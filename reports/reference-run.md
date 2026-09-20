@@ -4,12 +4,12 @@
 
 | Epoch | Mean loss | Seconds |
 | ---: | ---: | ---: |
-| 1 | 1.1578 | 81 |
-| 2 | 1.0564 | 88 |
-| 3 | 1.0429 | 94 |
-| 4 | 1.0405 | 96 |
-| 5 | 1.0372 | 96 |
-| 6 | 1.0366 | 96 |
+| 1 | 1.1578 | 88 |
+| 2 | 1.0564 | 95 |
+| 3 | 1.0429 | 101 |
+| 4 | 1.0405 | 101 |
+| 5 | 1.0372 | 99 |
+| 6 | 1.0366 | 97 |
 
 Chance is `1.1552` and the Bayes-optimal loss for this generator is `0.5585` — the label noise puts a floor under how well anything can do. The run closed **20%** of that gap.
 # Eval report
@@ -20,8 +20,8 @@ Model(s): trigon-reference-0.1.0
 
 | Suite | Cases | Accuracy | ECE | Adaptive ECE | Brier | p50 ms | p99 ms | Tokens |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| calibration/uncalibrated | 6000 | 0.4561 | 0.0112 | 0.0155 | 0.5947 | 6.6 | 8.4 | 125 |
-| calibration/temperature-scaled | 6000 | 0.4561 | 0.0111 | 0.0158 | 0.5947 | 6.5 | 7.7 | 125 |
+| calibration/uncalibrated | 6000 | 0.4561 | 0.0112 | 0.0155 | 0.5947 | 6.4 | 8.1 | 125 |
+| calibration/temperature-scaled | 6000 | 0.4561 | 0.0111 | 0.0158 | 0.5947 | 6.5 | 8.1 | 125 |
 
 ## Release gates
 

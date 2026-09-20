@@ -44,3 +44,40 @@ so. It is that the loop closes and the gates bite, twice over:
   `trigon train` exits non-zero, so CI blocks it.
 
 Under ECE-only gates, all three would have shipped. See `docs/evals.md` §4.
+
+## What the certified model actually answers
+
+`reference-run.pt` passes all five gates. Served on three accounts — the
+probabilities are the model's own, the truth column is what the generator
+recorded:
+
+```
+plan=pro, seats=340, tickets=5, payment_failed=True
+  plan    -> pro    conf=0.105  [pro=0.323 enterprise=0.320]   truth: pro          OK
+  at_risk -> P(yes)=0.348                                      truth: yes
+  size    -> 1.50   conf=0.256                                 truth: gold
+
+plan=free, seats=12, tickets=0, payment_failed=False
+  plan    -> free   conf=0.600  [free=0.862 pro=0.047]         truth: free         OK
+  at_risk -> P(yes)=0.382                                      truth: no
+  size    -> 1.48   conf=0.262                                 truth: bronze
+
+plan=enterprise, seats=480, tickets=7, payment_failed=True
+  plan    -> pro    conf=0.103  [pro=0.322 enterprise=0.319]   truth: enterprise   X
+  at_risk -> P(yes)=0.348                                      truth: yes
+  size    -> 1.50   conf=0.256                                 truth: platinum
+```
+
+Two things to read here. **The confidence means something**: where the model is
+confident it is right (free, 0.862, confidence 0.600), and where it is split
+almost evenly between two options it reports confidence 0.105 — and that is the
+one it gets wrong. High confidence tracking accuracy is the whole claim, and it
+is visible in three rows.
+
+**And it only learned one of the three questions.** `plan` is a copy task: the
+answer appears verbatim in the state. `at_risk` is a conjunction and `size` is a
+threshold on a number, and the model answers both with a constant regardless of
+input — 0.348 and 1.50 every time. That is consistent with the project's own
+non-goals (no arithmetic, no counting) and with a two-layer spike, and it is
+exactly the shape `accuracy_over_baseline` exists to keep honest: the model
+clears the gate on the strength of one question out of three.
