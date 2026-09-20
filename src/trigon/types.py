@@ -42,8 +42,6 @@ __all__ = [
 # injection-robustness section of docs/training.md.
 State = str | dict[str, Any] | list[Any]
 
-_NAME = Field(min_length=1, max_length=256)
-
 
 class _Strict(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -52,30 +50,57 @@ class _Strict(BaseModel):
 class OptionSpec(_Strict):
     """One option of a Choice, with the criteria that select it."""
 
-    name: str = _NAME
-    criteria: str | None = Field(default=None, max_length=8192)
+    name: str = Field(
+        min_length=1, max_length=256, description="The label this option is returned under."
+    )
+    criteria: str | None = Field(
+        default=None,
+        max_length=8192,
+        description="What selects this option. Compiled into the option's schema block.",
+    )
 
 
 class LevelSpec(_Strict):
     """One level of a Score. Levels are ordered low to high as given."""
 
-    name: str = _NAME
-    criteria: str | None = Field(default=None, max_length=8192)
-    # Anchors the level on the caller's own scale (1-5 stars, 0-4 Likert). When
-    # omitted, levels are anchored at their index, so the reported score is the
-    # expected level index.
-    value: float | None = None
+    name: str = Field(
+        min_length=1, max_length=256, description="The label this level is returned under."
+    )
+    criteria: str | None = Field(
+        default=None, max_length=8192, description="What places the state at this level."
+    )
+    value: float | None = Field(
+        default=None,
+        description=(
+            "Anchors the level on your own scale (1-5 stars, 0-4 Likert), so the reported "
+            "score is on that scale. Omit on every level and they anchor at their index "
+            "instead. Values must ascend; all levels carry one or none do."
+        ),
+    )
 
 
 class _QuestionBase(_Strict):
-    instructions: str = Field(min_length=1, max_length=32768)
+    instructions: str = Field(
+        min_length=1,
+        max_length=32768,
+        description="What this question is asking. Part of the cacheable schema prefix.",
+    )
 
 
 class ChoiceQuestion(_QuestionBase):
     """Pick one option from a defined set. Relative: it settles *which*."""
 
     type: Literal["choice"] = "choice"
-    options: list[OptionSpec] = Field(min_length=2, max_length=MAX_OPTIONS_PER_QUESTION)
+    options: list[OptionSpec] = Field(
+        min_length=2,
+        max_length=MAX_OPTIONS_PER_QUESTION,
+        description=(
+            "The options to choose between, in the order probabilities are returned. "
+            "Names must be unique. Two is the minimum: a single-option Choice has no "
+            "answer to give. Above the large-cardinality trigger the set is narrowed by "
+            "a prefilter and the dropped options come back at probability 0."
+        ),
+    )
 
     @field_validator("options")
     @classmethod
@@ -96,7 +121,14 @@ class ScoreQuestion(_QuestionBase):
     """
 
     type: Literal["score"] = "score"
-    levels: list[LevelSpec] = Field(min_length=2, max_length=MAX_LEVELS_PER_SCORE)
+    levels: list[LevelSpec] = Field(
+        min_length=2,
+        max_length=MAX_LEVELS_PER_SCORE,
+        description=(
+            "The levels, ordered low to high as given. Names must be unique. The answer "
+            "is a distribution over these, and the reported score is its expectation."
+        ),
+    )
 
     @field_validator("levels")
     @classmethod
@@ -139,30 +171,71 @@ Question = Annotated[ChoiceQuestion | ScoreQuestion | NoulQuestion, Field(discri
 class RequestOptions(_Strict):
     """Per-request serving knobs. All optional; all have serving-side defaults."""
 
-    # Escalate to the premium tier when workhorse confidence lands below this.
-    # ``None`` leaves the decision to the deployment's routing policy.
-    escalate_below_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
-    # Return the pre-calibration distribution alongside the calibrated one.
-    include_raw_probabilities: bool = False
-    # Name of a fitted conformal wrapper to apply, if the deployment has one.
-    conformal_profile: str | None = Field(default=None, max_length=128)
-    # Return only the most probable options rather than the whole
-    # distribution. The full distribution is the default because returning it
-    # is the product's whole point -- a caller who cannot see the probabilities
-    # cannot compute their own confidence. But at tens of thousands of options
-    # the response itself becomes the bottleneck (100,000 options is roughly
-    # 2 MB of JSON), and a caller who only acts on the top few should not pay
-    # to serialize the tail. The selected option is always included.
-    top_probabilities: int | None = Field(default=None, ge=1)
+    escalate_below_confidence: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Send a question to the premium tier when the workhorse's confidence lands "
+            "below this. Escalation is per question, not per request. Omit to leave the "
+            "decision to the deployment's routing policy."
+        ),
+    )
+    include_raw_probabilities: bool = Field(
+        default=False,
+        description="Also return the pre-calibration distribution, for debugging a fit.",
+    )
+    conformal_profile: str | None = Field(
+        default=None,
+        max_length=128,
+        description=(
+            "Name of a fitted conformal wrapper to apply. Adds a prediction set with a "
+            "distribution-free coverage guarantee, which holds whether or not the "
+            "underlying model is well calibrated."
+        ),
+    )
+    top_probabilities: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Return only this many of the most probable labels instead of the whole "
+            "distribution; the selected one is always included. The full distribution is "
+            "the default because a caller who cannot see the probabilities cannot compute "
+            "their own confidence -- but 100,000 options is roughly 2 MB of JSON, and a "
+            "caller acting on the top few should not pay to serialize the tail. Trimmed "
+            "probabilities are NOT renormalised: see `truncated` and `probability_mass`."
+        ),
+    )
 
 
 class SystemOneRequest(_Strict):
     """State plus a map of typed questions, answered in a single model pass."""
 
-    model: str = Field(default="trigon-workhorse", max_length=128)
-    state: State
-    questions: dict[str, Question] = Field(min_length=1, max_length=MAX_QUESTIONS_PER_REQUEST)
-    options: RequestOptions = Field(default_factory=RequestOptions)
+    model: str = Field(
+        default="trigon-workhorse",
+        max_length=128,
+        description="Which serving tier to answer from. The response names the concrete build.",
+    )
+    state: State = Field(
+        description=(
+            "What the questions are about: text, a JSON record, or a list of documents. "
+            "Never interpreted as instructions -- see the injection-robustness section of "
+            "docs/training.md."
+        )
+    )
+    questions: dict[str, Question] = Field(
+        min_length=1,
+        max_length=MAX_QUESTIONS_PER_REQUEST,
+        description=(
+            "Questions to answer about this state, keyed by an id of 1-128 characters "
+            "that the answers come back under. Every question is answered in the same "
+            "forward pass and none can influence another: adding, removing or reordering "
+            "questions moves no other answer, exactly."
+        ),
+    )
+    options: RequestOptions = Field(
+        default_factory=RequestOptions, description="Per-request serving knobs."
+    )
 
     @field_validator("questions")
     @classmethod
@@ -174,37 +247,100 @@ class SystemOneRequest(_Strict):
 
 
 class ChoiceAnswer(_Strict):
+    """A distribution over exactly the options the request declared."""
+
     type: Literal["choice"] = "choice"
-    selected: str
-    probabilities: dict[str, float]
-    confidence: float = Field(ge=0.0, le=1.0)
-    raw_probabilities: dict[str, float] | None = None
-    # Present when a conformal profile was applied: the options that survive at
-    # the profile's coverage target. A singleton set is the useful case.
-    prediction_set: list[str] | None = None
-    coverage_target: float | None = Field(default=None, ge=0.0, le=1.0)
-    # Present when the large-cardinality stage narrowed the option set; options
-    # outside the shortlist carry probability 0 rather than being omitted.
-    shortlisted_from: int | None = None
-    # True when ``top_probabilities`` trimmed the distribution. The reported
-    # probabilities are then the real ones, not renormalised, so they sum to
-    # less than 1 -- and ``probability_mass`` says how much they cover.
-    truncated: bool = False
-    probability_mass: float | None = Field(default=None, ge=0.0, le=1.0)
+    selected: str = Field(description="The most probable option. Always one you declared.")
+    probabilities: dict[str, float] = Field(
+        description=(
+            "Calibrated probability per option, in declared order. Sums to 1 unless `truncated`."
+        )
+    )
+    confidence: float = Field(
+        ge=0.0,
+        le=1.0,
+        description=(
+            "How concentrated the distribution is, scaled by log(option count) so a "
+            "2-option and a 77-option answer read comparably: 0 is uniform, 1 is certain. "
+            "Derived from the calibrated distribution, and always from the full one."
+        ),
+    )
+    raw_probabilities: dict[str, float] | None = Field(
+        default=None, description="The pre-calibration distribution, if you asked for it."
+    )
+    prediction_set: list[str] | None = Field(
+        default=None,
+        description=(
+            "Present when a conformal profile was applied: the options that survive at "
+            "the profile's coverage target. A singleton set is the useful case; an empty "
+            "one means abstain, not that no answer exists."
+        ),
+    )
+    coverage_target: float | None = Field(
+        default=None, ge=0.0, le=1.0, description="The coverage that prediction set guarantees."
+    )
+    shortlisted_from: int | None = Field(
+        default=None,
+        description=(
+            "Present when the large-cardinality stage narrowed the option set: how many "
+            "options you declared. Options the prefilter dropped come back at probability "
+            "0 rather than being omitted -- you declared them, so the answer mentions them."
+        ),
+    )
+    truncated: bool = Field(
+        default=False,
+        description=(
+            "True when `top_probabilities` trimmed the distribution. The probabilities "
+            "returned are then the real ones, NOT renormalised, so they sum to less than "
+            "1; `probability_mass` says how much they cover. `selected` and `confidence` "
+            "are computed over the full distribution either way."
+        ),
+    )
+    probability_mass: float | None = Field(
+        default=None, ge=0.0, le=1.0, description="How much of the distribution survived trimming."
+    )
 
 
 class ScoreAnswer(_Strict):
+    """A distribution over the declared levels, plus its expectation."""
+
     type: Literal["score"] = "score"
-    score: float
-    probabilities: dict[str, float]
-    confidence: float = Field(ge=0.0, le=1.0)
-    raw_probabilities: dict[str, float] | None = None
-    prediction_set: list[str] | None = None
-    coverage_target: float | None = Field(default=None, ge=0.0, le=1.0)
-    # See ChoiceAnswer: the score and the confidence are always computed over
-    # the full distribution, never over what survived truncation.
-    truncated: bool = False
-    probability_mass: float | None = Field(default=None, ge=0.0, le=1.0)
+    score: float = Field(
+        description=(
+            "The expectation of the distribution below, on your level values (or level "
+            "indices when you declared none). Not a regression output: it cannot land "
+            "outside the scale you declared."
+        )
+    )
+    probabilities: dict[str, float] = Field(description="Calibrated probability per level.")
+    confidence: float = Field(
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Concentration of an ORDERED distribution, from its dispersion rather than "
+            "its entropy -- mass on two adjacent levels is more confident than the same "
+            "mass split across the ends, and entropy cannot see the difference."
+        ),
+    )
+    raw_probabilities: dict[str, float] | None = Field(
+        default=None, description="The pre-calibration distribution, if you asked for it."
+    )
+    prediction_set: list[str] | None = Field(
+        default=None, description="Levels surviving the conformal profile, if one was applied."
+    )
+    coverage_target: float | None = Field(
+        default=None, ge=0.0, le=1.0, description="The coverage that prediction set guarantees."
+    )
+    truncated: bool = Field(
+        default=False,
+        description=(
+            "See ChoiceAnswer. `score` and `confidence` are always computed over the full "
+            "distribution, never over what survived truncation."
+        ),
+    )
+    probability_mass: float | None = Field(
+        default=None, ge=0.0, le=1.0, description="How much of the distribution survived trimming."
+    )
 
 
 class NoulAnswer(_Strict):
@@ -212,38 +348,72 @@ class NoulAnswer(_Strict):
     already carries everything a confidence statistic could summarise."""
 
     type: Literal["noul"] = "noul"
-    probability: float = Field(ge=0.0, le=1.0)
-    raw_probability: float | None = None
+    probability: float = Field(
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Calibrated probability that the judgement holds. There is no confidence "
+            "field by design: for a binary question the probability already carries "
+            "everything a confidence statistic could summarise, and 0.5 is the model "
+            "saying it does not know."
+        ),
+    )
+    raw_probability: float | None = Field(
+        default=None, description="The pre-calibration probability, if you asked for it."
+    )
 
 
 Answer = Annotated[ChoiceAnswer | ScoreAnswer | NoulAnswer, Field(discriminator="type")]
 
 
 class Usage(_Strict):
-    state_tokens: int = 0
-    schema_tokens: int = 0
-    readout_tokens: int = 0
-    # Named for the fact it is the whole cost: there is no decode half.
-    prefill_tokens: int = 0
-    cached_schema_tokens: int = 0
+    state_tokens: int = Field(default=0, description="Tokens the state compiled to.")
+    schema_tokens: int = Field(
+        default=0, description="Tokens the question schemas compiled to, across all questions."
+    )
+    readout_tokens: int = Field(default=0, description="Readout slots, one or more per question.")
+    prefill_tokens: int = Field(
+        default=0,
+        # Named for the fact it is the whole cost: there is no decode half.
+        description="Total tokens prefilled. There is no decode half, so this is the whole cost.",
+    )
+    cached_schema_tokens: int = Field(
+        default=0,
+        description=(
+            "Schema tokens served from a cross-request KV prefix cache. Always 0 in this "
+            "reference implementation, which holds no KV cache: the layout makes the schema "
+            "prefix cacheable (asserted in tests/test_independence.py) but the cache itself "
+            "is the phase-3 serving stack. Read a 0 as 'not cached', never as 'not cacheable'."
+        ),
+    )
 
 
 class Timing(_Strict):
-    total_ms: float = 0.0
-    model_ms: float = 0.0
-    compile_ms: float = 0.0
+    total_ms: float = Field(default=0.0, description="Wall clock for the whole request.")
+    model_ms: float = Field(default=0.0, description="The single forward pass. There is no decode.")
+    compile_ms: float = Field(
+        default=0.0, description="Compiling the schema layout and its attention mask."
+    )
 
 
 class SystemOneResponse(_Strict):
-    id: str
-    # Always a pinned version, never a moving alias: answers change under users
-    # when an alias moves.
-    model: str
-    answers: dict[str, Answer]
-    usage: Usage = Field(default_factory=Usage)
-    timing: Timing = Field(default_factory=Timing)
-    # Populated when the request was escalated to the premium tier.
-    tier: str = "workhorse"
+    id: str = Field(description="Unique id for this response.")
+    model: str = Field(
+        description=(
+            "The concrete build that answered. Always a pinned version, never a moving "
+            "alias -- answers change under users when an alias moves. A build trained on "
+            "nothing says so in this string."
+        )
+    )
+    answers: dict[str, Answer] = Field(
+        description="One answer per question you asked, under the same ids."
+    )
+    usage: Usage = Field(default_factory=Usage, description="What the request cost, in tokens.")
+    timing: Timing = Field(default_factory=Timing, description="Where the time went.")
+    tier: str = Field(
+        default="workhorse",
+        description="Which tier answered. 'premium' when a question was escalated.",
+    )
 
 
 def _reject_duplicates(names: list[str], kind: str) -> None:

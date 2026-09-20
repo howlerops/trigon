@@ -34,10 +34,16 @@ every ECE gate — the first trained reference model did exactly that at 46%
 accuracy. `accuracy_over_baseline` is what rejects it. Any new gate set must
 keep a term that fails a model which ignores its input.
 
-**Anything derived only from the schema is derived once.** The KV prefix, the
-attention mask and the BM25 option index are all cached on schema-shaped keys.
-When you add something in that class, cache it the same way and key it on what
-it actually depends on.
+**Anything derived only from the schema is derived once.** The attention mask
+and the BM25 option index are cached on schema-shaped keys. When you add
+something in that class, cache it the same way and key it on what it actually
+depends on.
+
+The KV prefix is the same class of thing and is *not* cached here — the layout
+makes it cacheable, and `tests/test_independence.py` asserts that the schema
+encodes identically regardless of state, but this repo holds no KV cache. The
+cache is the phase-3 serving stack, and `Usage.cached_schema_tokens` therefore
+reports 0 on every response and says so in the spec.
 
 **Claims are tested, not asserted.** The two architectural claims — per-question
 independence and schema-prefix cacheability — are asserted in
