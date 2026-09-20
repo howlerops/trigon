@@ -178,3 +178,30 @@ def _calibrated_sample(rng: random.Random, n: int, k: int):
         probs.append(row)
         labels.append(rng.choices(range(k), weights=row)[0])
     return probs, labels
+
+
+def test_a_prediction_set_reports_its_own_shape():
+    """`is_empty` is the abstain signal and `is_singleton` the useful case;
+    both are documented semantics that nothing was reading."""
+    # A threshold no label can clear: LAC returns nothing, and that means
+    # "abstain", not "no answer exists".
+    abstains = ConformalPredictor(
+        alpha=0.1, method=ConformalMethod.LAC, threshold=-1.0, calibration_n=500
+    ).predict([0.7, 0.2, 0.1])
+    assert abstains.is_empty and abstains.size == 0 and not abstains.is_singleton
+
+    decisive = ConformalPredictor(
+        alpha=0.1, method=ConformalMethod.LAC, threshold=0.5, calibration_n=500
+    ).predict([0.9, 0.05, 0.05])
+    assert decisive.is_singleton and decisive.size == 1 and not decisive.is_empty
+
+
+@pytest.mark.parametrize("alpha", [0.0, 1.0, -0.1, 1.5])
+def test_conformal_rejects_an_alpha_outside_the_open_unit_interval(alpha):
+    with pytest.raises(ValueError, match="alpha"):
+        fit_conformal([[0.5, 0.5]] * 100, [0] * 100, alpha=alpha)
+
+
+def test_conformal_rejects_labels_that_do_not_match_the_predictions():
+    with pytest.raises(ValueError, match="against"):
+        fit_conformal([[0.5, 0.5]] * 100, [0] * 99)
