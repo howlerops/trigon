@@ -60,7 +60,8 @@ pip install -e ".[dev,server]"     # add "train" for the reference model
 pytest -q
 ruff check src tests scripts
 trigon eval all -n 200             # exits non-zero on a failed gate
-trigon train --out reports/run.md  # train, calibrate, gate (needs the train extra)
+trigon train --out reports/run.md --save-model reports/run.pt   # train, calibrate, gate
+trigon ask request.json --backend torch --weights reports/run.pt # serve that model
 python scripts/export_openapi.py   # after ANY change to the contract
 ```
 

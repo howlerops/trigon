@@ -18,7 +18,12 @@ from . import __version__
 __all__ = ["main"]
 
 
-def _engine(backend: str, domain: str | None = None, temperature_path: str | None = None):
+def _engine(
+    backend: str,
+    domain: str | None = None,
+    temperature_path: str | None = None,
+    weights: str | None = None,
+):
     from .calibration.temperature import TemperatureScaler
     from .engine import Engine, EngineConfig
 
@@ -30,7 +35,7 @@ def _engine(backend: str, domain: str | None = None, temperature_path: str | Non
     elif backend == "torch":
         from .backends.torch_readout import TorchReadoutBackend
 
-        impl = TorchReadoutBackend()
+        impl = TorchReadoutBackend.load(weights) if weights else TorchReadoutBackend()
         compiler = impl.make_compiler()
     else:
         raise SystemExit(f"unknown backend {backend!r}; try 'lexical' or 'torch'")
@@ -45,7 +50,7 @@ def cmd_ask(args: argparse.Namespace) -> int:
 
     # Build the engine first: a bad --backend should fail before we consume
     # stdin, which the caller cannot rewind.
-    engine = _engine(args.backend, args.domain, args.temperatures)
+    engine = _engine(args.backend, args.domain, args.temperatures, args.weights)
     raw = sys.stdin.read() if args.request == "-" else pathlib.Path(args.request).read_text()
     response = engine.answer(SystemOneRequest.model_validate_json(raw))
     print(response.model_dump_json(indent=2, exclude_none=True))
@@ -185,7 +190,12 @@ def cmd_train(args: argparse.Namespace) -> int:
         training = pathlib.Path(f"{stem}-training.json")
         scaler.save(temperatures)
         training.write_text(_json.dumps(report.to_dict(), indent=2))
-        print(f"\nwrote {out}, {temperatures.name} and {training.name}", file=sys.stderr)
+        written = [out.name, temperatures.name, training.name]
+        if args.save_model:
+            weights = pathlib.Path(args.save_model)
+            backend.save(weights)
+            written.append(weights.name)
+        print(f"\nwrote {', '.join(written)}", file=sys.stderr)
     return 0 if all(g.passed for g in gates) else 1
 
 
@@ -310,6 +320,7 @@ def build_parser() -> argparse.ArgumentParser:
     shared(ask)
     ask.add_argument("request")
     ask.add_argument("--temperatures", default=None, help="path to fitted temperatures")
+    ask.add_argument("--weights", default=None, help="a checkpoint written by 'trigon train'")
     ask.set_defaults(func=cmd_ask)
 
     serve = sub.add_parser("serve", help="run the reference gateway")
@@ -365,6 +376,11 @@ def build_parser() -> argparse.ArgumentParser:
         "with pooled option states",
     )
     tr.add_argument("--out", default=None, help="write the report here")
+    tr.add_argument(
+        "--save-model",
+        default=None,
+        help="write the trained weights here, so the run can be served",
+    )
     tr.set_defaults(func=cmd_train)
     return parser
 

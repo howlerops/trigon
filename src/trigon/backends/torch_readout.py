@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import math
 import time
+from pathlib import Path
 
 try:  # pragma: no cover - exercised by the import error path only
     import torch
@@ -203,6 +204,44 @@ class TorchReadoutBackend:
     def make_compiler(self, **kwargs) -> SchemaCompiler:
         """A compiler wired to this backend's tokenizer."""
         return SchemaCompiler(estimator=self.estimator, **kwargs)
+
+    # -- persistence -----------------------------------------------------
+
+    def save(self, path: str | Path) -> None:
+        """Write the weights and the shape needed to rebuild them.
+
+        A run that cannot be reloaded cannot be served, and a report about a
+        model nobody can run again is a claim rather than a result. The config
+        travels with the weights so a checkpoint is self-describing.
+        """
+        target = Path(path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        torch.save(
+            {
+                "version": self._version,
+                "config": {
+                    "vocab_size": self.config.vocab_size,
+                    "d_model": self.config.d_model,
+                    "n_layers": self.config.n_layers,
+                    "n_heads": self.config.n_heads,
+                    "d_ff": self.config.d_ff,
+                    "dropout": self.config.dropout,
+                    "max_levels": self.config.max_levels,
+                },
+                "state_dict": self.model.state_dict(),
+            },
+            target,
+        )
+
+    @classmethod
+    def load(cls, path: str | Path, *, version: str | None = None) -> TorchReadoutBackend:
+        """Rebuild a backend from a checkpoint written by ``save``."""
+        payload = torch.load(Path(path), map_location="cpu", weights_only=False)
+        config = ReadoutConfig(**payload["config"])
+        backend = cls(config, version=version or payload.get("version", "trigon-reference"))
+        backend.model.load_state_dict(payload["state_dict"])
+        backend.model.eval()
+        return backend
 
     # -- inference -------------------------------------------------------
 

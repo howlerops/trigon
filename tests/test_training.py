@@ -104,3 +104,42 @@ def test_serving_and_training_share_one_forward_path():
 def test_training_refuses_an_empty_set():
     with pytest.raises(ValueError, match="nothing to train on"):
         train(_tiny_backend(), [], TrainingConfig())
+
+
+def test_a_trained_model_round_trips_through_a_checkpoint(tmp_path):
+    """A run that cannot be reloaded cannot be served, and a report about a
+    model nobody can run again is a claim rather than a result."""
+    backend = _tiny_backend()
+    compiler = backend.make_compiler()
+    train(backend, synthetic_outcome_cases(n=40, noise=0.2), TrainingConfig(epochs=1))
+
+    path = tmp_path / "model.pt"
+    backend.save(path)
+    reloaded = TorchReadoutBackend.load(path)
+
+    # Same architecture, recovered from the checkpoint alone.
+    assert reloaded.config.d_model == backend.config.d_model
+    assert reloaded.config.n_layers == backend.config.n_layers
+    assert reloaded.model_version == backend.model_version
+
+    case = synthetic_outcome_cases(n=1, seed=7)[0]
+    compiled = compiler.compile_request(case.request)
+    before = backend.infer(compiled, case.request)
+    after = reloaded.infer(compiled, case.request)
+    for qid, out in before.outputs.items():
+        assert after.outputs[qid].logits == pytest.approx(out.logits)
+
+
+def test_a_reloaded_model_serves_through_the_engine(tmp_path):
+    from trigon.engine import Engine
+
+    backend = _tiny_backend()
+    train(backend, synthetic_outcome_cases(n=40, noise=0.2), TrainingConfig(epochs=1))
+    path = tmp_path / "model.pt"
+    backend.save(path)
+
+    reloaded = TorchReadoutBackend.load(path)
+    engine = Engine(reloaded, compiler=reloaded.make_compiler())
+    response = engine.answer(synthetic_outcome_cases(n=1, seed=3)[0].request)
+    assert set(response.answers) == {"plan", "at_risk", "size"}
+    assert sum(response.answers["plan"].probabilities.values()) == pytest.approx(1.0)

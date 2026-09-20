@@ -128,6 +128,11 @@ invisible until someone measures ECE on the served path.
 gates read.** Fitting and reporting on the same data is how a calibration
 number stops meaning anything.
 
+**A run is servable, not just reportable.** `--save-model` writes the weights
+alongside the config needed to rebuild them, and `trigon ask --backend torch
+--weights` loads it. Without that, a calibration report describes a model that
+no longer exists.
+
 **The data carries irreducible noise.** `--noise 0.2` flips a fifth of the
 labels, which is what makes calibration testable at all: on a noiseless set a
 model can be right every time and any confidence below 1.0 reads as

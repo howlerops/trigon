@@ -128,6 +128,11 @@ proper scoring rules, measure calibration on a held-out split, fit a
 temperature, and put the result through the release gates. Its point is that
 the gates are passed — or failed — by a model rather than asserted about one.
 
+`--save-model` writes a self-describing checkpoint (weights plus the shape
+needed to rebuild them), and `trigon ask --backend torch --weights <path>`
+serves it. A run that cannot be reloaded cannot be served, and a report about a
+model nobody can run again is a claim rather than a result.
+
 ## What is proved, not claimed
 
 `tests/test_independence.py` runs the reference model and asserts:
