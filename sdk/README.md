@@ -31,8 +31,8 @@ response = client.systemone(
         "urgent": noul("Needs a human within the hour?"),
     },
 )
-response.answers["route"].selected      # "billing"
-response.answers["route"].confidence    # a number you can threshold
+response.answers["route"].selected  # "billing"
+response.answers["route"].confidence  # a number you can threshold
 response.answers["urgent"].probability  # no confidence field, by design
 ```
 
