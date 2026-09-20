@@ -14,7 +14,10 @@ a checkpoint. No weights are committed.
 | `reference-run-dotproduct.md` | the same run with dot-product option scoring — the phase-1 ablation |
 
 Sidecars beside each report carry the fitted temperatures and the loss curve in
-machine-readable form.
+machine-readable form. The dot-product arm has none: the two runs were launched
+in parallel before sidecar names were derived from the report name, so they
+collided and the last writer won. The loss curve and gates are in its markdown
+report; the fix is in `trigon.cli`.
 
 The headline is not the model's quality — it is a spike, and its accuracy says
 so. It is that the loop closes and the gates bite, twice over:
