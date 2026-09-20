@@ -161,6 +161,7 @@ def cmd_train(args: argparse.Namespace) -> int:
     from .evals import (
         blocking,
         check_gates,
+        render_json,
         render_markdown,
         run_calibration_suite,
         synthetic_outcome_cases,
@@ -232,12 +233,17 @@ def cmd_train(args: argparse.Namespace) -> int:
         # Sidecars are named after the report, not fixed: two runs writing into
         # one directory (an ablation, say) must not clobber each other's
         # temperatures and loss curves.
+        # A machine-readable sibling, the same as `trigon eval` writes. Without
+        # it a training run can only be read by a person, and anything that
+        # compares runs -- scripts/seed_sweep.py, a CI trend -- has to parse
+        # markdown.
+        out.with_suffix(".json").write_text(render_json([before, after], gates, slices))
         stem = out.with_suffix("")
         temperatures = pathlib.Path(f"{stem}-temperatures.json")
         training = pathlib.Path(f"{stem}-training.json")
         scaler.save(temperatures)
         training.write_text(_json.dumps(report.to_dict(), indent=2))
-        written = [out.name, temperatures.name, training.name]
+        written = [out.name, out.with_suffix(".json").name, temperatures.name, training.name]
         if args.save_model:
             weights = pathlib.Path(args.save_model)
             backend.save(weights)
