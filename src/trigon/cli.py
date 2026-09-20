@@ -177,9 +177,15 @@ def cmd_train(args: argparse.Namespace) -> int:
         out = pathlib.Path(args.out)
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(markdown)
-        scaler.save(out.with_name("temperatures.json"))
-        out.with_name("training.json").write_text(_json.dumps(report.to_dict(), indent=2))
-        print(f"\nwrote {out}, temperatures.json and training.json", file=sys.stderr)
+        # Sidecars are named after the report, not fixed: two runs writing into
+        # one directory (an ablation, say) must not clobber each other's
+        # temperatures and loss curves.
+        stem = out.with_suffix("")
+        temperatures = pathlib.Path(f"{stem}-temperatures.json")
+        training = pathlib.Path(f"{stem}-training.json")
+        scaler.save(temperatures)
+        training.write_text(_json.dumps(report.to_dict(), indent=2))
+        print(f"\nwrote {out}, {temperatures.name} and {training.name}", file=sys.stderr)
     return 0 if all(g.passed for g in gates) else 1
 
 
