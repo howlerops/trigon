@@ -65,7 +65,7 @@ def test_unknown_question_type_is_rejected(client):
 def test_oversized_state_returns_413_not_422(client):
     """The request is well-formed; it just does not fit."""
     body = {
-        "state": "word " * 40000,
+        "state": "word " * 80000,  # ~100k tokens, over the 65,536-token state budget
         "questions": {"q": {"type": "noul", "instructions": "ok?"}},
     }
     response = client.post("/v1/systemone", json=body)

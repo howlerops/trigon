@@ -10,8 +10,13 @@ decision without a falsifier is a preference.
 
 **Decision.** The large-cardinality stage engages when **either** trigger
 fires: more than **1,024 options** in one Choice, or a single compiled question
-over **16,384 tokens**. The prefilter returns a **256-option shortlist**. The
+over **65,536 tokens**. The prefilter returns a **2,048-option shortlist**. The
 numbers live in `src/trigon/limits.py`; nothing else may hard-code them.
+
+These are far above the contract we mirror, deliberately — see "Capacity"
+below. Drop-in compatibility is unaffected: a superset never rejects a request
+the narrower contract would have accepted, and `COMPAT_BUDGET` reproduces their
+limits exactly for like-for-like benchmarking.
 
 **The envelope was checked, and the plan had it wrong.** The plan states a
 "~32k context budget, matching Jev's", and the first version of `limits.py`
@@ -22,16 +27,17 @@ question) and **32k for state plus the longest single question**
 this wrong in both directions — it halved the total budget, and it missed the
 constraint that actually governs a high-cardinality Choice.
 
-The corrected carve-up:
+The corrected carve-up, then raised — see "Capacity" below for why the two
+halves are sized so differently:
 
-| Slice | Tokens | Why |
-| --- | ---: | --- |
-| Total request | 65,536 | State plus every question |
-| State + longest question | 32,768 | The binding constraint for large option sets |
-| State | 16,384 | Dominates tokens in document-heavy workloads |
-| Schema | 40,960 | The cacheable half; large option sets grow into it |
-| Readout slots | 4,096 | One per question, or one per option below the crossover |
-| Headroom | 4,096 | Scaffolding, plus one-sided tokenizer estimation error |
+| Slice | Compat | Extended | Why |
+| --- | ---: | ---: | --- |
+| Total request | 65,536 | **524,288** | State plus every question |
+| State + longest question | 32,768 | **131,072** | The binding constraint for large option sets |
+| State | 16,384 | **65,536** | The only term quadratic in the whole request |
+| Schema | 40,960 | **393,216** | Block-diagonal, so near-free to grow |
+| Readout slots | 4,096 | **32,768** | One per question under dot-product scoring |
+| Questions per request | 64 | **1,024** | Linear cost; their cookbook batches 13 |
 
 `max_question_tokens` is therefore **derived, not configured**: whatever the
 per-question envelope leaves once state has taken its budget. It cannot drift
@@ -105,28 +111,44 @@ A 1,536-option shortlist fits **only if the criteria are stripped** — and the
 criteria are what tell the model how to choose between options. Even then it
 uses 16,138 of 16,384 tokens, leaving 1.5% headroom.
 
-**What we are changing.** Three things.
+**What we changed, and then what changed it back.** The first response was
+three things: restate the gate with a difficulty level; go two-stage inside
+retrieval (lexical to ~1,536 names, rerank to 256 with criteria); and move the
+ANN stage out of the cut order, on the grounds that lexical matching cannot
+separate options a short query underdetermines.
 
-1. **The gate is restated with a difficulty level.** "recall@256 ≥ 0.99" is
-   not a claim until it says which queries. It holds to 10,000 options for
-   queries stating three or four of four fields; it does not hold at two.
-   `run_cardinality_gate` sweeps difficulty by default so the published number
-   is a curve rather than a flattering point.
+Then the budgets were raised (see "Capacity" below) and the picture changed.
+At a 65,536-token per-question budget a **2,048-option shortlist fits with the
+criteria intact** — 58,449 tokens, 11% headroom — where at 16,384 it did not
+fit at all. Re-running the falsifier there:
 
-2. **Within retrieval, go two-stage.** Lexical prefilter to ~1,536 *names
-   only*, then rerank to 256 *with criteria*. Both stages fit their budgets,
-   and it needs no new infrastructure.
+| Query states | recall@2048, 10,000 options |
+| --- | ---: |
+| 3 of 4 fields | 1.0000 |
+| 2 of 4 | 1.0000 |
+| **1 of 4** | **1.0000** |
 
-3. **The ANN stage moves in the cut order.** The plan lists large-N retrieval
-   second to cut, as an optimisation. This measurement says otherwise: lexical
-   matching cannot separate options a short query underdetermines, and buying
-   the recall with shortlist size spends the entire token budget and the
-   criteria with it. Semantic retrieval is the thing that makes
-   high-cardinality routing work on realistic queries. `docs/roadmap.md` is
-   updated.
+So the gate holds at every difficulty the probe can generate, including a query
+that names a single field — with a plain BM25 prefilter and no ANN stage.
 
-None of that is a reason to lower the gate, which was the one option D1 ruled
-out in advance.
+**The correction:** the recall failure was a budget problem wearing a retrieval
+problem's clothes. The prefilter was never the bottleneck; a 256-option
+shortlist was, and 256 was chosen to match a competitor's cap rather than
+derived from anything. What survives from the first response:
+
+1. **The gate keeps its difficulty level.** "recall@k ≥ 0.99" is not a claim
+   until it says which queries, and `run_cardinality_gate` sweeps difficulty by
+   default. This is what made the original failure visible at all.
+2. **The two-stage rerank is dropped.** It existed to work around the token
+   budget; the budget is gone as a constraint, and an unnecessary stage is
+   latency and code for nothing.
+3. **The ANN stage goes back into the cut order**, where the plan had it. It is
+   an optimisation — a BM25 scan of 10,000 options is not free, and an ANN
+   index is the right answer at 100,000 — but it is no longer load-bearing for
+   correctness. `docs/roadmap.md` is corrected.
+
+Lowering the gate was the one option ruled out in advance, and it stayed ruled
+out.
 
 ## 2. Ordinal-aware loss for Score, or plain cross-entropy
 
@@ -271,6 +293,59 @@ not to produce realistic multi-step dependency structure — pipelines where a
 later question's option set depends on an earlier answer — then real pipeline
 traces become the cheapest source of that structure and go into the mix, with
 their share capped and reported.
+
+---
+
+## Capacity: input and output ceilings
+
+**Decision.** Raise the budgets well past the contract we mirror, and size the
+two halves differently, because attention cost under our isolation rules is
+asymmetric.
+
+`CompiledRequest.attention_pairs` counts the (query, key) pairs the mask admits:
+
+```
+  sum over questions of (schema_q)^2                          -- block-diagonal
++ state^2                                                     -- quadratic in the whole
++ sum over questions of readout_q x (schema_q + state + readout_q)   -- linear
+```
+
+Measured:
+
+| Layout | Tokens | Saving vs dense | Costs like dense |
+| --- | ---: | ---: | ---: |
+| 32k state, 4 questions × 20 options | 11,150 | 18.6% | 10,057 |
+| 8k state, 20 questions × 50 options | 16,652 | 93.5% | 4,256 |
+| 8k state, 64 questions × 50 options | 47,804 | **98.1%** | **6,650** |
+
+A question's schema block attends only to itself, so schema cost is the *sum*
+of per-question squares rather than the square of their sum. Readouts are
+linear. **State is the only term quadratic in the whole request**, which is
+what the first row shows: when state dominates, the mask buys almost nothing.
+
+So questions and option sets are cheap to grow and state is not, and the
+budgets say so: schema gets 393,216 tokens and 1,024 questions, state gets
+65,536. A full-size request costs roughly what a dense model spends on 82k
+tokens — the honest form of a long-context claim is "about six times cheaper
+than the length suggests", not "free".
+
+**On the output side**, this contract has no generated tokens, so capacity
+means the answer surface: more questions per request, and more options or
+levels per answer. Both are raised. The constraint that appears instead is
+*response size* — 100,000 options is roughly 2 MB of JSON, and a caller acting
+on the top few should not pay to serialize the tail. `top_probabilities`
+returns the k most probable options, always including the selected one, with
+the real probabilities rather than renormalised ones and a `probability_mass`
+field saying how much of the distribution they cover. Confidence, the Score
+expectation and the conformal set are all computed on the full distribution
+before any trimming: a confidence derived from a truncated vector would read
+high simply because the tail was dropped.
+
+**What would change our mind.** Two measurements neither of which we have yet:
+KV memory at 65,536 state tokens on an L4 at target QPS, and end-to-end p50/p99
+at the top of the range. The budgets are sized from attention arithmetic, which
+is necessary and not sufficient — if the memory or latency numbers do not hold,
+state comes down first, because it is the term that costs.
 
 ---
 

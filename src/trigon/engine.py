@@ -177,30 +177,43 @@ class Engine:
             if opts.include_raw_probabilities
             else None
         )
-        by_name = dict(zip(names, probs, strict=True))
-        raw_by_name = dict(zip(names, raw, strict=True)) if raw is not None else None
+        # Confidence and the conformal set are always computed on the FULL
+        # distribution, before any trimming: a confidence derived from a
+        # truncated vector would read high simply because the tail was dropped.
+        confidence = choice_confidence(probs, self.config.choice_confidence)
         prediction_set, coverage_target = self._conformal(probs, names, opts.conformal_profile)
+        top = max(range(len(probs)), key=lambda i: probs[i])
+
+        by_name, truncated, mass = _present(names, probs, opts.top_probabilities, keep=top)
+        raw_by_name = (
+            _present(names, raw, opts.top_probabilities, keep=top)[0] if raw is not None else None
+        )
 
         if isinstance(question, ChoiceQuestion):
-            top = max(range(len(probs)), key=lambda i: probs[i])
             return ChoiceAnswer(
                 selected=names[top],
                 probabilities=by_name,
-                confidence=choice_confidence(probs, self.config.choice_confidence),
+                confidence=confidence,
                 raw_probabilities=raw_by_name,
                 prediction_set=prediction_set,
                 coverage_target=coverage_target,
                 shortlisted_from=len(names) if shortlist is not None else None,
+                truncated=truncated,
+                probability_mass=mass if truncated else None,
             )
 
         anchors = question.anchors
         return ScoreAnswer(
+            # The score is the expectation over the whole distribution, never
+            # over what survived truncation.
             score=expectation(probs, anchors),
             probabilities=by_name,
             confidence=score_confidence(probs, anchors, self.config.score_confidence),
             raw_probabilities=raw_by_name,
             prediction_set=prediction_set,
             coverage_target=coverage_target,
+            truncated=truncated,
+            probability_mass=mass if truncated else None,
         )
 
     def _conformal(
@@ -216,6 +229,28 @@ class Engine:
             )
         result = predictor.predict(probs, names)
         return list(result.labels), predictor.target_coverage
+
+
+def _present(
+    names: list[str], probs: list[float], top_k: int | None, keep: int
+) -> tuple[dict[str, float], bool, float]:
+    """The probabilities to put on the wire.
+
+    Returns the real probabilities, never renormalised: a truncated map that
+    summed to 1 would misrepresent how much of the distribution the caller is
+    seeing. ``probability_mass`` reports the coverage instead.
+    """
+    if top_k is None or top_k >= len(names):
+        return dict(zip(names, probs, strict=True)), False, 1.0
+
+    order = sorted(range(len(probs)), key=lambda i: probs[i], reverse=True)[:top_k]
+    if keep not in order:
+        # The selected option is always present, even if the caller asked for
+        # fewer entries than its rank.
+        order[-1] = keep
+    order.sort()
+    kept = {names[i]: probs[i] for i in order}
+    return kept, True, sum(kept.values())
 
 
 def _expand(scaled: list[float], shortlist: list[int] | None, full: int) -> list[float]:

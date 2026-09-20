@@ -98,20 +98,24 @@ Compute: ~$30–70k total — teacher labels, training, serving burn-in.
 ## Cut order under schedule pressure
 
 1. KV-cache quantization
-2. ~~Large-N retrieval stage~~ — **promoted out of the cut order**
+2. Large-N retrieval stage (the ANN index)
 3. Premium tier
 
-The plan listed large-N retrieval second to cut, as an optimisation. Running
-D1's falsifier says otherwise. At 10,000 options, a lexical prefilter holds
-recall@256 ≥ 0.99 only for queries that state three or four of four fields; at
-two fields it returns 0.94, and buying the recall back needs a ~1,536-option
-shortlist, which fits the per-question token budget only with the option
-criteria stripped out — and the criteria are what tell the model how to choose.
-Semantic retrieval is what makes high-cardinality routing work on realistic
-queries, so cutting it does not cost an optimisation, it costs the feature.
+This briefly changed and then changed back, which is worth recording rather
+than tidying away. Running D1's falsifier showed a lexical prefilter failing
+the recall gate at 10,000 options on underdetermined queries, and the ANN stage
+was promoted out of the cut order on that basis. Raising the per-question token
+budget then let the shortlist grow from 256 to 2,048 **with the option criteria
+intact**, and recall went to 1.0000 at every difficulty the probe generates —
+with plain BM25 and no ANN index.
+
+The recall failure was a budget problem wearing a retrieval problem's clothes.
+The ANN stage returns to the cut order as what the plan called it: an
+optimisation. A BM25 scan of 10,000 options is not free and an index is the
+right answer at 100,000, but it is no longer load-bearing for correctness.
 Numbers in `docs/decisions.md` §1.
 
-The remaining two are optimisations, not dependencies. **Never cut the calibration
+All three are optimisations, not dependencies. **Never cut the calibration
 training or the eval suites.** They are the product — the differentiator is
 published calibration evidence, and there is no version of this project that
 ships without it.

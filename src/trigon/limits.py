@@ -21,41 +21,77 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+# ---------------------------------------------------------------------------
+# Capacity
+#
+# The isolation rules make attention cost asymmetric, and the budgets are built
+# on that asymmetry rather than on one flat context number. Measured with
+# ``CompiledRequest.attention_pairs`` (see docs/architecture.md):
+#
+#   layout                              tokens   saving vs dense   costs like
+#   32k state, 4 questions x 20 opts     11,150             18.6%      10,057
+#   8k state, 20 questions x 50 opts     16,652             93.5%       4,256
+#   8k state, 64 questions x 50 opts     47,804             98.1%       6,650
+#
+# Schema is block-diagonal -- a question's block attends only to itself -- so
+# its cost is the SUM of per-question squares, not the square of the sum.
+# Readouts are linear. State attends only to itself, which makes it the one
+# term quadratic in the whole request.
+#
+# So: questions and option sets are cheap to grow and state is not. These
+# budgets are sized accordingly, and they are deliberately far above the
+# contract we mirror. Drop-in compatibility is preserved because accepting a
+# superset never rejects a request the competitor would have taken; use
+# ``COMPAT_BUDGET`` to reproduce their limits exactly for benchmarking.
+
 # Total tokens in one request: state plus every question.
-CONTEXT_BUDGET_TOKENS = 65_536
+CONTEXT_BUDGET_TOKENS = 524_288
 
 # State plus the longest single question. The binding constraint for large
 # option sets, and the reason the retrieval trigger is per-question.
-SINGLE_QUESTION_ENVELOPE_TOKENS = 32_768
+SINGLE_QUESTION_ENVELOPE_TOKENS = 131_072
 
-# How the total is carved up. State gets a generous slice because it dominates
-# tokens in document-heavy workloads; schema gets the largest because it is the
-# cacheable half and the one large option sets grow into.
-STATE_BUDGET_TOKENS = 16_384
-SCHEMA_BUDGET_TOKENS = 40_960
-READOUT_BUDGET_TOKENS = 4_096
+# How the total is carved up.
+#
+# State is the expensive axis: 65,536 state tokens alone cost 4.3e9 attention
+# pairs, which dominates every other term. It is raised deliberately and
+# bounded deliberately.
+STATE_BUDGET_TOKENS = 65_536
+# Schema is nearly free by comparison, so it gets the large share.
+SCHEMA_BUDGET_TOKENS = 393_216
+READOUT_BUDGET_TOKENS = 32_768
 # The remainder is headroom for template scaffolding and for tokenizer
 # estimation error, which is one-sided on purpose.
+#
+# A full-size request under these budgets costs roughly what a dense model
+# would spend on 82k tokens. That is the honest form of the long-context
+# claim: not free, but about six times cheaper than the length suggests.
 
 # The most any single question may compile to, derived rather than chosen:
 # whatever the per-question envelope leaves once state has taken its budget.
 MAX_QUESTION_TOKENS = SINGLE_QUESTION_ENVELOPE_TOKENS - STATE_BUDGET_TOKENS
 
-MAX_QUESTIONS_PER_REQUEST = 64
-MAX_LEVELS_PER_SCORE = 32
+# One readout slot per question under dot-product scoring, so questions are
+# close to free. The competitor's own cookbook batches 13.
+MAX_QUESTIONS_PER_REQUEST = 1_024
+MAX_LEVELS_PER_SCORE = 64
 
 # The large-cardinality stage engages when EITHER trigger fires. The count
 # trigger protects the readout head; the token trigger protects the
-# per-question envelope. Which fires first depends on how verbose the options
-# are: bare names trip the count trigger, options carrying criteria trip the
-# token trigger at roughly 800 options.
+# per-question envelope.
 RETRIEVAL_OPTION_COUNT_TRIGGER = 1_024
 RETRIEVAL_QUESTION_TOKEN_TRIGGER = MAX_QUESTION_TOKENS
 
-# Options surviving the ANN prefilter and scored by the model. Chosen to sit
-# just above the 255-option cap of the contract we mirror, so the
-# post-retrieval path is never narrower than the competitor's native path.
-RETRIEVAL_SHORTLIST_SIZE = 256
+# Options surviving the ANN prefilter and scored by the model.
+#
+# Raised from 256 to 2,048 because the per-question budget now allows it, and
+# because 256 demonstrably was not enough: at 10,000 options with a query
+# stating two of four fields, recall@256 was 0.9400 against a 0.99 gate, while
+# recall@1536 was 1.0000. At the old 16,384-token per-question budget a
+# 1,536-option shortlist only fitted with the option criteria stripped out; at
+# 65,536 it fits with the criteria intact (43,775 tokens, 33% headroom).
+# See docs/decisions.md section 1.
+RETRIEVAL_SHORTLIST_SIZE = 2_048
 
 # Release gate on the prefilter: if recall@shortlist of the true option drops
 # below this on the cardinality eval sets, raise the shortlist rather than
@@ -65,6 +101,11 @@ RETRIEVAL_MIN_RECALL_AT_K = 0.99
 # A hard ceiling that no schema may exceed even with retrieval enabled, so a
 # pathological request fails fast at the gateway instead of OOM-ing a replica.
 MAX_OPTIONS_PER_QUESTION = 100_000
+
+# Above this many options in one answer, returning every probability makes the
+# response itself the bottleneck: 100,000 options is roughly 2 MB of JSON.
+# Callers can ask for the top-k instead; see RequestOptions.top_probabilities.
+FULL_DISTRIBUTION_ADVISORY_LIMIT = 4_096
 
 
 @dataclass(frozen=True)
@@ -115,6 +156,19 @@ class Budget:
 
 
 DEFAULT_BUDGET = Budget()
+
+#: The contract we are drop-in compatible with, reproduced exactly. Use it to
+#: benchmark like for like, and to check that a request built for their limits
+#: is still valid here -- which it always is, because ours are a superset.
+COMPAT_BUDGET = Budget(
+    context_tokens=65_536,
+    single_question_envelope=32_768,
+    state_tokens=16_384,
+    schema_tokens=40_960,
+    readout_tokens=4_096,
+    max_questions=64,
+    shortlist_size=256,
+)
 
 
 @dataclass(frozen=True)

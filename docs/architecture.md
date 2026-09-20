@@ -48,6 +48,36 @@ throughout the stack. `state_attends_to_schema=True` recovers that capacity and
 gives up the guarantee. Which side wins is the phase-1 ablation; the default is
 the one whose published claim we can stand behind.
 
+## What that costs, and what it buys
+
+The isolation rules are not only a correctness property — they set how long a
+request may be. `CompiledRequest.attention_pairs` counts the (query, key) pairs
+the mask admits:
+
+```
+  sum over questions of (schema_q)^2                                -- block-diagonal
++ state^2                                                           -- quadratic in the whole
++ sum over questions of readout_q x (schema_q + state + readout_q)  -- linear
+```
+
+| Layout | Tokens | Saving vs dense | Costs like dense |
+| --- | ---: | ---: | ---: |
+| 32k state, 4 questions × 20 options | 11,150 | 18.6% | 10,057 |
+| 8k state, 20 questions × 50 options | 16,652 | 93.5% | 4,256 |
+| 8k state, 64 questions × 50 options | 47,804 | 98.1% | 6,650 |
+
+A question's schema block attends only to itself, so schema cost is the *sum*
+of per-question squares rather than the square of their sum — adding questions
+or growing an option set is close to linear. **State is the only term quadratic
+in the whole request**, which the first row shows: when state dominates, the
+mask buys almost nothing.
+
+`trigon.limits` is built on that asymmetry rather than on one flat context
+number: 393,216 tokens of schema and 1,024 questions, against 65,536 tokens of
+state. A full-size request costs about what a dense model spends on 82k tokens.
+`COMPAT_BUDGET` reproduces the narrower contract we mirror, for like-for-like
+benchmarking; the default is a superset, so a request valid there is valid here.
+
 ## Positions are group-local
 
 The mask alone is not enough. With sequence-global positions, inserting a

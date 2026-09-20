@@ -186,3 +186,93 @@ def test_a_non_choice_question_over_budget_is_rejected_not_narrowed():
     )
     with pytest.raises(SchemaTooLarge, match="per-question budget"):
         compiler.compile_schema({"q": verbose})
+
+
+def test_attention_cost_is_block_diagonal_in_the_schema():
+    """The property the capacity budgets are built on: a question's schema
+    block attends only to itself, so schema cost is the SUM of per-question
+    squares rather than the square of their sum."""
+    few = compile_request(
+        SystemOneRequest(
+            state="a short state",
+            questions={
+                "a": ChoiceQuestion(
+                    instructions="pick",
+                    options=[{"name": f"o{i}", "criteria": "some criterion"} for i in range(40)],
+                )
+            },
+        )
+    )
+    many = compile_request(
+        SystemOneRequest(
+            state="a short state",
+            questions={
+                f"q{k}": ChoiceQuestion(
+                    instructions="pick",
+                    options=[{"name": f"o{i}", "criteria": "some criterion"} for i in range(40)],
+                )
+                for k in range(16)
+            },
+        )
+    )
+    # Sixteen times the schema, far less than sixteen squared times the cost.
+    assert many.total_tokens > 10 * few.total_tokens
+    assert many.attention_pairs < 40 * few.attention_pairs
+    assert many.attention_saving > 0.9
+
+
+def test_state_is_the_quadratic_term():
+    """Doubling state roughly quadruples its contribution; doubling the number
+    of questions does not."""
+    def cost(state_words: int, n_questions: int) -> int:
+        return compile_request(
+            SystemOneRequest(
+                state="word " * state_words,
+                questions={
+                    f"q{i}": NoulQuestion(instructions=f"is fact {i} present?")
+                    for i in range(n_questions)
+                },
+            )
+        ).attention_pairs
+
+    assert cost(2000, 1) / cost(1000, 1) > 3.5
+    assert cost(1000, 8) / cost(1000, 4) < 1.2
+
+
+def test_dense_equivalent_states_the_claim_honestly():
+    compiled = compile_request(
+        SystemOneRequest(
+            state="word " * 500,
+            questions={
+                f"q{k}": ChoiceQuestion(
+                    instructions="pick",
+                    options=[{"name": f"o{i}", "criteria": "a criterion"} for i in range(50)],
+                )
+                for k in range(24)
+            },
+        )
+    )
+    # Long, but honestly priced: it costs what a much shorter dense request would.
+    assert compiled.total_tokens > 8_000
+    assert compiled.dense_equivalent_tokens < compiled.total_tokens // 2
+
+
+def test_compat_budget_requests_are_always_valid_under_the_default():
+    """Drop-in compatibility survives raising our limits, because a superset
+    never rejects a request the narrower contract would have accepted."""
+    from trigon.limits import COMPAT_BUDGET, DEFAULT_BUDGET
+
+    assert DEFAULT_BUDGET.context_tokens >= COMPAT_BUDGET.context_tokens
+    assert DEFAULT_BUDGET.single_question_envelope >= COMPAT_BUDGET.single_question_envelope
+    assert DEFAULT_BUDGET.state_tokens >= COMPAT_BUDGET.state_tokens
+    assert DEFAULT_BUDGET.max_question_tokens >= COMPAT_BUDGET.max_question_tokens
+    assert DEFAULT_BUDGET.max_questions >= COMPAT_BUDGET.max_questions
+
+    at_their_limit = SystemOneRequest(
+        state="word " * (COMPAT_BUDGET.state_tokens // 2),
+        questions={
+            f"q{i}": NoulQuestion(instructions="ok?") for i in range(COMPAT_BUDGET.max_questions)
+        },
+    )
+    SchemaCompiler(budget=COMPAT_BUDGET).compile_request(at_their_limit)
+    compile_request(at_their_limit)  # and under ours

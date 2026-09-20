@@ -199,6 +199,57 @@ class CompiledRequest:
     def total_tokens(self) -> int:
         return self.schema_tokens + self.state_tokens + self.readout_tokens
 
+    @property
+    def attention_pairs(self) -> int:
+        """How many (query, key) pairs the mask actually admits.
+
+        This is the number that governs how long a request may be. Dense
+        attention over the same sequence costs ``total_tokens ** 2``; the
+        isolation rules make our cost the sum of much smaller blocks:
+
+            sum over questions of (schema_q)^2     -- block-diagonal, not squared-sum
+          + state^2                                -- the only term quadratic in the whole
+          + sum over questions of readout_q x (schema_q + state + readout_q)
+
+        The consequence is an asymmetry worth designing around: schema is
+        nearly free to grow because each question's block is isolated, so a
+        request can carry very many questions or very large option sets at
+        roughly linear cost -- while **state is the one axis that costs
+        quadratically**. Budgets should not treat the two the same, and
+        ``trigon.limits`` does not.
+        """
+        pairs = 0
+        for q in self.schema.questions:
+            pairs += q.schema_tokens**2
+            pairs += q.readout_slots * (q.schema_tokens + self.state_tokens + q.readout_slots)
+        pairs += self.state_tokens**2
+        if self.attention.bidirectional:
+            return pairs
+        # The causal fallback admits roughly half of each block.
+        return pairs // 2
+
+    @property
+    def dense_attention_pairs(self) -> int:
+        """What the same sequence would cost with no mask at all."""
+        return self.total_tokens**2
+
+    @property
+    def attention_saving(self) -> float:
+        """Fraction of dense attention work the mask removes, in [0, 1)."""
+        dense = self.dense_attention_pairs
+        if dense == 0:
+            return 0.0
+        return 1.0 - self.attention_pairs / dense
+
+    @property
+    def dense_equivalent_tokens(self) -> int:
+        """The dense context length that costs what this request costs.
+
+        The honest way to state a long-context claim: a request is "as cheap
+        as" a dense model at this length, rather than free.
+        """
+        return int(self.attention_pairs**0.5)
+
 
 class SchemaCompiler:
     """Turns a request into a layout. Stateless apart from its configuration."""

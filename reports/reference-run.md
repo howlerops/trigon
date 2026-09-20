@@ -1,3 +1,17 @@
+# Reference run
+
+`2500` training cases, `6` epochs, lr `0.01`, d_model `128`, layers `2`, option scoring `readout_per_option`, label noise `0.2`.
+
+| Epoch | Mean loss | Seconds |
+| ---: | ---: | ---: |
+| 1 | 1.1578 | 81 |
+| 2 | 1.0564 | 88 |
+| 3 | 1.0429 | 94 |
+| 4 | 1.0405 | 96 |
+| 5 | 1.0372 | 96 |
+| 6 | 1.0366 | 96 |
+
+Chance is `1.1552` and the Bayes-optimal loss for this generator is `0.5585` — the label noise puts a floor under how well anything can do. The run closed **20%** of that gap.
 # Eval report
 
 Model(s): trigon-reference-0.1.0
@@ -6,13 +20,14 @@ Model(s): trigon-reference-0.1.0
 
 | Suite | Cases | Accuracy | ECE | Adaptive ECE | Brier | p50 ms | p99 ms | Tokens |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| calibration/uncalibrated | 6000 | 0.4561 | 0.0112 | 0.0155 | 0.5947 | 5.8 | 7.6 | 125 |
-| calibration/temperature-scaled | 6000 | 0.4561 | 0.0111 | 0.0158 | 0.5947 | 6.2 | 8.2 | 125 |
+| calibration/uncalibrated | 6000 | 0.4561 | 0.0112 | 0.0155 | 0.5947 | 6.6 | 8.4 | 125 |
+| calibration/temperature-scaled | 6000 | 0.4561 | 0.0111 | 0.0158 | 0.5947 | 6.5 | 7.7 | 125 |
 
 ## Release gates
 
 - PASS sample_size: 18000.0000 (limit 5000.0000) -- below this, ECE is dominated by estimator noise
 - PASS gate_is_testable: 0.0080 (limit 0.0250) -- a perfectly calibrated model scores ECE 0.0049 on this run, p95 0.0080
+- PASS accuracy_over_baseline: 0.0639 (limit 0.0500) -- model 0.4561 vs marginal predictor 0.3922; calibration cannot reject a model that ignores the state
 - PASS workhorse_ece: 0.0111 (limit 0.0500)
 - PASS workhorse_adaptive_ece: 0.0158 (limit 0.0500)
 

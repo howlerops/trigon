@@ -44,6 +44,19 @@
             "title": "Probabilities",
             "type": "object"
           },
+          "probability_mass": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Probability Mass"
+          },
           "raw_probabilities": {
             "anyOf": [
               {
@@ -72,6 +85,11 @@
               }
             ],
             "title": "Shortlisted From"
+          },
+          "truncated": {
+            "default": false,
+            "title": "Truncated",
+            "type": "boolean"
           },
           "type": {
             "const": "choice",
@@ -293,6 +311,18 @@
             "default": false,
             "title": "Include Raw Probabilities",
             "type": "boolean"
+          },
+          "top_probabilities": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Top Probabilities"
           }
         },
         "title": "RequestOptions",
@@ -341,6 +371,19 @@
             "title": "Probabilities",
             "type": "object"
           },
+          "probability_mass": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Probability Mass"
+          },
           "raw_probabilities": {
             "anyOf": [
               {
@@ -358,6 +401,11 @@
           "score": {
             "title": "Score",
             "type": "number"
+          },
+          "truncated": {
+            "default": false,
+            "title": "Truncated",
+            "type": "boolean"
           },
           "type": {
             "const": "score",
@@ -388,7 +436,7 @@
             "items": {
               "$ref": "#/components/schemas/LevelSpec"
             },
-            "maxItems": 32,
+            "maxItems": 64,
             "minItems": 2,
             "title": "Levels",
             "type": "array"
@@ -442,7 +490,7 @@
                 }
               ]
             },
-            "maxProperties": 64,
+            "maxProperties": 1024,
             "minProperties": 1,
             "title": "Questions",
             "type": "object"

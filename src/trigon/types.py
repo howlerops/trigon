@@ -146,6 +146,14 @@ class RequestOptions(_Strict):
     include_raw_probabilities: bool = False
     # Name of a fitted conformal wrapper to apply, if the deployment has one.
     conformal_profile: str | None = Field(default=None, max_length=128)
+    # Return only the most probable options rather than the whole
+    # distribution. The full distribution is the default because returning it
+    # is the product's whole point -- a caller who cannot see the probabilities
+    # cannot compute their own confidence. But at tens of thousands of options
+    # the response itself becomes the bottleneck (100,000 options is roughly
+    # 2 MB of JSON), and a caller who only acts on the top few should not pay
+    # to serialize the tail. The selected option is always included.
+    top_probabilities: int | None = Field(default=None, ge=1)
 
 
 class SystemOneRequest(_Strict):
@@ -178,6 +186,11 @@ class ChoiceAnswer(_Strict):
     # Present when the large-cardinality stage narrowed the option set; options
     # outside the shortlist carry probability 0 rather than being omitted.
     shortlisted_from: int | None = None
+    # True when ``top_probabilities`` trimmed the distribution. The reported
+    # probabilities are then the real ones, not renormalised, so they sum to
+    # less than 1 -- and ``probability_mass`` says how much they cover.
+    truncated: bool = False
+    probability_mass: float | None = Field(default=None, ge=0.0, le=1.0)
 
 
 class ScoreAnswer(_Strict):
@@ -188,6 +201,10 @@ class ScoreAnswer(_Strict):
     raw_probabilities: dict[str, float] | None = None
     prediction_set: list[str] | None = None
     coverage_target: float | None = Field(default=None, ge=0.0, le=1.0)
+    # See ChoiceAnswer: the score and the confidence are always computed over
+    # the full distribution, never over what survived truncation.
+    truncated: bool = False
+    probability_mass: float | None = Field(default=None, ge=0.0, le=1.0)
 
 
 class NoulAnswer(_Strict):

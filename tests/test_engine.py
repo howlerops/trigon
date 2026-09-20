@@ -159,7 +159,8 @@ def test_a_backend_returning_the_wrong_head_is_caught():
 
 
 def test_large_option_sets_are_shortlisted_and_still_answered_in_full(engine):
-    options = [{"name": f"intent_{i}"} for i in range(1500)]
+    # Above the 2,048-option shortlist, so the prefilter actually narrows.
+    options = [{"name": f"intent_{i}"} for i in range(6000)]
     options[900] = {"name": "card_payment_declined", "criteria": "a card transaction was refused"}
     response = engine.answer(
         SystemOneRequest(
@@ -170,8 +171,8 @@ def test_large_option_sets_are_shortlisted_and_still_answered_in_full(engine):
     answer = response.answers["intent"]
     # Every declared option is accounted for, including the ones the prefilter
     # dropped -- they carry probability 0 rather than disappearing.
-    assert len(answer.probabilities) == 1500
-    assert answer.shortlisted_from == 1500
+    assert len(answer.probabilities) == 6000
+    assert answer.shortlisted_from == 6000
     assert sum(answer.probabilities.values()) == pytest.approx(1.0)
     assert answer.probabilities["card_payment_declined"] > 0.0
 
@@ -195,3 +196,52 @@ def test_domain_selects_a_per_domain_temperature():
         .answers["c"]
     )
     assert support.probabilities["a"] < general.probabilities["a"]
+
+
+def test_an_option_set_inside_the_shortlist_is_not_narrowed(engine):
+    """Raising the shortlist to 2,048 means mid-sized questions now skip the
+    prefilter entirely rather than paying for a stage they do not need."""
+    options = [{"name": f"intent_{i}"} for i in range(1500)]
+    options[900] = {"name": "card_payment_declined", "criteria": "a card was refused"}
+    response = engine.answer(
+        SystemOneRequest(
+            state="my card payment was declined",
+            questions={"intent": ChoiceQuestion(instructions="route", options=options)},
+        )
+    )
+    assert response.answers["intent"].shortlisted_from is None
+
+
+def test_top_probabilities_trims_the_response_without_renormalising(engine):
+    """A truncated map that summed to 1 would misrepresent how much of the
+    distribution the caller is seeing."""
+    options = [{"name": f"intent_{i}", "criteria": f"about topic {i}"} for i in range(400)]
+    options[7] = {"name": "card_declined", "criteria": "a card transaction was refused"}
+    request = SystemOneRequest(
+        state="my card transaction was refused",
+        questions={"intent": ChoiceQuestion(instructions="route", options=options)},
+        options={"top_probabilities": 10},
+    )
+    answer = engine.answer(request).answers["intent"]
+
+    assert answer.truncated is True
+    assert len(answer.probabilities) == 10
+    assert answer.selected in answer.probabilities  # the pick is always present
+    assert sum(answer.probabilities.values()) < 1.0
+    assert answer.probability_mass == pytest.approx(sum(answer.probabilities.values()))
+
+
+def test_confidence_is_computed_before_truncation(engine):
+    """Confidence derived from a trimmed vector would read high simply because
+    the tail was dropped."""
+    options = [{"name": f"intent_{i}", "criteria": f"about topic {i}"} for i in range(400)]
+    base = SystemOneRequest(
+        state="a message with no particular signal",
+        questions={"intent": ChoiceQuestion(instructions="route", options=options)},
+    )
+    full = engine.answer(base).answers["intent"]
+    trimmed = engine.answer(
+        base.model_copy(update={"options": base.options.model_copy(
+            update={"top_probabilities": 5})})
+    ).answers["intent"]
+    assert trimmed.confidence == pytest.approx(full.confidence)

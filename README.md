@@ -55,6 +55,35 @@ a footnote — which is why the release gates are ECE numbers, why the eval
 harness ships with the weights, and why a deployment that has not been
 calibrated says so on `/healthz`.
 
+## Capacity
+
+Large, and asymmetrically so, because the isolation rules make attention cost
+asymmetric. A question's schema block attends only to itself, so schema cost is
+the sum of per-question squares rather than the square of their sum; state is
+the only term quadratic in the whole request.
+
+| | Default | The contract we mirror |
+| --- | ---: | ---: |
+| Tokens per request | **524,288** | 65,536 |
+| State + longest question | **131,072** | 32,768 |
+| State | **65,536** | 16,384 |
+| Questions per request | **1,024** | 64 |
+| Options per Choice | **100,000** | 255 |
+
+A full-size request costs roughly what a dense model spends on 82k tokens —
+the honest form of a long-context claim is "about six times cheaper than the
+length suggests", not "free". `COMPAT_BUDGET` reproduces the narrower limits
+for like-for-like benchmarking; the default is a superset, so anything valid
+there is valid here.
+
+There are no generated tokens, so output capacity is the answer surface: more
+questions, more options and levels per answer. The constraint that shows up
+instead is response size — 100,000 options is ~2 MB of JSON — so
+`top_probabilities` returns the k most probable options, always including the
+selected one, with real (not renormalised) probabilities and a
+`probability_mass` field saying how much they cover. Confidence and the Score
+expectation are computed on the full distribution first.
+
 ## Three primitives
 
 | Primitive | Question | Answer |
@@ -117,19 +146,24 @@ to the schema.
 Three more things were established by running the code rather than reasoning
 about it, and each changed the plan:
 
-- **The retrieval gate fails on realistic queries.** `trigon.evals.cardinality`
-  is decision D1's falsifier. At 10,000 options with two of four fields
-  unstated, recall@256 is 0.94 against a 0.99 gate, and holding it needs a
-  shortlist that only fits the token budget with the option criteria stripped
-  out. The ANN stage is therefore load-bearing, not an optimisation, and moved
-  out of the cut order.
+- **The retrieval gate failed, and the fix was not where it looked.**
+  `trigon.evals.cardinality` is decision D1's falsifier. At 10,000 options with
+  two of four fields unstated, recall@256 was 0.94 against a 0.99 gate. Raising
+  the per-question token budget let the shortlist grow to 2,048 *with option
+  criteria intact*, and recall went to 1.0000 at every difficulty — with plain
+  BM25. It was a budget problem wearing a retrieval problem's clothes.
 - **A model that ignores its input passes every calibration gate.** The trained
   reference model cleared all four at 45.6% accuracy, because reporting true
   marginals is calibrated by construction. `accuracy_over_baseline` is what
   rejects it.
-- **The context envelope is two limits, not one** — 64k per request and 32k for
-  state plus the longest single question. The plan's flat 32k assumption got
-  both the total and the binding constraint wrong.
+- **The context envelope is two limits, not one** — the contract we mirror
+  bounds the whole request *and* state-plus-longest-question separately. The
+  plan's flat 32k assumption got both the total and the binding constraint
+  wrong.
+- **Dot-product option scoring did not learn at all.** The plan's phase-1
+  ablation: a readout slot per option reached 45.6% accuracy; the dot-product
+  head — the one that makes huge option sets affordable — finished at 38.9%,
+  *below* the 39.2% marginal predictor, while still passing every ECE gate.
 
 ## Layout
 

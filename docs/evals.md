@@ -136,12 +136,26 @@ lexical match against distractors that are at best 3/4, and recall@256 reads
 1.0000 at every option count — which tells you nothing except that exact
 matching is easy. `drop_slots` leaves fields unstated, as real tickets do.
 
-At a 256-option shortlist the gate holds to 10,000 options for queries stating
-three or four fields, and **fails at two** (0.9400). Holding it there needs a
-~1,536-option shortlist, which fits the per-question token budget only with the
-option criteria stripped. The full table, and the three changes it forced, are
-in `docs/decisions.md` §1 — including moving the ANN stage out of the cut
-order.
+At the original 256-option shortlist the gate held for queries stating three or
+four fields and **failed at two** (0.9400) — and holding it needed a
+~1,536-option shortlist, which fitted the then per-question budget only with
+the option criteria stripped out.
+
+Raising the per-question budget to 65,536 tokens changed that. A 2,048-option
+shortlist now fits **with criteria intact** (58,449 tokens), and recall is
+1.0000 at every difficulty the probe generates, including a query naming a
+single field — with plain BM25 and no ANN index:
+
+| Query states | recall@2048, 10,000 options |
+| --- | ---: |
+| 3 of 4 fields | 1.0000 |
+| 2 of 4 | 1.0000 |
+| 1 of 4 | 1.0000 |
+
+The recall failure was a budget problem wearing a retrieval problem's clothes.
+What survives is the difficulty sweep, which is what made it visible;
+`docs/decisions.md` §1 has the full correction, including putting the ANN stage
+back in the cut order.
 
 The option sets are generated, and that is a consequence of the licence audit
 rather than a convenience: UFET — the ~10k-type corpus the build plan named for
@@ -204,6 +218,40 @@ Temperature scaling moved ECE from 0.0112 to 0.0111 — correct behaviour, not a
 failure. The model was already near-calibrated, and no temperature can make a
 model use its input. Post-hoc calibration fixes the shape of a distribution,
 never what it is conditioned on.
+
+### The option-scoring ablation
+
+The plan names this a phase-1 question: a readout slot per option, or one slot
+dotted against pooled option states? The second is what makes huge option sets
+affordable — one slot regardless of cardinality — and it is the path the
+compiler takes above 64 options.
+
+Same data, same seed, same budget; only the head differs.
+
+| | readout per option | dot product |
+| --- | ---: | ---: |
+| Final loss | **1.0366** | 1.1398 |
+| Gap to Bayes closed | **20%** | 2.6% |
+| Accuracy | **0.4561** | 0.3887 |
+| Lift over marginal predictor | **+0.0639** | **−0.0036** |
+| ECE | 0.0111 | 0.0177 |
+| Adaptive ECE | 0.0158 | 0.0441 |
+| Gates | **all pass** | `accuracy_over_baseline` **fails** |
+
+Chance is 1.1552 and the Bayes-optimal loss for this generator is 0.5585. The
+dot-product arm's loss rose between epochs 5 and 6 (1.1395 → 1.1398): it never
+left chance.
+
+Two things follow. **The ablation has an answer, and it is inconvenient**: at
+this scale and budget the cheap head does not learn, and it is the head the
+high-cardinality path depends on. Phase 1 has to budget training effort for the
+regime where falling back to a slot per option is not an option, rather than
+assuming the cheap head comes free.
+
+**And it is the sharpest case for `accuracy_over_baseline` available.** The
+dot-product arm is *worse than ignoring the state* — a negative lift — and it
+still passes every ECE gate, adaptive ECE included. Under the build plan's
+ECE-only gates this arm would have been certified shippable.
 
 ## 5. Workflow suite
 
