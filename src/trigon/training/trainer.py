@@ -137,44 +137,57 @@ def train(
         total, seen = 0.0, 0
         optimizer.zero_grad(set_to_none=True)
 
-        for position, index in enumerate(order, start=1):
-            case = cases[index]
-            compiled = compiler.compile_request(case.request)
-            raw, _ = backend.logits(compiled, case.request)
+        # One batched forward per optimizer step rather than `accumulate`
+        # sequential ones. The arithmetic is unchanged -- the step's loss is
+        # still the mean over cases of the mean over that case's questions, and
+        # `logits_batch` is asserted equal to `logits` to floating-point
+        # equality -- but there is one backward pass instead of `accumulate` of
+        # them, which is where the time goes.
+        for chunk_start in range(0, len(order), config.accumulate):
+            chunk = order[chunk_start : chunk_start + config.accumulate]
+            items = [
+                (compiler.compile_request(cases[index].request), cases[index].request)
+                for index in chunk
+            ]
+            batched = backend.logits_batch(items)
 
-            losses = []
-            for compiled_q in compiled.schema.questions:
-                qid = compiled_q.question_id
-                expected = case.expected.get(qid)
-                if expected is None:
+            case_losses = []
+            for index, (compiled, _), raw in zip(chunk, items, batched, strict=True):
+                case = cases[index]
+                losses = []
+                for compiled_q in compiled.schema.questions:
+                    qid = compiled_q.question_id
+                    expected = case.expected.get(qid)
+                    if expected is None:
+                        continue
+                    label = expected.hard_label
+                    if label is None:
+                        continue
+                    losses.append(question_loss(raw[qid], compiled_q.kind, label, config.ordinal))
+                if not losses:
                     continue
-                label = expected.hard_label
-                if label is None:
-                    continue
-                losses.append(question_loss(raw[qid], compiled_q.kind, label, config.ordinal))
-            if not losses:
+                if epoch == 0:
+                    counted_questions += len(losses)
+                case_losses.append(torch.stack(losses).mean())
+
+            if not case_losses:
                 continue
-            if epoch == 0:
-                counted_questions += len(losses)
+            stacked = torch.stack(case_losses)
+            stacked.mean().backward()
+            total += float(stacked.detach().sum())
+            seen += len(case_losses)
 
-            loss = torch.stack(losses).mean()
-            (loss / config.accumulate).backward()
-            total += float(loss.detach())
-            seen += 1
-
-            at_boundary = position % config.accumulate == 0
-            if at_boundary or position == len(order):
-                step += 1
-                _set_lr(optimizer, config, step, total_steps, warmup_steps)
-                torch.nn.utils.clip_grad_norm_(model.parameters(), config.grad_clip)
-                optimizer.step()
-                optimizer.zero_grad(set_to_none=True)
-                if config.log_every and step % config.log_every == 0:
-                    print(
-                        f"  epoch {epoch + 1} step {step}/{total_steps} "
-                        f"loss {total / max(seen, 1):.4f}",
-                        flush=True,
-                    )
+            step += 1
+            _set_lr(optimizer, config, step, total_steps, warmup_steps)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), config.grad_clip)
+            optimizer.step()
+            optimizer.zero_grad(set_to_none=True)
+            if config.log_every and step % config.log_every == 0:
+                print(
+                    f"  epoch {epoch + 1} step {step}/{total_steps} "
+                    f"loss {total / max(seen, 1):.4f}",
+                    flush=True,
+                )
 
         record = EpochReport(
             epoch=epoch + 1,

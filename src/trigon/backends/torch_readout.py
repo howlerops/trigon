@@ -44,6 +44,7 @@ from __future__ import annotations
 import hashlib
 import math
 import time
+from collections.abc import Sequence
 from pathlib import Path
 
 try:  # pragma: no cover - exercised by the import error path only
@@ -178,23 +179,33 @@ class PrefillOnlyModel(nn.Module):
     ) -> torch.Tensor:
         """One forward pass.
 
-        ``token_embeddings`` (1, T, d); ``mask`` (T, T) boolean "may attend";
-        ``positions`` (T,) group-local indices; ``segment_types`` (T,) in
-        {0: schema, 1: state, 2: readout}.
+        ``token_embeddings`` (B, T, d); ``mask`` (T, T) for a single request or
+        (B, T, T) when the batch's requests have different layouts, boolean
+        "may attend"; ``positions`` and ``segment_types`` (T,) or (B, T), the
+        latter group-local indices and the former in {0: schema, 1: state,
+        2: readout}.
         """
+        batched = positions.dim() == 2
         table = _sinusoidal(
             int(positions.max().item()) + 1,
             self.config.d_model,
             token_embeddings.device,
             token_embeddings.dtype,
         )
-        hidden = (
-            token_embeddings
-            + table[positions].unsqueeze(0)
-            + self.segment_embed(segment_types).unsqueeze(0)
-        )
+        hidden = token_embeddings + table[positions] + self.segment_embed(segment_types)
+        if not batched:
+            hidden = hidden if hidden.dim() == 3 else hidden.unsqueeze(0)
+
         # nn.TransformerEncoder takes True as "block this pair".
-        hidden = self.encoder(hidden, mask=~mask)
+        attn_mask = ~mask
+        if attn_mask.dim() == 3:
+            # A per-sample mask has to be repeated once per attention head:
+            # the encoder flattens (batch, head) into one leading dimension,
+            # and repeat_interleave is what keeps each sample's rows adjacent.
+            # `repeat` here instead would silently give sample 0's mask to
+            # every head of every sample.
+            attn_mask = attn_mask.repeat_interleave(self.config.n_heads, dim=0)
+        hidden = self.encoder(hidden, mask=attn_mask)
         return self.norm(hidden)
 
 
@@ -353,7 +364,21 @@ class TorchReadoutBackend:
                 f"backend's tokenizer"
             )
         hidden = self.model(embeddings, mask, spans.positions(), spans.segment_types())[0]
+        return self._heads(compiled, request, hidden, spans), int(embeddings.shape[1])
 
+    def _heads(
+        self,
+        compiled: CompiledRequest,
+        request: SystemOneRequest,
+        hidden: torch.Tensor,
+        spans: _Spans,
+    ) -> dict[str, torch.Tensor]:
+        """Per-question logits from one request's hidden states.
+
+        Shared by the single and batched paths so they cannot drift: a trainer
+        carrying its own copy of the heads is how a model ends up scoring well
+        offline and miscalibrated in production.
+        """
         out: dict[str, torch.Tensor] = {}
         for compiled_q in compiled.schema.questions:
             qid = compiled_q.question_id
@@ -379,18 +404,73 @@ class TorchReadoutBackend:
                 if self.config.match_normalize:
                     # Cosine, with a learnable temperature. Raw dot products
                     # let descent equalise the logits by shrinking every key
-                    # towards their shared mean -- which is the cheapest route
-                    # to the marginal and destroys the option signal on the
-                    # way. Normalising removes that route: scale buys nothing,
-                    # so the only way to flatten the answer is to make the
-                    # option directions identical, which the data does not
-                    # reward.
+                    # towards their shared mean -- the cheapest route to the
+                    # marginal, and it destroys the option signal on the way.
                     query = query / query.norm().clamp_min(1e-6)
                     keys = keys / keys.norm(dim=-1, keepdim=True).clamp_min(1e-6)
                     out[qid] = (keys @ query) * self.model.match_log_scale.exp()
                 else:
                     out[qid] = keys @ query / math.sqrt(self.config.d_model)
-        return out, int(embeddings.shape[1])
+        return out
+
+    def logits_batch(
+        self, items: Sequence[tuple[CompiledRequest, SystemOneRequest]]
+    ) -> list[dict[str, torch.Tensor]]:
+        """One forward pass over several requests, padded to the longest.
+
+        Same arithmetic as calling :meth:`logits` on each, to floating-point
+        equality -- asserted in ``tests/test_training.py``, because a trainer
+        whose batched pass differs from the served one is the standard way to
+        end up with a model that scores well offline and is miscalibrated in
+        production.
+
+        Padding needs care in both directions. A padded row must not be
+        attended to by a real one, or the answer depends on what happened to
+        share its batch; and a padded row must still attend to *something*,
+        because a row that may attend to nothing softmaxes over all -inf and
+        returns NaN, which then propagates through the whole batch.
+        """
+        if not items:
+            return []
+
+        embeddings, spans_list, masks = [], [], []
+        for compiled, _ in items:
+            embedded, spans = self._embed(compiled)
+            embeddings.append(embedded[0])
+            spans_list.append(spans)
+            masks.append(torch.tensor(materialize_mask(compiled), dtype=torch.bool))
+
+        width = max(e.shape[0] for e in embeddings)
+        batch = len(items)
+        padded = torch.zeros(batch, width, self.config.d_model, dtype=embeddings[0].dtype)
+        mask = torch.zeros(batch, width, width, dtype=torch.bool)
+        positions = torch.zeros(batch, width, dtype=torch.long)
+        segments = torch.zeros(batch, width, dtype=torch.long)
+
+        for i, (embedded, spans, sample_mask) in enumerate(
+            zip(embeddings, spans_list, masks, strict=True)
+        ):
+            length = embedded.shape[0]
+            if sample_mask.shape[0] != length:
+                raise ValueError(
+                    f"mask is {sample_mask.shape[0]} tokens but the sequence is {length}; "
+                    "the compiler's estimator must be the backend's tokenizer"
+                )
+            padded[i, :length] = embedded
+            mask[i, :length, :length] = sample_mask
+            positions[i, :length] = spans.positions()
+            segments[i, :length] = spans.segment_types()
+            # Padded rows attend to themselves and nothing else. They are
+            # discarded below; this only keeps the softmax finite.
+            for row in range(length, width):
+                mask[i, row, row] = True
+
+        hidden = self.model(padded, mask, positions, segments)
+
+        out: list[dict[str, torch.Tensor]] = []
+        for i, (compiled, request) in enumerate(items):
+            out.append(self._heads(compiled, request, hidden[i], spans_list[i]))
+        return out
 
     @torch.no_grad()
     def infer(self, compiled: CompiledRequest, request: SystemOneRequest) -> BackendOutput:

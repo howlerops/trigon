@@ -249,3 +249,78 @@ def test_a_bpe_checkpoint_refuses_a_vocabulary_of_the_wrong_size():
         build_tokenizer({"kind": "bpe", "vocab_size": 99})
     with pytest.raises(ValueError, match="unknown tokenizer kind"):
         build_tokenizer({"kind": "sentencepiece", "vocab_size": 32000})
+
+
+# -- padded batching ---------------------------------------------------------
+
+
+def _batch_items(backend, n=12, seed=1000):
+    from trigon.evals.datasets import synthetic_outcome_cases
+
+    compiler = backend.make_compiler()
+    cases = synthetic_outcome_cases(n=n, seed=seed, noise=0.2)
+    return [(compiler.compile_request(c.request), c.request) for c in cases]
+
+
+def test_a_batched_pass_equals_the_unbatched_one_exactly():
+    """The trainer batches and the gateway does not. If they differ at all, the
+    model is trained on arithmetic it is never served with — the standard way
+    to score well offline and be miscalibrated in production."""
+    from trigon.backends.torch_readout import TorchReadoutBackend
+
+    backend = TorchReadoutBackend(seed=0)
+    items = _batch_items(backend)
+    with torch.no_grad():
+        one_at_a_time = [backend.logits(compiled, request)[0] for compiled, request in items]
+        batched = backend.logits_batch(items)
+
+    assert len(batched) == len(items)
+    for single, many in zip(one_at_a_time, batched, strict=True):
+        assert single.keys() == many.keys()
+        for qid in single:
+            assert torch.equal(single[qid], many[qid]), f"{qid} moved under batching"
+
+
+def test_padding_cannot_reach_across_a_batch():
+    """A request's answer must not depend on what shared its batch. Requests of
+    very different lengths are the case that would expose a leak."""
+    from trigon.backends.torch_readout import TorchReadoutBackend
+    from trigon.types import ChoiceQuestion, SystemOneRequest
+
+    backend = TorchReadoutBackend(seed=0)
+    compiler = backend.make_compiler()
+    question = ChoiceQuestion(
+        instructions="Route this.", options=[{"name": "a"}, {"name": "b"}, {"name": "c"}]
+    )
+    short = SystemOneRequest(state="brief", questions={"q": question})
+    long = SystemOneRequest(state="a much longer message " * 60, questions={"q": question})
+
+    items = [(compiler.compile_request(r), r) for r in (short, long)]
+    with torch.no_grad():
+        alone = [backend.logits(compiled, request)[0]["q"] for compiled, request in items]
+        # Together, and again in the other order — padding lands on a
+        # different member of the batch each way.
+        together = [out["q"] for out in backend.logits_batch(items)]
+        reversed_ = [out["q"] for out in backend.logits_batch(items[::-1])][::-1]
+
+    for solo, mixed, flipped in zip(alone, together, reversed_, strict=True):
+        assert torch.equal(solo, mixed)
+        assert torch.equal(solo, flipped)
+
+
+def test_a_batched_pass_never_returns_nan():
+    """A padded row that may attend to nothing softmaxes over all -inf and
+    returns NaN, which then propagates through the whole batch."""
+    from trigon.backends.torch_readout import TorchReadoutBackend
+
+    backend = TorchReadoutBackend(seed=0)
+    with torch.no_grad():
+        for out in backend.logits_batch(_batch_items(backend, n=16)):
+            for qid, values in out.items():
+                assert torch.isfinite(values).all(), f"{qid} produced a non-finite logit"
+
+
+def test_an_empty_batch_is_not_an_error():
+    from trigon.backends.torch_readout import TorchReadoutBackend
+
+    assert TorchReadoutBackend(seed=0).logits_batch([]) == []
