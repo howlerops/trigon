@@ -114,6 +114,7 @@ trigon eval all -n 200             # every suite and gate; non-zero on a failure
 trigon eval workflow -n 200        # or one suite: calibration | jaggedness |
                                    #   cardinality | workflow
 trigon fit --conformal-out p.json  # fit the post-hoc calibration layer
+python scripts/seed_sweep.py       # a configuration's spread across seeds
 trigon spec                        # the OpenAPI contract
 ```
 

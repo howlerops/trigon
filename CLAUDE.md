@@ -84,6 +84,7 @@ pytest -q
 ruff check src tests scripts
 trigon eval all -n 200             # exits non-zero on a failed gate
 trigon train --out reports/run.md --save-model reports/run.pt   # train, calibrate, gate
+python scripts/seed_sweep.py --seeds 0 1 2 3 -n 8000 --epochs 8  # certify on the spread
 trigon ask request.json --backend torch --weights reports/run.pt # one request
 trigon serve --backend torch --weights reports/run.pt            # behind the API
 python scripts/export_openapi.py   # after ANY change to the contract
