@@ -35,6 +35,13 @@ jobs:
         run: |
           python scripts/export_openapi.py
           git diff --exit-code spec/openapi.json
+      - name: TypeScript client typechecks
+        # Nobody reads generated code, so the compiler is the review. Strict
+        # mode here caught a real bug the first time it ran.
+        working-directory: sdk/typescript
+        run: |
+          npm install --no-audit --no-fund
+          npm run typecheck
       - name: Generated artifacts are current
         # Each is generated from something else in the tree, so a change that
         # is not regenerated has to fail in the same commit rather than later.
