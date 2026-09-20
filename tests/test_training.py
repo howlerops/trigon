@@ -194,3 +194,58 @@ def test_a_checkpoint_keeps_the_head_it_was_trained_with(tmp_path):
     reloaded = TorchReadoutBackend.load(path)
     assert reloaded.config.match_residual is False
     assert reloaded.config.match_normalize is False
+
+
+def test_a_checkpoint_is_served_with_the_tokenizer_it_was_trained_on(tmp_path):
+    """A model served under a different vocabulary reads every token id as a
+    different word, and nothing raises. The checkpoint names its tokenizer."""
+    from trigon.backends.tokenizer import HashingTokenizer
+    from trigon.backends.torch_readout import TorchReadoutBackend
+
+    path = tmp_path / "hashed.pt"
+    TorchReadoutBackend(tokenizer=HashingTokenizer(4096), seed=0).save(path)
+
+    reloaded = TorchReadoutBackend.load(path)
+    assert isinstance(reloaded.tokenizer, HashingTokenizer)
+    assert reloaded.tokenizer.vocab_size == 4096
+    assert reloaded.config.vocab_size == 4096
+
+
+def test_a_checkpoint_written_before_tokenizers_were_recorded_loads_as_hashing(tmp_path):
+    """Every such checkpoint used the hashing tokenizer — including the
+    committed reference run, which stopped loading when the default changed."""
+    from trigon.backends.tokenizer import HashingTokenizer
+    from trigon.backends.torch_readout import TorchReadoutBackend
+
+    path = tmp_path / "old.pt"
+    TorchReadoutBackend(tokenizer=HashingTokenizer(8192), seed=0).save(path)
+    payload = torch.load(path, map_location="cpu", weights_only=False)
+    del payload["tokenizer"]
+    torch.save(payload, path)
+
+    reloaded = TorchReadoutBackend.load(path)
+    assert isinstance(reloaded.tokenizer, HashingTokenizer)
+    assert reloaded.tokenizer.vocab_size == 8192
+
+
+def test_the_committed_reference_run_still_loads_and_answers():
+    """The certified model is the one thing that must never stop loading."""
+    import pathlib
+
+    from trigon.backends.torch_readout import TorchReadoutBackend
+
+    weights = pathlib.Path(__file__).resolve().parent.parent / "reports" / "reference-run.pt"
+    if not weights.exists():  # gitignored; present only after a local train run
+        pytest.skip("reference-run.pt is not checked in")
+    backend = TorchReadoutBackend.load(weights)
+    assert backend.model_version.endswith("+50b2d6bd")
+    assert backend.tokenizer.vocab_size == 8192
+
+
+def test_a_bpe_checkpoint_refuses_a_vocabulary_of_the_wrong_size():
+    from trigon.backends.tokenizer import build_tokenizer
+
+    with pytest.raises(ValueError, match="trained on a 99-token BPE vocabulary"):
+        build_tokenizer({"kind": "bpe", "vocab_size": 99})
+    with pytest.raises(ValueError, match="unknown tokenizer kind"):
+        build_tokenizer({"kind": "sentencepiece", "vocab_size": 32000})

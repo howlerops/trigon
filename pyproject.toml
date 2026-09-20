@@ -35,6 +35,9 @@ trigon = "trigon.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
+# data/*.json carries the BPE vocabulary, which ships with the package: the
+# gateway counts tokens on nodes with no model weights, so it cannot be a
+# runtime download.
 trigon = ["py.typed", "evals/suites/*.json", "data/*.json"]
 
 [tool.pytest.ini_options]

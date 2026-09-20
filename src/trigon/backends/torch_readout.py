@@ -65,7 +65,7 @@ from ..schema import (
 from ..schema.tokens import CallableEstimator
 from ..types import SystemOneRequest
 from .base import BackendOutput, QuestionOutput
-from .tokenizer import READOUT_ID, HashingTokenizer
+from .tokenizer import READOUT_ID, Tokenizer, build_tokenizer, default_tokenizer, describe
 
 __all__ = ["PrefillOnlyModel", "ReadoutConfig", "TorchReadoutBackend"]
 
@@ -206,12 +206,15 @@ class TorchReadoutBackend:
         config: ReadoutConfig | None = None,
         *,
         model: PrefillOnlyModel | None = None,
-        tokenizer: HashingTokenizer | None = None,
+        tokenizer: Tokenizer | None = None,
         version: str = UNTRAINED_VERSION,
         seed: int | None = 0,
     ) -> None:
         self.config = config or ReadoutConfig()
-        self.tokenizer = tokenizer or HashingTokenizer(self.config.vocab_size)
+        self.tokenizer = tokenizer or default_tokenizer()
+        # The vocabulary decides the embedding table, not the other way round:
+        # a config carrying a stale vocab_size would index past the table.
+        self.config.vocab_size = self.tokenizer.vocab_size
         if seed is not None:
             torch.manual_seed(seed)
         self.model = model or PrefillOnlyModel(self.config)
@@ -275,6 +278,7 @@ class TorchReadoutBackend:
                     "match_normalize": self.config.match_normalize,
                     "match_residual": self.config.match_residual,
                 },
+                "tokenizer": describe(self.tokenizer),
                 "state_dict": self.model.state_dict(),
             },
             target,
@@ -293,7 +297,16 @@ class TorchReadoutBackend:
         for flag in ("match_normalize", "match_residual"):
             stored.setdefault(flag, False)
         config = ReadoutConfig(**stored)
-        backend = cls(config, version=version or payload.get("version", TRAINED_VERSION_PREFIX))
+        # Rebuild the tokenizer the run was trained with, never today's
+        # default: the vocabulary sizes the embedding table, and a mismatch is
+        # either a load error or -- worse, if the sizes happen to agree -- a
+        # model reading every token as a different word.
+        tokenizer = build_tokenizer(payload.get("tokenizer"))
+        backend = cls(
+            config,
+            tokenizer=tokenizer,
+            version=version or payload.get("version", TRAINED_VERSION_PREFIX),
+        )
 
         # A checkpoint written before a parameter existed is still a valid
         # checkpoint: adding `match_log_scale` broke loading every run saved
