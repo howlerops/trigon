@@ -7,10 +7,13 @@ benchmark -- it produces a number people quote.
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 from trigon.backends.base import BackendOutput, QuestionOutput
 from trigon.backends.lexical import LexicalBackend
+from trigon.calibration.temperature import TemperatureScaler
 from trigon.engine import Engine
 from trigon.evals import (
     Case,
@@ -365,3 +368,63 @@ def test_json_report_covers_every_suite_the_markdown_does():
     # The CLI exits non-zero on this run, so the file a consumer reads must
     # not report it as a pass.
     assert payload["passed"] is False
+
+
+# -- the two gates nothing had ever run --------------------------------------
+#
+# Coverage found the quantization-delta gate and the premium tier's tighter
+# limit entirely unexecuted. Both are release gates: an untested gate is a
+# claim about what CI would block, not a thing CI blocks.
+
+
+def test_the_premium_tier_is_gated_more_tightly_than_the_workhorse():
+    engine = Engine(LexicalBackend())
+    result, _ = run_calibration_suite(engine, synthetic_outcome_cases(n=200), floor_trials=10)
+    workhorse = {g.name: g for g in check_gates(result, tier="workhorse")}
+    premium = {g.name: g for g in check_gates(result, tier="premium")}
+    assert premium["premium_ece"].limit < workhorse["workhorse_ece"].limit
+    # Same measurement, different bar -- the value must not move with the tier.
+    assert premium["premium_ece"].value == workhorse["workhorse_ece"].value
+
+
+def test_an_unknown_tier_is_rejected_rather_than_silently_ungated():
+    engine = Engine(LexicalBackend())
+    result, _ = run_calibration_suite(engine, synthetic_outcome_cases(n=200), floor_trials=10)
+    with pytest.raises(KeyError):
+        check_gates(result, tier="freemium")
+
+
+def test_quantization_gate_catches_a_calibration_regression_argmax_would_miss():
+    """Probabilities degrade well before argmax does, which is the entire
+    reason this gate is separate from an accuracy check."""
+    engine = Engine(LexicalBackend())
+    cases = synthetic_outcome_cases(n=200)
+    baseline, _ = run_calibration_suite(engine, cases, floor_trials=10)
+
+    # A serving path that keeps every argmax and wrecks the probabilities: the
+    # same engine at a temperature far from 1.
+    scaler = TemperatureScaler(primitive={"choice": 0.2, "noul": 0.2, "score": 0.2})
+    degraded, _ = run_calibration_suite(
+        Engine(LexicalBackend(), scaler=scaler), cases, floor_trials=10
+    )
+    assert degraded.accuracy == pytest.approx(baseline.accuracy), (
+        "sharpening cannot change which option wins, or this is not the right probe"
+    )
+
+    gates = {g.name: g for g in check_gates(baseline, quantized=degraded)}
+    delta = gates["quantization_ece_delta"]
+    assert delta.value > delta.limit and not delta.passed
+    # And it stays quiet when the quantized path did not move calibration.
+    same = {g.name: g for g in check_gates(baseline, quantized=baseline)}
+    assert same["quantization_ece_delta"].value == 0.0
+    assert same["quantization_ece_delta"].passed
+
+
+def test_gates_refuse_a_run_with_nothing_scored():
+    engine = Engine(LexicalBackend())
+    result, _ = run_calibration_suite(engine, synthetic_outcome_cases(n=200), floor_trials=10)
+    empty = replace(result, calibration=None)
+    with pytest.raises(ValueError, match="no scored questions"):
+        check_gates(empty)
+    with pytest.raises(ValueError, match="quantized run produced no scored questions"):
+        check_gates(result, quantized=empty)
