@@ -18,6 +18,7 @@ from ..engine import Engine
 from ..limits import (
     CALIBRATION_GATES,
     MAX_FLOOR_FRACTION_OF_GATE,
+    MIN_ACCURACY_OVER_BASELINE,
     MIN_CALIBRATION_SAMPLES,
 )
 from .harness import Case, CaseOutcome, SuiteResult, run_cases, summarize
@@ -124,6 +125,26 @@ def check_gates(
                 ),
             )
         )
+    # Before the calibration gates: did the model use the input at all? A
+    # marginal predictor is calibrated by construction, so ECE cannot reject
+    # it -- and a gate that certifies the one model guaranteed to be useless is
+    # worse than no gate, because it looks like evidence.
+    if result.baseline_accuracy is not None and result.accuracy is not None:
+        lift = result.accuracy - result.baseline_accuracy
+        gates.append(
+            GateResult(
+                "accuracy_over_baseline",
+                lift,
+                MIN_ACCURACY_OVER_BASELINE,
+                lift >= MIN_ACCURACY_OVER_BASELINE,
+                note=(
+                    f"model {result.accuracy:.4f} vs marginal predictor "
+                    f"{result.baseline_accuracy:.4f}; calibration cannot reject a "
+                    f"model that ignores the state"
+                ),
+            )
+        )
+
     gates.append(GateResult(f"{tier}_ece", cal.ece, limit, cal.ece <= limit))
     gates.append(
         GateResult(f"{tier}_adaptive_ece", cal.adaptive_ece, limit, cal.adaptive_ece <= limit)

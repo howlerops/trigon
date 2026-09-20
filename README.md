@@ -127,7 +127,7 @@ src/trigon/
   training/         proper scoring rules and the outcome-grounded training loop
   engine.py         the pipeline, in one place so nothing can drift
   server/           reference gateway; generates the OpenAPI spec
-  evals/            three suites, one runner, release gates
+  evals/            three suites, two gates, one runner, one closed loop
 spec/openapi.json   the contract, drift-tested against the gateway
 docs/               architecture, training, data + licence audit, evals, decisions
 ```
@@ -141,7 +141,7 @@ docs/               architecture, training, data + licence audit, evals, decisio
 - [`docs/training.md`](docs/training.md) — the two objectives, the schedule,
   the auxiliary losses
 - [`docs/data.md`](docs/data.md) — five streams and the dataset licence audit
-- [`docs/evals.md`](docs/evals.md) — the three suites and the release gates
+- [`docs/evals.md`](docs/evals.md) — the suites, the gates, and the reference run
 - [`docs/roadmap.md`](docs/roadmap.md) — phases, staffing, cut order, risks
 
 ## Scope

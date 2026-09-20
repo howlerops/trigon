@@ -161,3 +161,21 @@ MIN_CALIBRATION_SAMPLES = 5_000
 # the simulated floor's 95th percentile to sit at or below this fraction of the
 # limit; otherwise the run is reported as untestable rather than as a pass.
 MAX_FLOOR_FRACTION_OF_GATE = 0.5
+
+
+# How far a model must beat the marginal predictor -- the one that ignores the
+# state and reports each question's label frequencies -- before a run may
+# certify it.
+#
+# This gate exists because the first trained reference model passed every
+# calibration gate with 46% accuracy: ECE 0.0111 against a 0.05 limit, bins
+# aligned, floor cleared. That is not a fluke and it is not a bug in the
+# metrics. A model that reports the true marginal distribution is calibrated
+# BY CONSTRUCTION -- it just does not use the input. Gating on ECE alone
+# therefore certifies the one model guaranteed to be useless, which makes a
+# calibration-only release gate worse than no gate, because it looks like
+# evidence.
+#
+# The margin is a floor against that degenerate case, not an accuracy target.
+# The real accuracy bar is the workflow suite.
+MIN_ACCURACY_OVER_BASELINE = 0.05

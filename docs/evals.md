@@ -1,7 +1,16 @@
 # Evals
 
-Three suites, one runner. The harness — not any single result — is the durable
-asset, so everything here runs on a fresh clone with no weights.
+Three suites, two gates and one closed loop, all on one runner. The harness —
+not any single result — is the durable asset, so everything here runs on a
+fresh clone with no weights.
+
+| | What it answers |
+| --- | --- |
+| §1 Calibration suite | are the probabilities worth believing |
+| §2 Jaggedness suite | which documented failure modes we have, and which we keep |
+| §3 Cardinality gate | does the prefilter pass the true option through |
+| §4 Reference run | does the whole pipeline close, and do the gates bite |
+| §5 Workflow suite | does it make the right decisions, at what cost and latency |
 
 ```bash
 trigon eval all -n 200 --out reports/run.md   # exits non-zero on a failed gate
@@ -18,9 +27,14 @@ per domain, plus conformal coverage checks.
 | --- | ---: | --- |
 | `sample_size` | ≥ 5,000 | the run is large enough for ECE to mean anything |
 | `gate_is_testable` | floor p95 ≤ ½ × limit | a calibrated model would clear the gate with room |
+| `accuracy_over_baseline` | ≥ +0.05 | the model uses its input at all |
 | Workhorse ECE (and adaptive ECE) | ≤ 0.05 | the model |
 | Premium ECE | ≤ 0.03 | the model |
 | Quantized-vs-BF16 ECE delta | ≤ 0.01 | the serving path |
+
+The first three gate the *measurement and the premise*, not the model, and they
+run first. Two of them exist because a run failed to catch something: see §4
+for the model that passed every ECE gate at 45.6% accuracy.
 
 The delta gate exists because probabilities degrade well before argmax does.
 An accuracy-only check would wave through a KV bit-width that quietly
@@ -143,7 +157,55 @@ better than a found corpus: distractor similarity becomes a dial instead of
 whatever the data happened to contain. CLINC150 stays as the real-data check at
 151 classes.
 
-## 4. Workflow suite
+## 4. The reference run
+
+```bash
+trigon train --out reports/reference-run.md
+```
+
+Train the reference model on outcome-grounded data, fit a temperature on the
+training split, measure on a held-out split generated from a different seed,
+and run the gates. Committed output: `reports/reference-run.md`. Everything is
+seeded — data generation, weight initialisation and shuffling — so the run
+reproduces from its settings rather than from a checkpoint.
+
+Its purpose is not model quality. The reference model is a spike: 128-wide, two
+layers, a hashing tokenizer, 2,500 cases. Its purpose is that the pipeline
+closes and the gates are exercised by something rather than asserted about
+something.
+
+**It produced the most useful result available: a pass that exposed a missing
+gate.**
+
+| | Value |
+| --- | ---: |
+| Accuracy | 0.4561 |
+| Marginal predictor | 0.3922 |
+| Lift | **+0.0639** |
+| ECE | 0.0111 |
+| Adaptive ECE | 0.0158 |
+| Noise floor (p95) | 0.0080 |
+| Brier | 0.5947 |
+
+Every ECE gate passed. The reliability bins aligned to within 0.024, and the
+measured error sat above the simulated floor, so it was a real measurement
+rather than luck. And the model had learned the label frequencies and little
+else — 45.6% accuracy against a marginal predictor's 39.2%.
+
+A model that reports true marginals is calibrated **by construction**. So a
+calibration-only gate set certifies the one model guaranteed to be useless, and
+hands it a reliability diagram on the way out. `accuracy_over_baseline` now
+computes the marginal predictor's accuracy from the eval labels and requires
+the model to beat it; it is a floor against the degenerate case, not an
+accuracy target. The build plan's gates were ECE-only and would have passed
+this model.
+
+Temperature scaling moved ECE from 0.0112 to 0.0111 — correct behaviour, not a
+failure. The model was already near-calibrated, and no temperature can make a
+model use its input. Post-hoc calibration fixes the shape of a distribution,
+never what it is conditioned on.
+
+## 5. Workflow suite
 
 Fixed compute graphs over one state, with later steps depending on earlier
 answers — the shape real pipelines have.

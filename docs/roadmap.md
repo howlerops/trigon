@@ -66,6 +66,22 @@ Autocast are all red. Outcome calibration in v1 rests on verifiable synthetic
 data plus green classification labels — a narrower claim than the plan assumes,
 and one the calibration report has to state.
 
+### What is still unverified
+
+Fourteen of the sixteen figures phase 0 inherited were checked against primary
+sources; the vendor's latency envelope, pricing, 255-option cap, nine
+documented failure modes and absence of published calibration evidence all
+hold, and the ecosystem turned out larger than assumed (28 open reproductions,
+17 independent evaluations, against the plan's 17 and 16). Two did not resolve
+and are carried as open rather than quietly assumed:
+
+- **"96% on a 50-case validation task vs 84–86% for small LLMs."** No primary
+  source surfaced. Do not quote it.
+- **The L4 unit economics** — $0.80/hr, ~30k prefill tok/s, therefore
+  ~$0.007/MTok. The arithmetic checks out; the inputs are unsourced. This is
+  the entire cost argument, so it needs a measured number from our own phase-3
+  burn-in rather than a citation.
+
 ## Staffing
 
 Two engineers — one ML leading phases 1–2, one infra/systems leading phase 3

@@ -128,12 +128,23 @@ class SuiteResult:
     n_cases: int
     n_questions: int
     accuracy: float | None
+    #: Accuracy of the marginal predictor -- the one that ignores the state and
+    #: always answers each question with its most frequent label. The number a
+    #: model has to beat before its calibration means anything.
+    baseline_accuracy: float | None
     calibration: CalibrationReport | None
     latency_p50_ms: float
     latency_p99_ms: float
     mean_prefill_tokens: float
     extra: dict[str, float] = field(default_factory=dict)
     per_primitive: dict[str, CalibrationReport] = field(default_factory=dict)
+
+    @property
+    def lift_over_baseline(self) -> float | None:
+        """How much the model beats the marginal predictor by."""
+        if self.accuracy is None or self.baseline_accuracy is None:
+            return None
+        return self.accuracy - self.baseline_accuracy
 
     def to_dict(self) -> dict:
         return {
@@ -142,6 +153,8 @@ class SuiteResult:
             "n_cases": self.n_cases,
             "n_questions": self.n_questions,
             "accuracy": self.accuracy,
+            "baseline_accuracy": self.baseline_accuracy,
+            "lift_over_baseline": self.lift_over_baseline,
             "calibration": self.calibration.to_dict() if self.calibration else None,
             "latency_p50_ms": self.latency_p50_ms,
             "latency_p99_ms": self.latency_p99_ms,
@@ -221,15 +234,17 @@ def summarize(
         raise ValueError(f"suite {suite!r} produced no outcomes")
 
     scored: list[tuple[str, tuple[float, ...], int]] = []
+    labels_by_question: dict[str, list[int]] = {}
     n_questions = 0
     for outcome in outcomes:
-        for question in outcome.questions.values():
+        for qid, question in outcome.questions.items():
             n_questions += 1
             if question.expected is None:
                 continue
             truth = question.expected.hard_label
             if truth is not None:
                 scored.append((question.primitive, question.probabilities, truth))
+                labels_by_question.setdefault(qid, []).append(truth)
 
     latencies = sorted(o.latency_ms for o in outcomes)
     calibration = (
@@ -260,6 +275,7 @@ def summarize(
         n_cases=len(outcomes),
         n_questions=n_questions,
         accuracy=calibration.accuracy if calibration else None,
+        baseline_accuracy=_marginal_accuracy(labels_by_question),
         calibration=calibration,
         latency_p50_ms=_percentile(latencies, 0.50),
         latency_p99_ms=_percentile(latencies, 0.99),
@@ -267,6 +283,26 @@ def summarize(
         extra=dict(extra or {}),
         per_primitive=per_primitive,
     )
+
+
+def _marginal_accuracy(labels_by_question: dict[str, list[int]]) -> float | None:
+    """Accuracy of the predictor that ignores the state entirely.
+
+    Per question, always answer its most frequent label. This is the model that
+    a calibration gate alone cannot reject -- reporting true marginals is
+    perfectly calibrated -- so it is the number a run has to beat before its
+    ECE is worth reading.
+    """
+    if not labels_by_question:
+        return None
+    right = total = 0
+    for labels in labels_by_question.values():
+        counts: dict[int, int] = {}
+        for label in labels:
+            counts[label] = counts.get(label, 0) + 1
+        right += max(counts.values())
+        total += len(labels)
+    return right / total if total else None
 
 
 def _percentile(sorted_values: Sequence[float], q: float) -> float:

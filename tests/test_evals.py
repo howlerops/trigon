@@ -150,17 +150,38 @@ def test_the_floor_is_reported_alongside_the_number():
     assert result.calibration.distinguishable is not None
 
 
-def test_gates_pass_a_perfectly_calibrated_stub():
-    """A model that answers every Noul at the true base rate is calibrated by
-    construction, so the gates must let it through -- including the equal-mass
-    estimator, which needs tie-aware binning not to invent a gap here."""
+def test_a_marginal_predictor_passes_every_calibration_gate():
+    """The finding that added ``accuracy_over_baseline``.
+
+    A model that answers every Noul at the true base rate is calibrated by
+    construction -- it reports the right distribution, it just ignores the
+    input entirely. Every ECE-based gate passes it. A calibration-only release
+    gate therefore certifies the one model guaranteed to be useless, which is
+    worse than no gate because it looks like evidence.
+    """
     cases = _noul_only(synthetic_outcome_cases(n=6000, noise=0.5))
     base_rate = sum(1 for c in cases if c.expected["at_risk"].hard_label == 1) / len(cases)
     result, _ = run_calibration_suite(Engine(FixedNoul(base_rate)), cases, floor_trials=40)
-    gates = check_gates(result)
-    # Every gate, including the two about the measurement itself.
-    assert all(g.passed for g in gates), [str(g) for g in gates]
+    gates = {g.name: g for g in check_gates(result)}
+
+    assert gates["workhorse_ece"].passed
+    assert gates["workhorse_adaptive_ece"].passed
+    assert gates["sample_size"].passed
+    assert gates["gate_is_testable"].passed
     assert result.calibration.distinguishable is False
+
+    # And it is caught by exactly one gate.
+    assert not gates["accuracy_over_baseline"].passed
+    assert gates["accuracy_over_baseline"].value == pytest.approx(0.0, abs=1e-9)
+    assert "ignores the state" in gates["accuracy_over_baseline"].note
+
+
+def test_baseline_is_the_per_question_majority_label():
+    cases = _noul_only(synthetic_outcome_cases(n=400, noise=0.5))
+    truths = [c.expected["at_risk"].hard_label for c in cases]
+    expected = max(truths.count(0), truths.count(1)) / len(truths)
+    result, _ = run_calibration_suite(Engine(FixedNoul(0.5)), cases, floor_trials=10)
+    assert result.baseline_accuracy == pytest.approx(expected)
 
 
 def test_slice_reports_split_by_domain():

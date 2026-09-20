@@ -354,6 +354,35 @@ re-analysis pointed out that published Jev ECE figures of 0.0505–0.0712 at n=6
 are equally what serious miscalibration looks like at that sample size. The
 right response to that critique is to make our own numbers immune to it.
 
+### Calibration alone certifies a model that ignores its input
+
+The first trained reference model passed every calibration gate: ECE 0.0111
+against a 0.05 limit, adaptive ECE 0.0158, reliability bins aligned to within
+0.024, and the measured error above its own simulated noise floor, so the
+number was a real measurement rather than luck. It also scored **45.6%
+accuracy** against a marginal predictor's 39.2% — it had learned the label
+frequencies and very little else.
+
+That is not a bug in the metrics. A model reporting each question's true
+marginal distribution is calibrated *by construction*; it simply does not use
+the state. So a calibration-only release gate certifies the one model
+guaranteed to be useless, and does it with a reliability diagram attached —
+which is worse than having no gate, because it looks like evidence.
+
+`accuracy_over_baseline` is the fix: the run computes the marginal predictor's
+accuracy from the eval labels themselves and requires the model to beat it by
+`MIN_ACCURACY_OVER_BASELINE`. It is a floor against the degenerate case, not
+an accuracy target; the real accuracy bar is the workflow suite.
+
+The build plan's release gates were ECE-only. They would have passed this
+model. Any future gate set has to keep a term that a state-ignoring model
+fails.
+
+Worth noting what temperature scaling did here: almost nothing (0.0112 →
+0.0111). That is correct behaviour, not a failure — the model was already
+near-calibrated, and a temperature cannot make a model use its input. Post-hoc
+calibration fixes the shape of a distribution, never what it is conditioned on.
+
 ### An index that is stable across requests should be built once
 
 `LexicalShortlister` rebuilt its whole BM25 corpus — tokenizing every option —

@@ -19,6 +19,12 @@ whether the two are separable. Never quote an ECE from a run below
 `MIN_CALIBRATION_SAMPLES`, and never widen `MAX_FLOOR_FRACTION_OF_GATE` to make
 `gate_is_testable` pass — if the gate is not a test, fix the run, not the gate.
 
+**Calibration never certifies alone.** A model that reports each question's
+marginal distribution is calibrated by construction and useless, and it passes
+every ECE gate — the first trained reference model did exactly that at 46%
+accuracy. `accuracy_over_baseline` is what rejects it. Any new gate set must
+keep a term that fails a model which ignores its input.
+
 **Anything derived only from the schema is derived once.** The KV prefix, the
 attention mask and the BM25 option index are all cached on schema-shaped keys.
 When you add something in that class, cache it the same way and key it on what

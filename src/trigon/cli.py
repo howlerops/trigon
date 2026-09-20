@@ -170,9 +170,7 @@ def cmd_train(args: argparse.Namespace) -> int:
         floor_trials=args.floor_trials,
     )
     gates = check_gates(after)
-    markdown = _training_section(report, args) + render_markdown(
-        [before, after], gates, slices
-    )
+    markdown = _training_section(report, args) + render_markdown([before, after], gates, slices)
 
     print(markdown)
     if args.out:
