@@ -1,0 +1,731 @@
+{
+  "components": {
+    "schemas": {
+      "ChoiceAnswer": {
+        "additionalProperties": false,
+        "properties": {
+          "confidence": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence",
+            "type": "number"
+          },
+          "coverage_target": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Coverage Target"
+          },
+          "prediction_set": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prediction Set"
+          },
+          "probabilities": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Probabilities",
+            "type": "object"
+          },
+          "raw_probabilities": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "number"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Raw Probabilities"
+          },
+          "selected": {
+            "title": "Selected",
+            "type": "string"
+          },
+          "shortlisted_from": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shortlisted From"
+          },
+          "type": {
+            "const": "choice",
+            "default": "choice",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "selected",
+          "probabilities",
+          "confidence"
+        ],
+        "title": "ChoiceAnswer",
+        "type": "object"
+      },
+      "ChoiceQuestion": {
+        "additionalProperties": false,
+        "description": "Pick one option from a defined set. Relative: it settles *which*.",
+        "properties": {
+          "instructions": {
+            "maxLength": 32768,
+            "minLength": 1,
+            "title": "Instructions",
+            "type": "string"
+          },
+          "options": {
+            "items": {
+              "$ref": "#/components/schemas/OptionSpec"
+            },
+            "maxItems": 100000,
+            "minItems": 2,
+            "title": "Options",
+            "type": "array"
+          },
+          "type": {
+            "const": "choice",
+            "default": "choice",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "instructions",
+          "options"
+        ],
+        "title": "ChoiceQuestion",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "LevelSpec": {
+        "additionalProperties": false,
+        "description": "One level of a Score. Levels are ordered low to high as given.",
+        "properties": {
+          "criteria": {
+            "anyOf": [
+              {
+                "maxLength": 8192,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Criteria"
+          },
+          "name": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "LevelSpec",
+        "type": "object"
+      },
+      "NoulAnswer": {
+        "additionalProperties": false,
+        "description": "No confidence field, by design: for a binary question the probability\nalready carries everything a confidence statistic could summarise.",
+        "properties": {
+          "probability": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Probability",
+            "type": "number"
+          },
+          "raw_probability": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Raw Probability"
+          },
+          "type": {
+            "const": "noul",
+            "default": "noul",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "probability"
+        ],
+        "title": "NoulAnswer",
+        "type": "object"
+      },
+      "NoulQuestion": {
+        "additionalProperties": false,
+        "description": "A yes/no judgement against criteria. Absolute, and independent of every\nother question in the request.",
+        "properties": {
+          "instructions": {
+            "maxLength": 32768,
+            "minLength": 1,
+            "title": "Instructions",
+            "type": "string"
+          },
+          "type": {
+            "const": "noul",
+            "default": "noul",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "instructions"
+        ],
+        "title": "NoulQuestion",
+        "type": "object"
+      },
+      "OptionSpec": {
+        "additionalProperties": false,
+        "description": "One option of a Choice, with the criteria that select it.",
+        "properties": {
+          "criteria": {
+            "anyOf": [
+              {
+                "maxLength": 8192,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Criteria"
+          },
+          "name": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "OptionSpec",
+        "type": "object"
+      },
+      "RequestOptions": {
+        "additionalProperties": false,
+        "description": "Per-request serving knobs. All optional; all have serving-side defaults.",
+        "properties": {
+          "conformal_profile": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conformal Profile"
+          },
+          "escalate_below_confidence": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Escalate Below Confidence"
+          },
+          "include_raw_probabilities": {
+            "default": false,
+            "title": "Include Raw Probabilities",
+            "type": "boolean"
+          }
+        },
+        "title": "RequestOptions",
+        "type": "object"
+      },
+      "ScoreAnswer": {
+        "additionalProperties": false,
+        "properties": {
+          "confidence": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence",
+            "type": "number"
+          },
+          "coverage_target": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Coverage Target"
+          },
+          "prediction_set": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prediction Set"
+          },
+          "probabilities": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Probabilities",
+            "type": "object"
+          },
+          "raw_probabilities": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "number"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Raw Probabilities"
+          },
+          "score": {
+            "title": "Score",
+            "type": "number"
+          },
+          "type": {
+            "const": "score",
+            "default": "score",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "score",
+          "probabilities",
+          "confidence"
+        ],
+        "title": "ScoreAnswer",
+        "type": "object"
+      },
+      "ScoreQuestion": {
+        "additionalProperties": false,
+        "description": "Place the state on an ordered set of descriptive levels.\n\nNot a regression head: the model produces a distribution over the declared\nlevels and the reported score is its expectation.",
+        "properties": {
+          "instructions": {
+            "maxLength": 32768,
+            "minLength": 1,
+            "title": "Instructions",
+            "type": "string"
+          },
+          "levels": {
+            "items": {
+              "$ref": "#/components/schemas/LevelSpec"
+            },
+            "maxItems": 32,
+            "minItems": 2,
+            "title": "Levels",
+            "type": "array"
+          },
+          "type": {
+            "const": "score",
+            "default": "score",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "instructions",
+          "levels"
+        ],
+        "title": "ScoreQuestion",
+        "type": "object"
+      },
+      "SystemOneRequest": {
+        "additionalProperties": false,
+        "description": "State plus a map of typed questions, answered in a single model pass.",
+        "properties": {
+          "model": {
+            "default": "trigon-workhorse",
+            "maxLength": 128,
+            "title": "Model",
+            "type": "string"
+          },
+          "options": {
+            "$ref": "#/components/schemas/RequestOptions"
+          },
+          "questions": {
+            "additionalProperties": {
+              "discriminator": {
+                "mapping": {
+                  "choice": "#/components/schemas/ChoiceQuestion",
+                  "noul": "#/components/schemas/NoulQuestion",
+                  "score": "#/components/schemas/ScoreQuestion"
+                },
+                "propertyName": "type"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/ChoiceQuestion"
+                },
+                {
+                  "$ref": "#/components/schemas/ScoreQuestion"
+                },
+                {
+                  "$ref": "#/components/schemas/NoulQuestion"
+                }
+              ]
+            },
+            "maxProperties": 64,
+            "minProperties": 1,
+            "title": "Questions",
+            "type": "object"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "items": {},
+                "type": "array"
+              }
+            ],
+            "title": "State"
+          }
+        },
+        "required": [
+          "state",
+          "questions"
+        ],
+        "title": "SystemOneRequest",
+        "type": "object"
+      },
+      "SystemOneResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "answers": {
+            "additionalProperties": {
+              "discriminator": {
+                "mapping": {
+                  "choice": "#/components/schemas/ChoiceAnswer",
+                  "noul": "#/components/schemas/NoulAnswer",
+                  "score": "#/components/schemas/ScoreAnswer"
+                },
+                "propertyName": "type"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/ChoiceAnswer"
+                },
+                {
+                  "$ref": "#/components/schemas/ScoreAnswer"
+                },
+                {
+                  "$ref": "#/components/schemas/NoulAnswer"
+                }
+              ]
+            },
+            "title": "Answers",
+            "type": "object"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "tier": {
+            "default": "workhorse",
+            "title": "Tier",
+            "type": "string"
+          },
+          "timing": {
+            "$ref": "#/components/schemas/Timing"
+          },
+          "usage": {
+            "$ref": "#/components/schemas/Usage"
+          }
+        },
+        "required": [
+          "id",
+          "model",
+          "answers"
+        ],
+        "title": "SystemOneResponse",
+        "type": "object"
+      },
+      "Timing": {
+        "additionalProperties": false,
+        "properties": {
+          "compile_ms": {
+            "default": 0.0,
+            "title": "Compile Ms",
+            "type": "number"
+          },
+          "model_ms": {
+            "default": 0.0,
+            "title": "Model Ms",
+            "type": "number"
+          },
+          "total_ms": {
+            "default": 0.0,
+            "title": "Total Ms",
+            "type": "number"
+          }
+        },
+        "title": "Timing",
+        "type": "object"
+      },
+      "Usage": {
+        "additionalProperties": false,
+        "properties": {
+          "cached_schema_tokens": {
+            "default": 0,
+            "title": "Cached Schema Tokens",
+            "type": "integer"
+          },
+          "prefill_tokens": {
+            "default": 0,
+            "title": "Prefill Tokens",
+            "type": "integer"
+          },
+          "readout_tokens": {
+            "default": 0,
+            "title": "Readout Tokens",
+            "type": "integer"
+          },
+          "schema_tokens": {
+            "default": 0,
+            "title": "Schema Tokens",
+            "type": "integer"
+          },
+          "state_tokens": {
+            "default": 0,
+            "title": "State Tokens",
+            "type": "integer"
+          }
+        },
+        "title": "Usage",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "description": "Typed, calibrated decisions in one prefill-only forward pass.\n\nSend state plus a map of typed questions; get one typed answer per question,\neach a distribution over exactly the labels you declared. Answers cannot\nviolate the schema: the only vector the model produces is a softmax over your\noption set.",
+    "title": "Trigon System One API",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/healthz": {
+      "get": {
+        "operationId": "healthz_healthz_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Healthz Healthz Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Liveness and calibration status",
+        "tags": [
+          "ops"
+        ]
+      }
+    },
+    "/v1/models": {
+      "get": {
+        "operationId": "models_v1_models_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Models V1 Models Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Serving tiers and their versions",
+        "tags": [
+          "ops"
+        ]
+      }
+    },
+    "/v1/systemone": {
+      "post": {
+        "operationId": "systemone_v1_systemone_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SystemOneRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemOneResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Answer a map of typed questions about one state",
+        "tags": [
+          "inference"
+        ]
+      }
+    }
+  },
+  "tags": [
+    {
+      "description": "Typed decisions.",
+      "name": "inference"
+    },
+    {
+      "description": "Health and capability reporting.",
+      "name": "ops"
+    }
+  ]
+}

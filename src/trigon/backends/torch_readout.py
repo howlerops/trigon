@@ -1,0 +1,330 @@
+"""Reference implementation of the prefill-only readout architecture.
+
+This is the phase-1 spike made executable: one forward pass, no decode loop,
+every question answered in parallel, and the isolation rules enforced by an
+additive attention mask rather than by hoping the model behaves. It is small
+and untrained -- its logits mean nothing -- but its *structure* is the thing
+under test, and ``tests/test_independence.py`` uses it to prove the two claims
+the product rests on:
+
+* adding a question does not move any other question's logits, at all, to
+  floating-point equality;
+* the schema half of the sequence encodes identically regardless of state,
+  which is what makes it a cacheable cross-request KV prefix.
+
+Both claims are properties of the layout, so they hold for an untrained model
+exactly as they will for a trained one. Training changes the numbers; it cannot
+change which tokens a readout was allowed to see.
+
+One finding from building this that is easy to miss on paper: the mask alone
+does *not* buy independence. With ordinary sequence-global position encodings,
+inserting a question shifts every later token's position, so a question's
+hidden states move even though the mask never let it see the new question.
+Positions here are therefore **group-local** -- each schema block, the state,
+and each question's readout slots all start at position 0 -- and a learned
+segment-type embedding keeps the three kinds distinguishable despite the
+overlapping indices. Group-local positions are also what make a schema block's
+KV genuinely portable between requests, which is the whole point of caching it:
+a cached prefix computed at one offset is wrong at another.
+
+Heads, all categorical, none of them a regression:
+
+* Choice with ``READOUT_PER_OPTION``: one readout slot per option, seeded with
+  that option's mean input embedding so the slot knows which option it is, then
+  projected to a scalar logit.
+* Choice with ``DOT_PRODUCT`` and every Score: one readout slot for the whole
+  question, scored against the pooled encoder states of each option or level.
+  One slot regardless of cardinality -- this is what makes large option sets
+  affordable.
+* Noul: one readout slot, one linear logit.
+"""
+
+from __future__ import annotations
+
+import math
+import time
+
+try:  # pragma: no cover - exercised by the import error path only
+    import torch
+    from torch import nn
+except ModuleNotFoundError as exc:  # pragma: no cover
+    raise ModuleNotFoundError(
+        "the torch readout backend needs the 'train' extra: pip install 'trigon[train]'"
+    ) from exc
+
+from ..schema import (
+    CompiledRequest,
+    OptionScoring,
+    SchemaCompiler,
+    SegmentKind,
+    materialize_mask,
+)
+from ..schema.tokens import CallableEstimator
+from ..types import SystemOneRequest
+from .base import BackendOutput, QuestionOutput
+from .tokenizer import READOUT_ID, HashingTokenizer
+
+__all__ = ["PrefillOnlyModel", "ReadoutConfig", "TorchReadoutBackend"]
+
+
+class ReadoutConfig:
+    """Shape of the reference model. Defaults are spike-sized, not ship-sized."""
+
+    def __init__(
+        self,
+        vocab_size: int = 8192,
+        d_model: int = 128,
+        n_layers: int = 2,
+        n_heads: int = 4,
+        d_ff: int = 256,
+        dropout: float = 0.0,
+        max_levels: int = 32,
+    ) -> None:
+        if d_model % n_heads:
+            raise ValueError(f"d_model {d_model} must divide by n_heads {n_heads}")
+        self.vocab_size = vocab_size
+        self.d_model = d_model
+        self.n_layers = n_layers
+        self.n_heads = n_heads
+        self.d_ff = d_ff
+        self.dropout = dropout
+        self.max_levels = max_levels
+
+
+def _sinusoidal(length: int, d_model: int, device, dtype) -> torch.Tensor:
+    """Absolute sinusoidal positions -- no learned length ceiling to trip over."""
+    position = torch.arange(length, device=device, dtype=dtype).unsqueeze(1)
+    scale = torch.exp(
+        torch.arange(0, d_model, 2, device=device, dtype=dtype) * (-math.log(10000.0) / d_model)
+    )
+    pe = torch.zeros(length, d_model, device=device, dtype=dtype)
+    pe[:, 0::2] = torch.sin(position * scale)
+    pe[:, 1::2] = torch.cos(position * scale)
+    return pe
+
+
+class PrefillOnlyModel(nn.Module):
+    """A prefix-LM encoder with a caller-supplied attention mask.
+
+    Deliberately a plain ``nn.TransformerEncoder``: the novelty in this project
+    is the mask, the heads and the training objective, not the block.
+    """
+
+    def __init__(self, config: ReadoutConfig) -> None:
+        super().__init__()
+        self.config = config
+        self.embed = nn.Embedding(config.vocab_size, config.d_model)
+        # schema / state / readout. Positions restart per group, so without
+        # this the model cannot tell state token 3 from schema token 3.
+        self.segment_embed = nn.Embedding(3, config.d_model)
+        layer = nn.TransformerEncoderLayer(
+            d_model=config.d_model,
+            nhead=config.n_heads,
+            dim_feedforward=config.d_ff,
+            dropout=config.dropout,
+            batch_first=True,
+            norm_first=True,
+        )
+        self.encoder = nn.TransformerEncoder(
+            layer, num_layers=config.n_layers, enable_nested_tensor=False
+        )
+        self.norm = nn.LayerNorm(config.d_model)
+        # Choice with a slot per option, and Noul, both reduce one state to one
+        # logit; they use separate heads because the calibration targets differ.
+        self.choice_head = nn.Linear(config.d_model, 1)
+        self.noul_head = nn.Linear(config.d_model, 1)
+        # Projects a readout state before it is dotted with pooled member
+        # states, so the dot-product head is not forced to use raw geometry.
+        self.match_query = nn.Linear(config.d_model, config.d_model, bias=False)
+        self.match_key = nn.Linear(config.d_model, config.d_model, bias=False)
+
+    def forward(
+        self,
+        token_embeddings: torch.Tensor,
+        mask: torch.Tensor,
+        positions: torch.Tensor,
+        segment_types: torch.Tensor,
+    ) -> torch.Tensor:
+        """One forward pass.
+
+        ``token_embeddings`` (1, T, d); ``mask`` (T, T) boolean "may attend";
+        ``positions`` (T,) group-local indices; ``segment_types`` (T,) in
+        {0: schema, 1: state, 2: readout}.
+        """
+        table = _sinusoidal(
+            int(positions.max().item()) + 1,
+            self.config.d_model,
+            token_embeddings.device,
+            token_embeddings.dtype,
+        )
+        hidden = (
+            token_embeddings
+            + table[positions].unsqueeze(0)
+            + self.segment_embed(segment_types).unsqueeze(0)
+        )
+        # nn.TransformerEncoder takes True as "block this pair".
+        hidden = self.encoder(hidden, mask=~mask)
+        return self.norm(hidden)
+
+
+class TorchReadoutBackend:
+    """Runs a ``PrefillOnlyModel`` over a compiled request."""
+
+    def __init__(
+        self,
+        config: ReadoutConfig | None = None,
+        *,
+        model: PrefillOnlyModel | None = None,
+        tokenizer: HashingTokenizer | None = None,
+        version: str = "trigon-reference-0.1.0",
+        seed: int | None = 0,
+    ) -> None:
+        self.config = config or ReadoutConfig()
+        self.tokenizer = tokenizer or HashingTokenizer(self.config.vocab_size)
+        if seed is not None:
+            torch.manual_seed(seed)
+        self.model = model or PrefillOnlyModel(self.config)
+        self.model.eval()
+        self._version = version
+
+    @property
+    def model_version(self) -> str:
+        return self._version
+
+    @property
+    def estimator(self) -> CallableEstimator:
+        """Exact token counts, so compiled spans match the tensors exactly."""
+        return CallableEstimator(self.tokenizer.encode, exact=True)
+
+    def make_compiler(self, **kwargs) -> SchemaCompiler:
+        """A compiler wired to this backend's tokenizer."""
+        return SchemaCompiler(estimator=self.estimator, **kwargs)
+
+    # -- inference -------------------------------------------------------
+
+    @torch.no_grad()
+    def infer(self, compiled: CompiledRequest, request: SystemOneRequest) -> BackendOutput:
+        started = time.perf_counter()
+        embeddings, spans = self._embed(compiled)
+        mask = torch.tensor(materialize_mask(compiled), dtype=torch.bool)
+        if mask.shape[0] != embeddings.shape[1]:
+            raise ValueError(
+                f"mask is {mask.shape[0]} tokens but the sequence is "
+                f"{embeddings.shape[1]}; the compiler's estimator must be the "
+                f"backend's tokenizer"
+            )
+        hidden = self.model(embeddings, mask, spans.positions(), spans.segment_types())[0]
+
+        outputs: dict[str, QuestionOutput] = {}
+        for compiled_q in compiled.schema.questions:
+            qid = compiled_q.question_id
+            readouts = hidden[spans.readout[qid]]
+            if compiled_q.kind == "noul":
+                logits = (float(self.model.noul_head(readouts[0]).squeeze(-1)),)
+            elif (
+                compiled_q.kind == "choice"
+                and compiled_q.option_scoring is OptionScoring.READOUT_PER_OPTION
+            ):
+                logits = tuple(
+                    float(x) for x in self.model.choice_head(readouts).squeeze(-1).tolist()
+                )
+            else:
+                members = torch.stack([hidden[idx].mean(dim=0) for idx in spans.members[qid]])
+                query = self.model.match_query(readouts[0])
+                keys = self.model.match_key(members)
+                scale = math.sqrt(self.config.d_model)
+                logits = tuple(float(x) for x in (keys @ query / scale).tolist())
+            outputs[qid] = QuestionOutput(question_id=qid, kind=compiled_q.kind, logits=logits)
+
+        return BackendOutput(
+            outputs=outputs,
+            model_version=self._version,
+            model_ms=(time.perf_counter() - started) * 1000.0,
+            diagnostics={"sequence_tokens": int(embeddings.shape[1])},
+        )
+
+    # -- sequence construction -------------------------------------------
+
+    def _embed(self, compiled: CompiledRequest) -> tuple[torch.Tensor, _Spans]:
+        """Build the input embeddings and record where everything landed."""
+        rows: list[torch.Tensor] = []
+        spans = _Spans()
+        cursor = 0
+        table = self.model.embed
+        member_embeddings: dict[tuple[str, int], torch.Tensor] = {}
+        # Position counters restart per isolation group -- see the module
+        # docstring for why this is load-bearing rather than cosmetic.
+        group_position: dict[str, int] = {}
+
+        for segment in compiled.segments:
+            group = segment.group
+            start = group_position.get(group, 0)
+            if segment.kind is SegmentKind.READOUT:
+                assert segment.question_id is not None
+                slot = table.weight[READOUT_ID]
+                if segment.member_index is not None:
+                    # Seed a per-option slot with that option's own content, so
+                    # the slot carries which option it is answering for.
+                    seed = member_embeddings.get((segment.question_id, segment.member_index))
+                    if seed is not None:
+                        slot = slot + seed
+                rows.append(slot.unsqueeze(0))
+                spans.readout.setdefault(segment.question_id, []).append(cursor)
+                spans.record(start, _SEGMENT_TYPE[segment.kind])
+                group_position[group] = start + 1
+                cursor += 1
+                continue
+
+            ids = self.tokenizer.encode(segment.text)
+            if len(ids) != segment.tokens:
+                raise ValueError(
+                    f"segment {segment.kind.value} compiled to {segment.tokens} tokens "
+                    f"but tokenizes to {len(ids)}"
+                )
+            for offset in range(len(ids)):
+                spans.record(start + offset, _SEGMENT_TYPE[segment.kind])
+            group_position[group] = start + len(ids)
+            if ids:
+                vectors = table(torch.tensor(ids, dtype=torch.long))
+                rows.append(vectors)
+                if segment.member_index is not None and segment.question_id is not None:
+                    member_embeddings[(segment.question_id, segment.member_index)] = vectors.mean(
+                        dim=0
+                    ).detach()
+                    spans.members.setdefault(segment.question_id, []).append(
+                        list(range(cursor, cursor + len(ids)))
+                    )
+            cursor += len(ids)
+
+        if not rows:
+            raise ValueError("compiled request produced an empty sequence")
+        return torch.cat(rows, dim=0).unsqueeze(0), spans
+
+
+_SEGMENT_TYPE = {
+    SegmentKind.SCHEMA_QUESTION: 0,
+    SegmentKind.SCHEMA_OPTION: 0,
+    SegmentKind.SCHEMA_LEVEL: 0,
+    SegmentKind.STATE: 1,
+    SegmentKind.READOUT: 2,
+}
+
+
+class _Spans:
+    """Where everything landed, so the heads can find their states."""
+
+    def __init__(self) -> None:
+        self.readout: dict[str, list[int]] = {}
+        self.members: dict[str, list[list[int]]] = {}
+        self._positions: list[int] = []
+        self._types: list[int] = []
+
+    def record(self, position: int, segment_type: int) -> None:
+        self._positions.append(position)
+        self._types.append(segment_type)
+
+    def positions(self) -> torch.Tensor:
+        return torch.tensor(self._positions, dtype=torch.long)
+
+    def segment_types(self) -> torch.Tensor:
+        return torch.tensor(self._types, dtype=torch.long)

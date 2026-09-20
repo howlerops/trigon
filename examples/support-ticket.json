@@ -1,0 +1,41 @@
+{
+  "state": {
+    "channel": "email",
+    "message": "I was charged twice for one order and my card was declined when I tried again. This is the third time this month.",
+    "plan": "pro",
+    "open_tickets": 4
+  },
+  "questions": {
+    "intent": {
+      "type": "choice",
+      "instructions": "Which team should handle this ticket?",
+      "options": [
+        { "name": "billing", "criteria": "a charge, invoice, refund or double payment" },
+        { "name": "shipping", "criteria": "delivery, tracking or an address change" },
+        { "name": "account", "criteria": "sign-in, password or profile settings" },
+        { "name": "hardware", "criteria": "a physical device that is broken or faulty" }
+      ]
+    },
+    "frustration": {
+      "type": "score",
+      "instructions": "How frustrated does the customer sound?",
+      "levels": [
+        { "name": "calm", "value": 1.0, "criteria": "neutral or friendly tone" },
+        { "name": "annoyed", "value": 2.0, "criteria": "mild irritation" },
+        { "name": "frustrated", "value": 3.0, "criteria": "clear dissatisfaction, repeated problems" },
+        { "name": "angry", "value": 4.0, "criteria": "hostile language or threats to leave" }
+      ]
+    },
+    "needs_human": {
+      "type": "noul",
+      "instructions": "Does this ticket need a human agent within the hour?"
+    },
+    "is_refund_request": {
+      "type": "noul",
+      "instructions": "Is the customer asking for money back?"
+    }
+  },
+  "options": {
+    "include_raw_probabilities": true
+  }
+}

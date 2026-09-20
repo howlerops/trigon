@@ -1,0 +1,148 @@
+"""Layout, cache keys, budgets and the block mask."""
+
+from __future__ import annotations
+
+import pytest
+
+from trigon.limits import Budget
+from trigon.schema import (
+    OptionScoring,
+    SchemaCompiler,
+    SchemaTooLarge,
+    SegmentKind,
+    compile_request,
+    compile_schema,
+    materialize_mask,
+)
+from trigon.types import ChoiceQuestion, NoulQuestion, ScoreQuestion, SystemOneRequest
+
+
+def _request(**questions) -> SystemOneRequest:
+    return SystemOneRequest(state="a customer message", questions=questions)
+
+
+def test_schema_hash_ignores_question_map_order():
+    a = ChoiceQuestion(instructions="pick", options=[{"name": "x"}, {"name": "y"}])
+    b = NoulQuestion(instructions="ok?")
+    assert (
+        compile_schema({"a": a, "b": b}).schema_hash == compile_schema({"b": b, "a": a}).schema_hash
+    )
+
+
+def test_schema_hash_changes_with_content():
+    a = ChoiceQuestion(instructions="pick", options=[{"name": "x"}, {"name": "y"}])
+    b = ChoiceQuestion(instructions="pick", options=[{"name": "x"}, {"name": "z"}])
+    assert compile_schema({"q": a}).schema_hash != compile_schema({"q": b}).schema_hash
+
+
+def test_per_question_hash_is_reusable_across_requests():
+    """The point of per-question hashes: the same question in a different
+    request must hit the same cache entry."""
+    shared = ChoiceQuestion(instructions="pick", options=[{"name": "x"}, {"name": "y"}])
+    alone = compile_schema({"q": shared}).question("q")
+    with_others = compile_schema({"q": shared, "other": NoulQuestion(instructions="ok?")}).question(
+        "q"
+    )
+    assert alone.schema_hash == with_others.schema_hash
+
+
+def test_layout_is_schema_then_state_then_readouts():
+    compiled = compile_request(_request(q=NoulQuestion(instructions="ok?")))
+    kinds = [s.kind for s in compiled.segments]
+    assert kinds[0] is SegmentKind.SCHEMA_QUESTION
+    assert kinds[-1] is SegmentKind.READOUT
+    assert kinds.index(SegmentKind.STATE) < kinds.index(SegmentKind.READOUT)
+
+
+def test_readouts_cannot_see_each_other():
+    compiled = compile_request(
+        _request(a=NoulQuestion(instructions="a?"), b=NoulQuestion(instructions="b?"))
+    )
+    plan = compiled.attention
+    assert not plan.can_attend("readout:a", "readout:b")
+    assert not plan.can_attend("readout:a", "schema:b")
+    assert plan.can_attend("readout:a", "schema:a")
+    assert plan.can_attend("readout:a", "state")
+
+
+def test_state_does_not_see_the_schema_by_default():
+    """This is what makes per-question independence exact -- see the compiler
+    docstring."""
+    compiled = compile_request(_request(a=NoulQuestion(instructions="a?")))
+    assert not compiled.attention.can_attend("state", "schema:a")
+
+
+def test_state_can_see_the_schema_when_the_ablation_flag_is_set():
+    compiler = SchemaCompiler(state_attends_to_schema=True)
+    compiled = compiler.compile_request(_request(a=NoulQuestion(instructions="a?")))
+    assert compiled.attention.can_attend("state", "schema:a")
+
+
+def test_materialized_mask_matches_the_group_plan():
+    compiled = compile_request(
+        _request(a=NoulQuestion(instructions="a?"), b=NoulQuestion(instructions="b?"))
+    )
+    mask = materialize_mask(compiled)
+    owners = [s.group for s in compiled.segments for _ in range(s.tokens)]
+    assert len(mask) == len(owners)
+    for i, query in enumerate(owners):
+        for j, key in enumerate(owners):
+            assert mask[i][j] is compiled.attention.can_attend(query, key)
+
+
+def test_causal_fallback_masks_the_future():
+    compiler = SchemaCompiler(bidirectional=False)
+    compiled = compiler.compile_request(_request(a=NoulQuestion(instructions="a?")))
+    mask = materialize_mask(compiled)
+    for i, row in enumerate(mask):
+        assert not any(row[i + 1 :])
+
+
+def test_option_scoring_switches_to_dot_product_past_the_crossover():
+    small = compile_schema(
+        {"q": ChoiceQuestion(instructions="pick", options=[{"name": str(i)} for i in range(4)])}
+    ).question("q")
+    large = compile_schema(
+        {"q": ChoiceQuestion(instructions="pick", options=[{"name": str(i)} for i in range(200)])}
+    ).question("q")
+    assert small.option_scoring is OptionScoring.READOUT_PER_OPTION
+    assert small.readout_slots == 4
+    assert large.option_scoring is OptionScoring.DOT_PRODUCT
+    assert large.readout_slots == 1
+
+
+def test_oversized_schema_is_rejected_with_an_actionable_message():
+    compiler = SchemaCompiler(
+        budget=Budget(schema_tokens=32, state_tokens=32, readout_tokens=8, context_tokens=128)
+    )
+    question = ChoiceQuestion(
+        instructions="pick", options=[{"name": f"option_number_{i}"} for i in range(50)]
+    )
+    with pytest.raises(SchemaTooLarge, match="schema budget"):
+        compiler.compile_schema({"q": question})
+
+
+def test_oversized_state_is_rejected():
+    compiler = SchemaCompiler(budget=Budget(state_tokens=8))
+    with pytest.raises(SchemaTooLarge, match="state budget"):
+        compiler.compile_request(
+            SystemOneRequest(state="word " * 500, questions={"q": NoulQuestion(instructions="ok?")})
+        )
+
+
+def test_json_state_renders_deterministically():
+    a = compile_request(
+        SystemOneRequest(state={"b": 2, "a": 1}, questions={"q": NoulQuestion(instructions="ok?")})
+    )
+    b = compile_request(
+        SystemOneRequest(state={"a": 1, "b": 2}, questions={"q": NoulQuestion(instructions="ok?")})
+    )
+    assert [s.text for s in a.segments] == [s.text for s in b.segments]
+
+
+def test_score_always_reads_out_from_one_slot():
+    compiled = compile_schema(
+        {"q": ScoreQuestion(instructions="rate", levels=[{"name": str(i)} for i in range(10)])}
+    ).question("q")
+    assert compiled.readout_slots == 1
+    assert compiled.cardinality == 10
