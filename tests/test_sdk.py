@@ -180,3 +180,87 @@ def test_the_generator_is_importable_without_running_it():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     assert callable(module.render)
+
+
+# -- TypeScript --------------------------------------------------------------
+
+TS = ROOT / "sdk" / "typescript"
+
+
+def _node() -> str | None:
+    import shutil
+
+    return shutil.which("node")
+
+
+def test_the_typescript_client_typechecks_under_strict_mode():
+    """It is generated, so nobody reads it — the compiler is the review.
+    Strict mode with exactOptionalPropertyTypes caught a real bug the first
+    time: `body: undefined` is not an absent key, and RequestInit refuses it.
+    """
+    if _node() is None:
+        pytest.skip("node is not installed")
+    if not (TS / "node_modules").exists():
+        pytest.skip("run `npm install` in sdk/typescript to typecheck")
+    result = subprocess.run(
+        [str(TS / "node_modules" / ".bin" / "tsc"), "--noEmit"],
+        cwd=TS,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_the_typescript_client_answers_against_a_live_gateway():
+    """Typechecking proves nothing about the server. This starts the real
+    gateway and drives it from node."""
+    if _node() is None:
+        pytest.skip("node is not installed")
+
+    import threading
+    import time
+
+    import uvicorn
+
+    app = build_app(ServerConfig(backend="lexical"))
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=8933, log_level="error"))
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    try:
+        deadline = time.time() + 15
+        while not server.started and time.time() < deadline:
+            time.sleep(0.05)
+        assert server.started, "the gateway did not come up"
+
+        result = subprocess.run(
+            [
+                _node(),
+                "--experimental-strip-types",
+                str(TS / "smoke.mjs"),
+                "http://127.0.0.1:8933",
+            ],
+            cwd=TS,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    finally:
+        server.should_exit = True
+        thread.join(timeout=10)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "confidence field present: false" in result.stdout
+    assert "bad request -> 422" in result.stdout
+
+
+def test_both_sdks_describe_the_same_contract_version():
+    source = (TS / "src" / "generated.ts").read_text()
+    assert f'CONTRACT_VERSION = "{trigon_client.CONTRACT_VERSION}"' in source
+
+
+def test_the_typescript_client_has_no_runtime_dependencies():
+    import json
+
+    manifest = json.loads((TS / "package.json").read_text())
+    assert not manifest.get("dependencies"), manifest.get("dependencies")
