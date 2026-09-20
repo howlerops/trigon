@@ -26,15 +26,22 @@ jobs:
           pip install torch --index-url https://download.pytorch.org/whl/cpu
           pip install -e ".[dev,server,llm]"
       - name: Lint
-        run: ruff check src tests scripts
+        run: ruff check src tests scripts sdk
       - name: Format check
-        run: ruff format --check src tests scripts
+        run: ruff format --check src tests scripts sdk
       - name: Test
         run: pytest -q
       - name: OpenAPI spec is current
         run: |
           python scripts/export_openapi.py
           git diff --exit-code spec/openapi.json
+      - name: Generated artifacts are current
+        # Each is generated from something else in the tree, so a change that
+        # is not regenerated has to fail in the same commit rather than later.
+        run: |
+          python scripts/generate_sdk.py --check
+          python scripts/attention_table.py --write
+          git diff --exit-code docs/architecture.md
 
   evals:
     # The eval harness is the durable asset, so it runs on every change. The

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import pathlib
 import re
+import sys
 
 import pytest
 
@@ -71,3 +72,24 @@ def test_every_documented_trigon_command_exists(doc):
             }
             unknown = [f for f in flags if f not in known]
             assert not unknown, f"{doc.name}: 'trigon {name}' has no {unknown}"
+
+
+def test_the_cookbook_runs():
+    """A worked example that has stopped working is worse than none."""
+    import subprocess
+
+    script = README.parent / "examples" / "triage_cookbook.py"
+    result = subprocess.run(
+        [sys.executable, str(script)],
+        capture_output=True,
+        text=True,
+        cwd=README.parent,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    out = result.stdout
+    # The four things it exists to demonstrate.
+    assert "tokens, one pass" in out
+    assert "held for a human" in out
+    assert "adding a fifth question moved the other answers: False" in out
+    assert "out of pocket" in out
