@@ -466,6 +466,30 @@ The build plan's release gates were ECE-only. They would have passed this
 model. Any future gate set has to keep a term that a state-ignoring model
 fails.
 
+**What the gate as built does not catch.** It pools every question, so it
+rejects a model that ignores the state *everywhere* and passes one that ignores
+it almost everywhere. The certified run is the demonstration — per question,
+against each question's own marginal predictor:
+
+| Question | Accuracy | Marginal predictor |
+| --- | ---: | ---: |
+| `plan` (copy a value from the state) | 0.490 | 0.253 |
+| `at_risk` (conjunction over two fields) | 0.650 | 0.667 |
+| `size` (threshold on a number) | 0.237 | 0.257 |
+
+One question learned, two answered with a near-constant that lands below
+chance, and the pooled lift is still +0.0639 — comfortably over the 0.05 limit.
+The gate is doing its job, which is to floor the fully degenerate case; it is
+just a lower bar than the single pooled number makes it look. Reading it as an
+accuracy bar is the mistake it was introduced to prevent, one level up.
+
+The cheap fix when it matters is to gate per question or per slice rather than
+on the pooled figure — `slice_reports` already carries the machinery, and the
+run above shows the breakdown is worth printing. It is not gated on today
+because at a 128-wide two-layer spike every per-question gate would fail and
+the signal would be noise about model capacity rather than about the gate.
+Phase 1, with a real backbone, is where that stops being true.
+
 Worth noting what temperature scaling did here: almost nothing (0.0112 →
 0.0111). That is correct behaviour, not a failure — the model was already
 near-calibrated, and a temperature cannot make a model use its input. Post-hoc

@@ -202,7 +202,7 @@ gate.**
 | Lift | **+0.0639** |
 | ECE | 0.0111 |
 | Adaptive ECE | 0.0158 |
-| Noise floor (p95) | 0.0080 |
+| Noise floor (p95) | 0.0084 |
 | Brier | 0.5947 |
 
 Every ECE gate passed. The reliability bins aligned to within 0.024, and the
