@@ -392,7 +392,17 @@ class TorchReadoutBackend:
                 out[qid] = self.model.choice_head(readouts).squeeze(-1)
             else:
                 members = torch.stack([hidden[idx].mean(dim=0) for idx in spans.members[qid]])
-                if self.config.match_residual:
+                # Choice only. The residual was designed and measured for the
+                # dot-product *option* head, where the failure was that an
+                # option's identity did not survive the encoder. A Score's
+                # members are ordered levels and share the same code path by
+                # accident of implementation, not because the mechanism
+                # applies -- and applying it there regressed the reference run
+                # from closing 20% of the gap to Bayes to closing 3%, on a
+                # `readout_per_option` run where the Score head was the only
+                # thing the flag could touch. Measure it on Score before
+                # extending it there.
+                if self.config.match_residual and compiled_q.kind == "choice":
                     # Carry the option's own input embedding past the encoder,
                     # so which option this is survives layer norm rather than
                     # having to be rediscovered from a smoothed hidden state.

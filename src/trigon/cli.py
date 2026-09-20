@@ -201,6 +201,7 @@ def cmd_train(args: argparse.Namespace) -> int:
             accumulate=args.accumulate,
             seed=args.seed,
             log_every=args.log_every,
+            validation_fraction=args.validation_fraction,
         ),
         compiler=compiler,
     )
@@ -275,6 +276,11 @@ def _training_section(report, args) -> str:
         f"--floor-trials {args.floor_trials} --option-scoring {args.option_scoring}"
         + (" --match-normalize" if args.match_normalize else "")
         + ("" if args.match_residual else " --no-match-residual")
+        + (
+            ""
+            if args.validation_fraction == 0.1
+            else f" --validation-fraction {args.validation_fraction}"
+        )
         + (f" --tokenizer {args.tokenizer}" if args.tokenizer != "bpe" else "")
     )
     lines = [
@@ -502,6 +508,12 @@ def build_parser() -> argparse.ArgumentParser:
     tr.add_argument("--layers", type=int, default=3)
     tr.add_argument("--seed", type=int, default=0)
     tr.add_argument("--floor-trials", type=int, default=100)
+    tr.add_argument(
+        "--validation-fraction",
+        type=float,
+        default=0.1,
+        help="share of cases held out to pick which epoch to keep; 0 keeps the last",
+    )
     tr.add_argument(
         "--tokenizer",
         default="bpe",

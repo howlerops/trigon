@@ -407,3 +407,56 @@ def test_the_holdout_is_the_same_cases_on_a_rerun():
         return [c.case_id for c in shuffled[:cut]]
 
     assert holdout_ids() == holdout_ids()
+
+
+def test_the_residual_never_touches_a_score_head():
+    """`match_residual` was designed and measured for the dot-product *option*
+    head. Score shares that code path by accident of implementation, and
+    applying it there regressed the reference run from closing 20% of the gap
+    to Bayes to closing 3%."""
+    from trigon.backends.torch_readout import ReadoutConfig, TorchReadoutBackend
+    from trigon.types import ScoreQuestion, SystemOneRequest
+
+    request = SystemOneRequest(
+        state="the customer is mildly annoyed",
+        questions={
+            "severity": ScoreQuestion(
+                instructions="How severe?",
+                levels=[{"name": "low"}, {"name": "mid"}, {"name": "high"}],
+            )
+        },
+    )
+
+    logits = {}
+    for residual in (True, False):
+        backend = TorchReadoutBackend(ReadoutConfig(match_residual=residual), seed=0)
+        compiled = backend.make_compiler().compile_request(request)
+        with torch.no_grad():
+            logits[residual] = backend.logits(compiled, request)[0]["severity"]
+    assert torch.equal(logits[True], logits[False])
+
+
+def test_the_residual_still_changes_a_dot_product_choice():
+    """The other half: it must still do the thing it was measured doing."""
+    from trigon.backends.torch_readout import ReadoutConfig, TorchReadoutBackend
+    from trigon.schema import OptionScoring
+    from trigon.types import ChoiceQuestion, SystemOneRequest
+
+    request = SystemOneRequest(
+        state="the card payment failed",
+        questions={
+            "route": ChoiceQuestion(
+                instructions="Route this.",
+                options=[{"name": "billing"}, {"name": "shipping"}, {"name": "account"}],
+            )
+        },
+    )
+
+    logits = {}
+    for residual in (True, False):
+        backend = TorchReadoutBackend(ReadoutConfig(match_residual=residual), seed=0)
+        compiler = backend.make_compiler(option_scoring=OptionScoring.DOT_PRODUCT)
+        compiled = compiler.compile_request(request)
+        with torch.no_grad():
+            logits[residual] = backend.logits(compiled, request)[0]["route"]
+    assert not torch.equal(logits[True], logits[False])
