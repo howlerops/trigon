@@ -184,10 +184,18 @@ about it, and each changed the plan:
   bounds the whole request *and* state-plus-longest-question separately. The
   plan's flat 32k assumption got both the total and the binding constraint
   wrong.
-- **Dot-product option scoring did not learn at all.** The plan's phase-1
-  ablation: a readout slot per option reached 45.6% accuracy; the dot-product
-  head — the one that makes huge option sets affordable — finished at 38.9%,
-  *below* the 39.2% marginal predictor, while still passing every ECE gate.
+- **Dot-product option scoring did not learn — and the reason was findable.**
+  The plan's phase-1 ablation, run in phase 0: the head that makes huge option
+  sets affordable finished at 38.9%, *below* the 39.2% marginal predictor,
+  while passing every ECE gate. Instrumenting it showed why — training
+  *collapsed* the option keys onto each other, from a mean pairwise cosine of
+  +0.47 at initialisation to +0.997, and the query froze to a constant across
+  every input. Adding each option's own input embedding back into its key
+  fixes it: **0.847 on the question either head can learn, against the
+  per-option head's 0.457**, at one readout slot instead of *n*. The repair
+  that was *expected* to work — CLIP-style cosine with a learnable temperature
+  — does nothing at all. `docs/decisions.md` has the arms and what the result
+  does not establish.
 
 ## When the probabilities cannot be trusted in your domain
 

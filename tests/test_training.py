@@ -143,3 +143,54 @@ def test_a_reloaded_model_serves_through_the_engine(tmp_path):
     response = engine.answer(synthetic_outcome_cases(n=1, seed=3)[0].request)
     assert set(response.answers) == {"plan", "at_risk", "size"}
     assert sum(response.answers["plan"].probabilities.values()) == pytest.approx(1.0)
+
+
+def test_a_checkpoint_written_before_a_parameter_existed_still_loads(tmp_path):
+    """Adding `match_log_scale` broke loading every run saved before it — the
+    certified model included. New parameters take their initialised value;
+    anything else that does not match still fails loudly."""
+    from trigon.backends.torch_readout import TorchReadoutBackend
+
+    path = tmp_path / "old.pt"
+    TorchReadoutBackend(seed=0).save(path)
+
+    payload = torch.load(path, map_location="cpu", weights_only=False)
+    del payload["state_dict"]["match_log_scale"]
+    torch.save(payload, path)
+
+    reloaded = TorchReadoutBackend.load(path)
+    expected = TorchReadoutBackend(seed=0).model.match_log_scale
+    assert torch.equal(reloaded.model.match_log_scale, expected)
+
+
+def test_a_checkpoint_with_a_mismatched_parameter_still_fails(tmp_path):
+    from trigon.backends.torch_readout import TorchReadoutBackend
+
+    path = tmp_path / "broken.pt"
+    TorchReadoutBackend(seed=0).save(path)
+    payload = torch.load(path, map_location="cpu", weights_only=False)
+    payload["state_dict"]["noul_head.weight"] = torch.zeros(1, 3)
+    torch.save(payload, path)
+
+    with pytest.raises(RuntimeError, match="size mismatch|shape"):
+        TorchReadoutBackend.load(path)
+
+
+def test_a_checkpoint_keeps_the_head_it_was_trained_with(tmp_path):
+    """`match_residual` defaults on for new models. A run saved before it did
+    must not silently acquire it — that would change the arithmetic of every
+    model on disk and stop a committed run reproducing its own report."""
+    from trigon.backends.torch_readout import ReadoutConfig, TorchReadoutBackend
+
+    assert ReadoutConfig().match_residual is True
+
+    path = tmp_path / "before.pt"
+    TorchReadoutBackend(ReadoutConfig(match_residual=False), seed=0).save(path)
+    payload = torch.load(path, map_location="cpu", weights_only=False)
+    del payload["config"]["match_residual"]
+    del payload["config"]["match_normalize"]
+    torch.save(payload, path)
+
+    reloaded = TorchReadoutBackend.load(path)
+    assert reloaded.config.match_residual is False
+    assert reloaded.config.match_normalize is False

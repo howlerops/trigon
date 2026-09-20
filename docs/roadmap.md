@@ -72,13 +72,17 @@ was added because of it, and no future gate set may drop a term that fails a
 model which ignores its input. This is the finding that most changes what
 "calibration is the product" is allowed to mean.
 
-**Dot-product option scoring did not learn.** The plan scheduled the crossover
-between a readout slot per option and one slot dotted with pooled option states
-as a phase-1 ablation. Run early, the dot-product head finished below the
-marginal predictor while the per-option head reached 0.4561 on identical data
-and seeds. It is the head that makes large option sets affordable at all, so
-this is phase 1's largest technical risk rather than a preference between two
-working designs.
+**Dot-product option scoring did not learn, and the fix was one line.** The
+plan scheduled the crossover between a readout slot per option and one slot
+dotted with pooled option states as a phase-1 ablation between two designs
+assumed to work. Run early, the dot-product head finished *below* the marginal
+predictor. Instrumenting it found the mechanism — training collapses the option
+keys onto each other until the head cannot express a preference, and the query
+freezes — and adding each option's input embedding back into its key reverses
+it completely: the dot-product head now beats the per-option head, 0.847
+against 0.457, at one readout slot instead of *n*. This was phase 1's largest
+technical risk; it is retired as a blocker and carried forward as a measurement
+to repeat on the real backbone.
 
 **The cardinality stress test has no licensed corpus.** UFET is unusable (no
 licence; LDC-derived), and nothing permissive exists above 151 classes. The

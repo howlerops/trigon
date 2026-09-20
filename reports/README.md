@@ -11,7 +11,8 @@ a checkpoint. No weights are committed.
 | File | What it is |
 | --- | --- |
 | `reference-run.md` | the reference model: train, calibrate, gate |
-| `reference-run-dotproduct.md` | the same run with dot-product option scoring — the phase-1 ablation |
+| `reference-run-dotproduct.md` | the same run with dot-product option scoring — **failed**, and the reason is in `docs/decisions.md` |
+| `ablations/dotproduct-*.md` | the three repair arms for that failure: `residual` fixes it, `normalize` does nothing, `both` is worse than `residual` alone |
 | `served-model.md` | a smaller run (1,200 cases, 5 epochs) that **failed two gates** |
 
 Sidecars beside each report carry the fitted temperatures and the loss curve in
@@ -105,3 +106,27 @@ one of three and is worse than chance on the other two still clears it at
 +0.0639. The gate is a floor against the fully degenerate case, not an accuracy
 target, and this run is the reminder that clearing it is a low bar: the real
 accuracy bar is the workflow suite.
+
+## The dot-product repair arms
+
+`ablations/` holds the three arms that answered why the dot-product head failed.
+Same data, seeds and hyperparameters as `reference-run-dotproduct.md`; held-out
+accuracy per question, against that question's own marginal predictor:
+
+| Arm | `plan` (0.253) | `at_risk` (0.667) | `size` (0.257) | Pooled lift | Gates |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Readout slot per option | 0.457 | 0.662 | 0.254 | +0.0673 | 5/5 |
+| Dot product, as first shipped | 0.254 | 0.662 | 0.254 | −0.0002 | blocked |
+| `dotproduct-normalize` | 0.254 | 0.662 | 0.254 | −0.0002 | blocked |
+| `dotproduct-residual` | **0.847** | 0.662 | 0.251 | **+0.1962** | 5/5 |
+| `dotproduct-both` | 0.457 | 0.662 | 0.254 | +0.0673 | 5/5 |
+
+`match_residual` — adding each option's own input embedding to its key — is now
+the default, and it makes the one-slot head beat the *n*-slot head on the one
+question either of them learns. `match_normalize` does nothing alone and
+cancels most of the gain when combined; the mechanism and the hypothesis that
+survives are in `docs/decisions.md`.
+
+Read the flat columns honestly: **`at_risk` and `size` are unlearned in every
+arm**, sitting at their marginals. No arm passes the per-question gate, which
+is why that gate is advisory. This fixes a head, not a model.

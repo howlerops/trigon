@@ -98,7 +98,7 @@ class ReadoutConfig:
         dropout: float = 0.0,
         max_levels: int = 32,
         match_normalize: bool = False,
-        match_residual: bool = False,
+        match_residual: bool = True,
     ) -> None:
         if d_model % n_heads:
             raise ValueError(f"d_model {d_model} must divide by n_heads {n_heads}")
@@ -109,8 +109,11 @@ class ReadoutConfig:
         self.d_ff = d_ff
         self.dropout = dropout
         self.max_levels = max_levels
-        # Two independent repairs for the dot-product head's collapse to the
-        # marginal; see the module docstring and docs/decisions.md.
+        # ``match_residual`` defaults ON: without it the dot-product head
+        # collapses to the marginal and answers 0.254 against a 0.253 marginal
+        # predictor; with it, 0.847. ``match_normalize`` defaults OFF: it does
+        # nothing alone and cancels most of the residual's gain. Both measured
+        # once, at spike scale -- see docs/decisions.md.
         self.match_normalize = match_normalize
         self.match_residual = match_residual
 
@@ -281,9 +284,27 @@ class TorchReadoutBackend:
     def load(cls, path: str | Path, *, version: str | None = None) -> TorchReadoutBackend:
         """Rebuild a backend from a checkpoint written by ``save``."""
         payload = torch.load(Path(path), map_location="cpu", weights_only=False)
-        config = ReadoutConfig(**payload["config"])
+        stored = dict(payload["config"])
+        # A flag absent from a checkpoint means "trained before this flag
+        # existed", which is False -- never the current constructor default.
+        # Otherwise flipping a default silently changes the arithmetic of every
+        # model already on disk, and a committed run stops reproducing its own
+        # report.
+        for flag in ("match_normalize", "match_residual"):
+            stored.setdefault(flag, False)
+        config = ReadoutConfig(**stored)
         backend = cls(config, version=version or payload.get("version", TRAINED_VERSION_PREFIX))
-        backend.model.load_state_dict(payload["state_dict"])
+
+        # A checkpoint written before a parameter existed is still a valid
+        # checkpoint: adding `match_log_scale` broke loading every run saved
+        # before it, the certified model included. Missing parameters take
+        # their freshly-initialised value; everything else still has to match
+        # exactly, so a truncated or mismatched checkpoint fails as loudly as
+        # before rather than loading as a half-random model.
+        state = dict(payload["state_dict"])
+        for name, value in backend.model.state_dict().items():
+            state.setdefault(name, value)
+        backend.model.load_state_dict(state)
         backend.model.eval()
         if version is None:
             # An unfingerprinted checkpoint -- written before the weights were

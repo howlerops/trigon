@@ -514,37 +514,81 @@ Worth noting what temperature scaling did here: almost nothing (0.0112 →
 near-calibrated, and a temperature cannot make a model use its input. Post-hoc
 calibration fixes the shape of a distribution, never what it is conditioned on.
 
-### The dot-product option head did not learn
+### The dot-product option head did not learn, and now does
 
 The plan scheduled the Choice crossover — a readout slot per option below 64,
 one slot dotted with pooled option states above it — as a phase-1 ablation
-between two designs assumed to work. Running it in phase 0 instead, on
-identical data, seeds and hyperparameters, the two arms did not merely differ:
+between two designs assumed to work. Run in phase 0 instead, the dot-product
+arm scored **0.3887 against a 0.3922 marginal predictor**: worse than ignoring
+the state, while passing every calibration gate. That made it phase 1's
+largest technical risk, because it is the head that makes large option sets
+affordable at all — one readout slot at any cardinality — and
+`READOUT_BUDGET_TOKENS` and `MAX_QUESTIONS_PER_REQUEST` are sized on the
+assumption that it works.
 
-| Arm | Accuracy | ECE | Adaptive ECE | Verdict |
-| --- | ---: | ---: | ---: | --- |
-| Readout slot per option | 0.4561 | 0.0111 | 0.0158 | all five gates pass |
-| One slot, dotted | 0.3887 | 0.0177 | 0.0441 | blocked on accuracy |
+**The mechanism.** Instrumenting the trained checkpoint, the head was not
+merely weak, it was disconnected: the query vector was *identical* across 40
+different states, to a per-dimension standard deviation of 0.0000. Comparing
+the option keys before and after training:
 
-0.3887 is below the 0.3922 marginal predictor. The dot-product arm learned
-nothing usable from the state, while passing every calibration gate — it is
-also the cleanest demonstration of the finding above.
+| | mean pairwise cosine | ‖δ‖ / ‖k̄‖ |
+| --- | ---: | ---: |
+| At initialisation | +0.4715 | 0.7988 |
+| After training | +0.9971 | 0.0434 |
 
-This matters more than an ablation result because the dot-product head is what
-makes large option sets affordable: it costs one readout slot at any
-cardinality, and `READOUT_BUDGET_TOKENS` and `MAX_QUESTIONS_PER_REQUEST` are
-sized on the assumption that it works. If it cannot be made to learn, the
-published ceilings for very large Choices rest on a head that does not.
+Training *collapsed* the option keys onto each other — an 18× reduction in the
+component that distinguishes one option from another. The keys start
+separable and the model learns to make them identical.
 
-What this is *not* is a verdict on the architecture. A 128-wide, two-layer
-model with a hashing tokenizer is a weak test of a head that has to align two
-learned representations in the same space, and the per-option head needs no
-such alignment — it gets a slot to itself. The plausible readings are that the
-dot-product head needs more capacity, a shared projection, or a scaled
-initialisation, and none of them is ruled out here. What phase 0 establishes is
-that it does not work *by default*, which is exactly the thing that would have
-been expensive to discover in phase 1 with a real backbone and a real
-tokenizer. It is phase 1's largest technical risk, and it is now a known one.
+Why: softmax is invariant to the shared component of the keys, so only the
+differences δ carry signal. Shrinking δ is a direct, high-gradient move toward
+the marginal; learning the state→query→key alignment is a product of two small
+quantities, a saddle. Descent takes the cheap route, and once δ ≈ 0 the
+gradient with respect to the query is δ/√d ≈ 0 and the query freezes. It is
+the degenerate-model failure `accuracy_over_baseline` exists to catch,
+occurring *inside* the architecture rather than at the gate.
+
+**Two repairs, measured.** Identical data, seeds and hyperparameters; held-out
+accuracy per question against that question's own marginal predictor:
+
+| Arm | `plan` (0.253) | `at_risk` (0.667) | `size` (0.257) | Pooled lift | Gates |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Readout slot per option | 0.457 | 0.662 | 0.254 | +0.0673 | 5/5 |
+| Dot product, as shipped | 0.254 | 0.662 | 0.254 | −0.0002 | blocked |
+| … + `match_normalize` | 0.254 | 0.662 | 0.254 | −0.0002 | blocked |
+| … + `match_residual` | **0.847** | 0.662 | 0.251 | **+0.1962** | 5/5 |
+| … + both | 0.457 | 0.662 | 0.254 | +0.0673 | 5/5 |
+
+`match_residual` adds each option's own input embedding to its key. With it the
+dot-product head does not merely recover, it **beats the per-option head by a
+wide margin on the question either can learn** — 0.847 against 0.457 — while
+costing one readout slot instead of *n*. The default is now on.
+
+**What was expected and was wrong.** The repair predicted to work was
+`match_normalize`: CLIP-style cosine similarity with a learnable temperature,
+on the reasoning that normalising removes the shrink-δ escape route. It does
+nothing whatsoever — 0.254, identical to the unrepaired head to three decimal
+places — and combined with the residual it *destroys* two-thirds of the gain.
+The shrink-to-marginal story is therefore not the whole mechanism. The
+hypothesis that survives is simpler: a one-token option block that attends only
+to itself comes out of two layers and a LayerNorm dominated by what every
+option shares, so the option's identity never reaches the key at all; the
+residual reinjects it, and L2-normalising discards the magnitude that carries
+it. That is a hypothesis fitted after the fact to one experiment, and it is
+marked as one.
+
+**What this does not establish.** Only `plan` — a copy task, where the answer
+appears verbatim in the state — is learned by any arm. `at_risk` (a
+conjunction) and `size` (a threshold on a number) sit at their marginals in
+every row, which is why the per-question gate fails for all five and is
+advisory. The result is one task family, one scale, one seed, at 128-wide and
+two layers with a hashing tokenizer; the mechanism it identifies is explicitly
+scale-dependent, since a deeper encoder with a real tokenizer may preserve
+option identity without help. **Phase 1 re-runs this arm on the real backbone**
+— the flag exists so it can be turned off, and the ranking here is not
+evidence about the ranking there.
+
+The risk is retired as a blocker and stays open as a measurement.
 
 ### An index that is stable across requests should be built once
 

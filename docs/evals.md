@@ -242,15 +242,33 @@ Same data, same seed, same budget; only the head differs.
 | Adaptive ECE | 0.0158 | 0.0441 |
 | Gates | **all pass** | `accuracy_over_baseline` **fails** |
 
+Both columns are the *original* pair. The dot-product column is what a
+collapsed head looks like; the repair below moves it past the left column.
+
 Chance is 1.1552 and the Bayes-optimal loss for this generator is 0.5585. The
 dot-product arm's loss rose between epochs 5 and 6 (1.1395 → 1.1398): it never
 left chance.
 
-Two things follow. **The ablation has an answer, and it is inconvenient**: at
-this scale and budget the cheap head does not learn, and it is the head the
-high-cardinality path depends on. Phase 1 has to budget training effort for the
-regime where falling back to a slot per option is not an option, rather than
-assuming the cheap head comes free.
+Two things follow. **The ablation had an answer, and it was inconvenient — so
+it got a second run.** At this scale the cheap head did not learn, and it is
+the head the high-cardinality path depends on, so "budget more training effort
+in phase 1" was not a good enough response. Instrumenting the trained
+checkpoint showed the query had frozen to a constant across every input and the
+option keys had collapsed onto each other during training. Three repair arms
+later, adding each option's input embedding back into its key turns 0.254 into
+0.847 on the one question either head learns — past the per-option head's
+0.457, at one readout slot instead of *n*:
+
+| Arm | `plan` accuracy | Pooled lift | Gates |
+| --- | ---: | ---: | --- |
+| Readout slot per option | 0.457 | +0.0673 | 5/5 |
+| Dot product, as first shipped | 0.254 | −0.0002 | blocked |
+| … + `match_normalize` | 0.254 | −0.0002 | blocked |
+| … + `match_residual` | **0.847** | **+0.1962** | 5/5 |
+| … + both | 0.457 | +0.0673 | 5/5 |
+
+`docs/decisions.md` has the mechanism, the repair that was expected to work and
+did not, and what one seed at spike scale does not establish.
 
 **And it is the sharpest case for `accuracy_over_baseline` available.** The
 dot-product arm is *worse than ignoring the state* — a negative lift — and it

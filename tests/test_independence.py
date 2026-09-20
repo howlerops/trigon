@@ -137,3 +137,68 @@ def test_output_shapes_always_match_the_declared_label_sets(engine):
     assert len(answers["levels"]["probabilities"]) == 7
     for answer in answers.values():
         assert sum(answer["probabilities"].values()) == pytest.approx(1.0)
+
+
+# -- the dot-product head's repairs must not cost the guarantees -------------
+
+
+@pytest.mark.parametrize(
+    "flags",
+    [
+        {"match_residual": True},
+        {"match_normalize": True},
+        {"match_residual": True, "match_normalize": True},
+    ],
+    ids=["residual", "normalize", "both"],
+)
+def test_dot_product_repairs_keep_option_keys_independent_of_state(flags):
+    """The keys are what the schema prefix cache would hold.
+
+    `match_residual` adds each option's input embedding to its key, which is a
+    new path from the sequence into the head — and a head that reached the
+    state through it would silently make the schema prefix uncacheable while
+    every other test still passed. The keys must be a function of the schema
+    alone, exactly.
+    """
+    from trigon.backends.torch_readout import ReadoutConfig
+    from trigon.schema import OptionScoring
+    from trigon.schema.compiler import materialize_mask
+
+    backend = TorchReadoutBackend(ReadoutConfig(**flags), seed=0)
+    compiler = backend.make_compiler(option_scoring=OptionScoring.DOT_PRODUCT)
+    states = [
+        "the card payment failed twice this week",
+        "everything is fine and the customer is delighted",
+        "a parcel went missing somewhere near Leeds",
+    ]
+
+    keys = []
+    with torch.no_grad():
+        for state in states:
+            compiled = compiler.compile_request(
+                SystemOneRequest(state=state, questions={"intent": BASE["intent"]})
+            )
+            embeddings, spans = backend._embed(compiled)
+            mask = torch.tensor(materialize_mask(compiled), dtype=torch.bool)
+            hidden = backend.model(embeddings, mask, spans.positions(), spans.segment_types())[0]
+            members = torch.stack([hidden[i].mean(dim=0) for i in spans.members["intent"]])
+            if flags.get("match_residual"):
+                members = members + torch.stack(spans.member_seed_rows["intent"])
+            keys.append(backend.model.match_key(members))
+
+    for other in keys[1:]:
+        assert torch.equal(keys[0], other), "option keys moved with the state"
+
+
+@pytest.mark.parametrize("flags", [{"match_residual": True}, {"match_normalize": True}])
+def test_dot_product_repairs_survive_a_checkpoint_round_trip(flags, tmp_path):
+    """The flags change the head's arithmetic, so a checkpoint that forgets
+    them reloads as a different model under the same weights."""
+    from trigon.backends.torch_readout import ReadoutConfig
+
+    original = TorchReadoutBackend(ReadoutConfig(**flags), seed=0)
+    path = tmp_path / "arm.pt"
+    original.save(path)
+    reloaded = TorchReadoutBackend.load(path)
+    for key, value in flags.items():
+        assert getattr(reloaded.config, key) == value
