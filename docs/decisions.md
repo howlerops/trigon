@@ -4,6 +4,25 @@ Answers to the four open questions in the build plan, plus the calls the
 implementation forced. Each one names what would change our mind, because a
 decision without a falsifier is a preference.
 
+## Sign-off, 2026-09-20
+
+Phase 0 closed. All five decisions ratified as written, all eight findings
+acknowledged. The six open questions resolved as follows:
+
+| | Question | Resolution |
+| --- | --- | --- |
+| Q14 | The "96% on 50 cases vs 84–86%" figure | **Dropped permanently.** No primary source surfaced. It is not to be quoted, in a deck or anywhere else |
+| Q15 | L4 unit economics, unsourced | **Burn-in pulled forward.** It is the whole cost argument; waiting until phase 3 puts it at week 13, after the point where it would shape positioning |
+| Q16 | `accuracy_over_baseline` pools questions | **Gate per question**, implemented now and advisory until a real backbone lands. See *A calibration-only gate set…* below |
+| Q17 | BoolQ and FEVER, CC BY-SA on a derived model | **Counsel opinion requested.** Two corpora today, but the question recurs for every CC BY-SA set, so it is worth answering once |
+| Q18 | LMSYS gated agreement; Kaggle terms | **Dropped.** None is load-bearing now that outcome grounding comes from verifiable synthetic data |
+| Q19 | Staffing | **No hires.** One operator plus parallel agents; see `docs/roadmap.md`, *Staffing*, which this replaces rather than amends |
+
+Q19 is the one that changes how the rest is built, and its consequences are
+written up there: compute and verification bind where engineer-hours used to,
+the eval harness stops being only a differentiator and becomes the mechanism
+that catches unfinished work, and parallelism buys breadth rather than depth.
+
 ---
 
 ## 1. Per-request option/token budget before the retrieval stage

@@ -49,6 +49,14 @@ A permissive code licence does not launder a research-only corpus. A dataset
 enters a training mix only by moving to green. "Verify" is a blocker for
 training, not a footnote.
 
+**Four corpora are dropped rather than red.** At sign-off (2026-09-20) the
+Kaggle entries (ASAP, Home Credit, IEEE-CIS) and LMSYS were dropped outright
+rather than left as blockers awaiting a licence answer: none is load-bearing
+now that outcome grounding comes from verifiable synthetic data, and carrying
+a red row indefinitely is how a blocker turns into a footnote. BoolQ and FEVER
+stay amber pending a counsel opinion on CC BY-SA for a derived model — that one
+is worth answering because it recurs for every share-alike corpus.
+
 **Checked against primary sources on 2026-09-20.** Each row below records what
 the dataset's own card or repository states, not what the build plan assumed.
 Rows marked *unchecked* keep the plan's assumption and are still blockers.
@@ -65,7 +73,7 @@ Rows marked *unchecked* keep the plan's assumption and are still blockers.
 | FEVER | Choice (3) | CC BY-SA 3.0 | **amber** | plan; share-alike |
 | SST-5 | Score | **no licence field on the HF card** | **red** ✓ | HF `SetFit/sst5` carries no licence |
 | Amazon Reviews 2023 | Score | **Amazon Customer Reviews Terms of Use** (repo scripts MIT) | **amber** | McAuley Lab card; platform terms are not an open licence |
-| ASAP essay scoring | Score + rubric | Kaggle competition terms | **red** | unchecked; competition terms |
+| ASAP essay scoring | Score + rubric | Kaggle competition terms | **dropped** | not pursued; see sign-off Q18 |
 | HelpSteer2/3 | Score | CC BY 4.0 | **green** ✓ | HF `nvidia/HelpSteer2` metadata |
 | GoEmotions | Choice (27) + distributions | Apache-2.0 | **green** ✓ | HF `google-research-datasets/go_emotions` metadata |
 | ChaosNLI | annotator distributions | **no licence field found** | **red** | HF mirror carries no licence |
@@ -75,8 +83,8 @@ Rows marked *unchecked* keep the plan's assumption and are still blockers.
 | UFET | Choice (~10k types) | **no stated licence; distant-supervision half derives from LDC-licensed Gigaword** | **red** | UT Austin dataset page; `uwnlp/open_type` |
 | Amazon ESCI | Choice (4) | **repo licensed Apache-2.0 as a "project"; no data-specific grant** | **amber** ⬇ | `amazon-science/esci-data` LICENSE + README |
 | WDC Products; Magellan | Noul | "public research", terms unstated | **amber** | unchecked |
-| LMSYS Arena preferences | Choice (A/B/tie) | **custom LMSYS-Chat-1M Dataset License Agreement, gated access** | **red** | HF `lmsys/lmsys-chat-1m` |
-| Home Credit; IEEE-CIS fraud | Noul on structured state | Kaggle competition terms | **red** | unchecked; competition terms |
+| LMSYS Arena preferences | Choice (A/B/tie) | **custom LMSYS-Chat-1M Dataset License Agreement, gated access** | **dropped** | not pursued; see sign-off Q18 |
+| Home Credit; IEEE-CIS fraud | Noul on structured state | Kaggle competition terms | **dropped** | not pursued; see sign-off Q18 |
 | Autocast | Noul/Choice | **code MIT; dataset hosted "with permission from Metaculus for research purposes only"** | **red** | `andyzoujm/autocast` |
 
 Net movement: CLINC150 and measuring_hate_speech clear to **green**, DBpedia-14

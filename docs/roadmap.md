@@ -1,9 +1,12 @@
 # Roadmap
 
-Sixteen weeks to a credible v1, with two engineers. The honest version of that
-claim is in the plan and worth repeating: 16 weeks yields a useful, fast,
-type-safe, publicly-calibrated v1 — not parity on calibration breadth with a
-team that spent two years on it.
+Five phases to a credible v1. The plan costed this at sixteen weeks with two
+engineers; **we are not hiring, and the work is executed by one operator with
+parallel agents**, so the week numbers below are an ordering with rough
+proportions rather than a schedule — see *Staffing* for what actually binds.
+The honest version of the destination is unchanged and worth repeating: this
+yields a useful, fast, type-safe, publicly-calibrated v1 — not parity on
+calibration breadth with a team that spent two years on it.
 
 | Phase | Weeks | Work | Exit criteria |
 | --- | --- | --- | --- |
@@ -98,28 +101,53 @@ Fourteen of the sixteen figures phase 0 inherited were checked against primary
 sources; the vendor's latency envelope, pricing, 255-option cap, nine
 documented failure modes and absence of published calibration evidence all
 hold, and the ecosystem turned out larger than assumed (28 open reproductions,
-17 independent evaluations, against the plan's 17 and 16). Two did not resolve
-and are carried as open rather than quietly assumed:
+17 independent evaluations, against the plan's 17 and 16). Two did not resolve, and both were closed at sign-off rather than carried:
 
 - **"96% on a 50-case validation task vs 84–86% for small LLMs."** No primary
-  source surfaced. Do not quote it.
+  source surfaced, and the claim is **dropped** — not softened, not
+  attributed, not repeated in a deck. An unsourced accuracy figure is the
+  exact species of claim this project exists to replace with a measured one.
 - **The L4 unit economics** — $0.80/hr, ~30k prefill tok/s, therefore
   ~$0.007/MTok. The arithmetic checks out; the inputs are unsourced. This is
-  the entire cost argument, so it needs a measured number from our own phase-3
-  burn-in rather than a citation.
+  the entire cost argument, so the **burn-in is pulled forward out of phase 3**:
+  at week 13 the number arrives after the point where it would shape
+  positioning. Until it is measured, the cost claim is an assumption and is
+  labelled one wherever it appears.
 
 ## Staffing
 
-Two engineers — one ML leading phases 1–2, one infra/systems leading phase 3
-and the Rust gateway, both on 0 and 4. Phases 2 and 3 only overlap with two
-people, and that overlap is what holds the 16 weeks.
+**One operator, plus parallel agents. No hires.** Decided 2026-09-20, and it
+replaces the plan's two-engineer and solo-engineer variants rather than
+selecting between them — neither describes this.
 
-**Solo variant**: one ML-leaning engineer, the full cut order applied from the
-start (no KV-cache quantization, no large-N stage, no premium tier, Python
-gateway), 24–28 weeks, with data engineering as the bottleneck. Below two
-people, ship the solo scope rather than stretching the full scope.
+The schedule in the phase table is in weeks of *calendar*, and it was derived
+from weeks of engineer-time. That derivation no longer holds, so read the
+phase table as an ordering with rough proportions, not as dates. What binds
+instead:
 
-Compute: ~$30–70k total — teacher labels, training, serving burn-in.
+| Old constraint | Now |
+| --- | --- |
+| Engineer-hours writing code | Not binding. Agents parallelise cleanly across independent work — three ablation arms ran concurrently at full speed on a 4-core box, because each training run is single-threaded |
+| — | **Compute.** The one resource agents cannot supply themselves, and the phase-2/3 line items ($20–50k teacher labels, $30–70k total) are unchanged |
+| — | **Verification.** Agents produce plausible code quickly; the eval harness and the gates are the only thing that separates plausible from correct |
+| — | **Judgement and sign-off.** Licence calls, positioning, what a number is allowed to claim. Unparallelisable by construction |
+
+Two consequences worth stating rather than discovering:
+
+**The eval harness moves from differentiator to load-bearing infrastructure.**
+It was already the product's public claim. Under agent execution it is also
+the only mechanism that catches work that looks finished and is not — this
+repo's own history has two cases where the whole suite was green over a
+component that could not run at all. Every ground rule in `CLAUDE.md` about
+testing claims rather than asserting them gets stricter, not more relaxed,
+and the per-question gate above exists because a pooled one was too easy to
+satisfy.
+
+**Parallelism buys breadth, not depth.** Three arms of an ablation at once,
+yes. A single training run does not go faster, a GPU-bound phase-2 sweep does
+not go faster, and the two measurements phase 3 owes — KV memory at 65,536
+state tokens, end-to-end p50/p99 — need hardware, not agents. Schedule the
+serial, hardware-bound work first and fan the rest out around it.
 
 ## Cut order under schedule pressure
 
