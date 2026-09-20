@@ -23,7 +23,7 @@ from ..limits import (
 )
 from .harness import Case, CaseOutcome, SuiteResult, run_cases, summarize
 
-__all__ = ["GateResult", "check_gates", "run_calibration_suite", "slice_reports"]
+__all__ = ["blocking", "GateResult", "check_gates", "run_calibration_suite", "slice_reports"]
 
 
 @dataclass(frozen=True)
@@ -36,11 +36,29 @@ class GateResult:
     passed: bool
     #: Set when the gate is about the measurement rather than the model.
     note: str = ""
+    #: Measured and printed, but not counted in the run's verdict. An advisory
+    #: gate is one we intend to enforce and cannot yet -- it is reported so it
+    #: cannot be quietly forgotten, which a gate that is merely switched off
+    #: always is. Nothing may become advisory to make a run pass; see
+    #: ``check_gates`` for the only one, and the condition that ends it.
+    advisory: bool = False
 
     def __str__(self) -> str:
         verdict = "PASS" if self.passed else "FAIL"
+        if self.advisory:
+            verdict = f"{verdict} (advisory)"
         base = f"{verdict} {self.name}: {self.value:.4f} (limit {self.limit:.4f})"
         return f"{base} -- {self.note}" if self.note else base
+
+
+def blocking(gates: Sequence[GateResult]) -> list[GateResult]:
+    """The gates that decide whether a run ships.
+
+    One helper because the verdict is computed in four places -- the CLI's exit
+    code twice, the markdown report and the JSON report -- and an advisory gate
+    counted in one of them would be a blocking gate with extra steps.
+    """
+    return [g for g in gates if not g.advisory]
 
 
 def run_calibration_suite(
@@ -85,6 +103,8 @@ def check_gates(
     result: SuiteResult,
     tier: str = "workhorse",
     quantized: SuiteResult | None = None,
+    *,
+    require_per_question: bool = False,
 ) -> list[GateResult]:
     """Apply the release gates from the build plan.
 
@@ -142,6 +162,36 @@ def check_gates(
                     f"{result.baseline_accuracy:.4f}; calibration cannot reject a "
                     f"model that ignores the state"
                 ),
+            )
+        )
+
+    worst = result.worst_question_lift
+    if worst is not None:
+        # The pooled gate above averages over questions, so a model that has
+        # learned one question of three and answers the rest by rote clears it
+        # -- the reference run does exactly that at +0.0639 pooled while two of
+        # its three questions sit below their own marginal predictor. This gate
+        # reads the worst single question instead.
+        #
+        # Advisory until phase 1. Not because the bar is wrong, but because at
+        # a 128-wide two-layer spike every per-question gate fails, and a gate
+        # that nothing can pass measures model capacity rather than model
+        # honesty. It becomes blocking the moment a real backbone lands --
+        # ``require_per_question=True``, which the phase-1 training command
+        # sets -- and it is reported in the meantime so that flip cannot be
+        # quietly skipped.
+        offender = min(result.per_question.values(), key=lambda q: q.lift)
+        gates.append(
+            GateResult(
+                "worst_question_over_baseline",
+                worst,
+                MIN_ACCURACY_OVER_BASELINE,
+                worst >= MIN_ACCURACY_OVER_BASELINE,
+                note=(
+                    f"worst is {offender.question_id!r} at {offender.accuracy:.4f} vs its own "
+                    f"marginal {offender.baseline_accuracy:.4f}; the pooled gate hides this"
+                ),
+                advisory=not require_per_question,
             )
         )
 

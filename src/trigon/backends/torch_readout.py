@@ -97,6 +97,8 @@ class ReadoutConfig:
         d_ff: int = 256,
         dropout: float = 0.0,
         max_levels: int = 32,
+        match_normalize: bool = False,
+        match_residual: bool = False,
     ) -> None:
         if d_model % n_heads:
             raise ValueError(f"d_model {d_model} must divide by n_heads {n_heads}")
@@ -107,6 +109,10 @@ class ReadoutConfig:
         self.d_ff = d_ff
         self.dropout = dropout
         self.max_levels = max_levels
+        # Two independent repairs for the dot-product head's collapse to the
+        # marginal; see the module docstring and docs/decisions.md.
+        self.match_normalize = match_normalize
+        self.match_residual = match_residual
 
 
 def _sinusoidal(length: int, d_model: int, device, dtype) -> torch.Tensor:
@@ -155,6 +161,10 @@ class PrefillOnlyModel(nn.Module):
         # states, so the dot-product head is not forced to use raw geometry.
         self.match_query = nn.Linear(config.d_model, config.d_model, bias=False)
         self.match_key = nn.Linear(config.d_model, config.d_model, bias=False)
+        # CLIP's learnable logit scale, used only when match_normalize is on.
+        # Held in log space so it stays positive under unconstrained descent;
+        # exp(2.66) ~ 1477/1000, i.e. the 1/0.07 CLIP initialises to.
+        self.match_log_scale = nn.Parameter(torch.tensor(math.log(1.0 / 0.07)))
 
     def forward(
         self,
@@ -259,6 +269,8 @@ class TorchReadoutBackend:
                     "d_ff": self.config.d_ff,
                     "dropout": self.config.dropout,
                     "max_levels": self.config.max_levels,
+                    "match_normalize": self.config.match_normalize,
+                    "match_residual": self.config.match_residual,
                 },
                 "state_dict": self.model.state_dict(),
             },
@@ -321,9 +333,29 @@ class TorchReadoutBackend:
                 out[qid] = self.model.choice_head(readouts).squeeze(-1)
             else:
                 members = torch.stack([hidden[idx].mean(dim=0) for idx in spans.members[qid]])
+                if self.config.match_residual:
+                    # Carry the option's own input embedding past the encoder,
+                    # so which option this is survives layer norm rather than
+                    # having to be rediscovered from a smoothed hidden state.
+                    rows = spans.member_seed_rows.get(qid)
+                    if rows:
+                        members = members + torch.stack(rows)
                 query = self.model.match_query(readouts[0])
                 keys = self.model.match_key(members)
-                out[qid] = keys @ query / math.sqrt(self.config.d_model)
+                if self.config.match_normalize:
+                    # Cosine, with a learnable temperature. Raw dot products
+                    # let descent equalise the logits by shrinking every key
+                    # towards their shared mean -- which is the cheapest route
+                    # to the marginal and destroys the option signal on the
+                    # way. Normalising removes that route: scale buys nothing,
+                    # so the only way to flatten the answer is to make the
+                    # option directions identical, which the data does not
+                    # reward.
+                    query = query / query.norm().clamp_min(1e-6)
+                    keys = keys / keys.norm(dim=-1, keepdim=True).clamp_min(1e-6)
+                    out[qid] = (keys @ query) * self.model.match_log_scale.exp()
+                else:
+                    out[qid] = keys @ query / math.sqrt(self.config.d_model)
         return out, int(embeddings.shape[1])
 
     @torch.no_grad()
@@ -396,9 +428,9 @@ class TorchReadoutBackend:
                 vectors = table(torch.tensor(ids, dtype=torch.long))
                 rows.append(vectors)
                 if segment.member_index is not None and segment.question_id is not None:
-                    member_embeddings[(segment.question_id, segment.member_index)] = vectors.mean(
-                        dim=0
-                    ).detach()
+                    pooled = vectors.mean(dim=0)
+                    member_embeddings[(segment.question_id, segment.member_index)] = pooled.detach()
+                    spans.member_seed_rows.setdefault(segment.question_id, []).append(pooled)
                     spans.members.setdefault(segment.question_id, []).append(
                         list(range(cursor, cursor + len(ids)))
                     )
@@ -424,6 +456,8 @@ class _Spans:
     def __init__(self) -> None:
         self.readout: dict[str, list[int]] = {}
         self.members: dict[str, list[list[int]]] = {}
+        # Per-option input embeddings, kept differentiable for match_residual.
+        self.member_seed_rows: dict[str, list] = {}
         self._positions: list[int] = []
         self._types: list[int] = []
 

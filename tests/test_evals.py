@@ -21,6 +21,7 @@ from trigon.evals import (
     Workflow,
     WorkflowCase,
     WorkflowStep,
+    blocking,
     check_gates,
     render_json,
     render_markdown,
@@ -428,3 +429,65 @@ def test_gates_refuse_a_run_with_nothing_scored():
         check_gates(empty)
     with pytest.raises(ValueError, match="quantized run produced no scored questions"):
         check_gates(result, quantized=empty)
+
+
+# -- the per-question gate ---------------------------------------------------
+
+
+def _suite_over(engine):
+    result, _ = run_calibration_suite(
+        engine, synthetic_outcome_cases(n=300, noise=0.2), floor_trials=5
+    )
+    return result
+
+
+def test_per_question_accuracy_shows_what_the_pooled_number_averages_away():
+    """The reference run clears the pooled gate with two of three questions
+    below their own marginal predictor. That has to be visible somewhere."""
+    result = _suite_over(Engine(LexicalBackend()))
+    assert set(result.per_question) == {"plan", "at_risk", "size"}
+    # The floor answers `plan` well above rote and is at or below it elsewhere.
+    assert result.per_question["plan"].lift > 0.2
+    assert result.worst_question_lift < 0
+    # And the pooled figure is positive regardless -- the whole problem.
+    assert result.lift_over_baseline > 0
+    assert result.worst_question_lift < result.lift_over_baseline
+
+
+def test_the_per_question_gate_is_advisory_until_asked_for():
+    result = _suite_over(Engine(LexicalBackend()))
+    gates = {g.name: g for g in check_gates(result)}
+    gate = gates["worst_question_over_baseline"]
+    assert gate.advisory and not gate.passed
+    assert "the pooled gate hides this" in gate.note
+    # Advisory means measured and printed, never counted.
+    assert gate not in blocking(check_gates(result))
+    assert all(g.passed for g in blocking(check_gates(result)) if g.name.endswith("baseline"))
+
+
+def test_require_per_question_makes_it_block():
+    result = _suite_over(Engine(LexicalBackend()))
+    gates = check_gates(result, require_per_question=True)
+    gate = next(g for g in gates if g.name == "worst_question_over_baseline")
+    assert not gate.advisory
+    assert gate in blocking(gates)
+    assert not all(g.passed for g in blocking(gates))
+
+
+def test_an_advisory_failure_does_not_read_as_a_clean_run():
+    """A report that says 'all gates passed' while a gate failed is worse than
+    having no advisory gate at all."""
+    result = _suite_over(Engine(LexicalBackend()))
+    markdown = render_markdown([result], check_gates(result))
+    assert "Advisory, not blocking" in markdown
+    assert "worst_question_over_baseline" in markdown
+    assert "Accuracy per question" in markdown
+
+
+def test_the_json_verdict_ignores_advisory_gates_like_the_exit_code_does():
+    import json
+
+    result = _suite_over(Engine(LexicalBackend()))
+    gates = check_gates(result)
+    payload = json.loads(render_json([result], gates))
+    assert payload["passed"] == all(g.passed for g in blocking(gates))

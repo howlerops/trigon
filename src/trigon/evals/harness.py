@@ -35,6 +35,7 @@ __all__ = [
     "Case",
     "CaseOutcome",
     "Expectation",
+    "QuestionAccuracy",
     "QuestionOutcome",
     "SuiteResult",
     "run_cases",
@@ -120,6 +121,34 @@ class CaseOutcome:
 
 
 @dataclass(frozen=True)
+class QuestionAccuracy:
+    """One question's accuracy against its own marginal predictor.
+
+    The pooled lift averages over questions, which lets a model that has
+    learned one question of three clear a gate while ignoring the state on the
+    other two. Per question, that is visible.
+    """
+
+    question_id: str
+    n: int
+    accuracy: float
+    baseline_accuracy: float
+
+    @property
+    def lift(self) -> float:
+        return self.accuracy - self.baseline_accuracy
+
+    def to_dict(self) -> dict:
+        return {
+            "question_id": self.question_id,
+            "n": self.n,
+            "accuracy": self.accuracy,
+            "baseline_accuracy": self.baseline_accuracy,
+            "lift": self.lift,
+        }
+
+
+@dataclass(frozen=True)
 class SuiteResult:
     """What a suite run produced, ready to serialize into a release report."""
 
@@ -136,8 +165,24 @@ class SuiteResult:
     latency_p50_ms: float
     latency_p99_ms: float
     mean_prefill_tokens: float
+    #: Accuracy and marginal-predictor accuracy for each question id. The
+    #: pooled figures above average over questions, so a model that answers one
+    #: question of three and ignores the state on the rest still clears a
+    #: pooled lift gate -- the reference run does exactly that. This is the
+    #: breakdown that shows it.
+    per_question: dict[str, QuestionAccuracy] = field(default_factory=dict)
     extra: dict[str, float] = field(default_factory=dict)
     per_primitive: dict[str, CalibrationReport] = field(default_factory=dict)
+
+    @property
+    def worst_question_lift(self) -> float | None:
+        """The smallest lift over baseline of any single question.
+
+        The pooled lift is an average and hides a question answered by rote.
+        This is the number a per-question gate reads.
+        """
+        lifts = [q.lift for q in self.per_question.values()]
+        return min(lifts) if lifts else None
 
     @property
     def lift_over_baseline(self) -> float | None:
@@ -155,6 +200,8 @@ class SuiteResult:
             "accuracy": self.accuracy,
             "baseline_accuracy": self.baseline_accuracy,
             "lift_over_baseline": self.lift_over_baseline,
+            "worst_question_lift": self.worst_question_lift,
+            "per_question": {k: v.to_dict() for k, v in self.per_question.items()},
             "calibration": self.calibration.to_dict() if self.calibration else None,
             "latency_p50_ms": self.latency_p50_ms,
             "latency_p99_ms": self.latency_p99_ms,
@@ -235,6 +282,7 @@ def summarize(
 
     scored: list[tuple[str, tuple[float, ...], int]] = []
     labels_by_question: dict[str, list[int]] = {}
+    hits_by_question: dict[str, int] = {}
     n_questions = 0
     for outcome in outcomes:
         for qid, question in outcome.questions.items():
@@ -245,6 +293,9 @@ def summarize(
             if truth is not None:
                 scored.append((question.primitive, question.probabilities, truth))
                 labels_by_question.setdefault(qid, []).append(truth)
+                probabilities = question.probabilities
+                predicted = max(range(len(probabilities)), key=probabilities.__getitem__)
+                hits_by_question[qid] = hits_by_question.get(qid, 0) + int(predicted == truth)
 
     latencies = sorted(o.latency_ms for o in outcomes)
     calibration = (
@@ -276,6 +327,7 @@ def summarize(
         n_questions=n_questions,
         accuracy=calibration.accuracy if calibration else None,
         baseline_accuracy=_marginal_accuracy(labels_by_question),
+        per_question=_per_question(labels_by_question, hits_by_question),
         calibration=calibration,
         latency_p50_ms=_percentile(latencies, 0.50),
         latency_p99_ms=_percentile(latencies, 0.99),
@@ -283,6 +335,26 @@ def summarize(
         extra=dict(extra or {}),
         per_primitive=per_primitive,
     )
+
+
+def _per_question(
+    labels_by_question: dict[str, list[int]], hits_by_question: dict[str, int]
+) -> dict[str, QuestionAccuracy]:
+    """Model and marginal-predictor accuracy, question by question."""
+    out: dict[str, QuestionAccuracy] = {}
+    for qid, labels in sorted(labels_by_question.items()):
+        if not labels:
+            continue
+        counts: dict[int, int] = {}
+        for label in labels:
+            counts[label] = counts.get(label, 0) + 1
+        out[qid] = QuestionAccuracy(
+            question_id=qid,
+            n=len(labels),
+            accuracy=hits_by_question.get(qid, 0) / len(labels),
+            baseline_accuracy=max(counts.values()) / len(labels),
+        )
+    return out
 
 
 def _marginal_accuracy(labels_by_question: dict[str, list[int]]) -> float | None:

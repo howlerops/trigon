@@ -12,7 +12,7 @@ import json
 from collections.abc import Sequence
 
 from ..calibration.metrics import CalibrationReport
-from .calibration_suite import GateResult
+from .calibration_suite import GateResult, blocking
 from .harness import SuiteResult
 
 __all__ = ["render_json", "render_markdown", "render_reliability"]
@@ -94,11 +94,39 @@ def render_markdown(
         for gate in gates:
             out.append(f"- {gate}")
         out.append("")
-        if all(g.passed for g in gates):
-            out.append("All gates passed.")
+        blockers = [g.name for g in blocking(gates) if not g.passed]
+        if blockers:
+            out.append(f"**Blocked**: {', '.join(blockers)}.")
         else:
-            failed = [g.name for g in gates if not g.passed]
-            out.append(f"**Blocked**: {', '.join(failed)}.")
+            out.append("All blocking gates passed.")
+        advisory_failures = [g.name for g in gates if g.advisory and not g.passed]
+        if advisory_failures:
+            out.append("")
+            out.append(
+                f"**Advisory, not blocking**: {', '.join(advisory_failures)}. "
+                "Reported so the run does not read as clean when it is not — "
+                "see `docs/evals.md` for what turns each one on."
+            )
+        out.append("")
+
+    per_question = next((r.per_question for r in results if r.per_question), None)
+    if per_question:
+        out.append("## Accuracy per question")
+        out.append("")
+        out.append(
+            "The pooled lift above averages over questions. A model that has learned "
+            "one question and answers the rest by rote clears a pooled gate, so the "
+            "breakdown is printed whether or not it is gated on."
+        )
+        out.append("")
+        out.append("| Question | n | Accuracy | Its marginal predictor | Lift |")
+        out.append("| --- | ---: | ---: | ---: | ---: |")
+        for q in sorted(per_question.values(), key=lambda q: q.lift):
+            mark = "" if q.lift >= 0 else " ⚠"
+            out.append(
+                f"| `{q.question_id}` | {q.n:,} | {q.accuracy:.4f} | "
+                f"{q.baseline_accuracy:.4f} | {q.lift:+.4f}{mark} |"
+            )
         out.append("")
 
     if slices:
@@ -176,7 +204,7 @@ def render_json(
             "slices": {k: v.to_dict() for k, v in (slices or {}).items()},
             "cardinality": [c.to_dict() for c in cardinality],
             "workflows": [w.to_dict() for w in workflows],
-            "passed": all(g.passed for g in gates) and all(c.passed for c in cardinality),
+            "passed": all(g.passed for g in blocking(gates)) and all(c.passed for c in cardinality),
         },
         indent=2,
         sort_keys=True,

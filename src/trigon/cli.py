@@ -89,6 +89,7 @@ def cmd_spec(args: argparse.Namespace) -> int:
 def cmd_eval(args: argparse.Namespace) -> int:
     from .evals import (
         all_workflows,
+        blocking,
         check_gates,
         render_json,
         render_markdown,
@@ -139,7 +140,7 @@ def cmd_eval(args: argparse.Namespace) -> int:
         print(f"\nwrote {out} and {out.with_suffix('.json')}", file=sys.stderr)
 
     # Non-zero exit on any failed gate, so CI can depend on this directly.
-    passed = all(g.passed for g in gates) and all(c.passed for c in cardinality)
+    passed = all(g.passed for g in blocking(gates)) and all(c.passed for c in cardinality)
     return 0 if passed else 1
 
 
@@ -157,13 +158,25 @@ def cmd_train(args: argparse.Namespace) -> int:
 
     from .backends.torch_readout import ReadoutConfig, TorchReadoutBackend
     from .engine import Engine
-    from .evals import check_gates, render_markdown, run_calibration_suite, synthetic_outcome_cases
+    from .evals import (
+        blocking,
+        check_gates,
+        render_markdown,
+        run_calibration_suite,
+        synthetic_outcome_cases,
+    )
     from .schema import OptionScoring
     from .training import TrainingConfig
     from .training import train as run_training
 
     backend = TorchReadoutBackend(
-        ReadoutConfig(d_model=args.d_model, n_layers=args.layers), seed=args.seed
+        ReadoutConfig(
+            d_model=args.d_model,
+            n_layers=args.layers,
+            match_normalize=args.match_normalize,
+            match_residual=args.match_residual,
+        ),
+        seed=args.seed,
     )
     compiler = backend.make_compiler(option_scoring=OptionScoring(args.option_scoring))
 
@@ -223,7 +236,7 @@ def cmd_train(args: argparse.Namespace) -> int:
             backend.save(weights)
             written.append(weights.name)
         print(f"\nwrote {', '.join(written)}", file=sys.stderr)
-    return 0 if all(g.passed for g in gates) else 1
+    return 0 if all(g.passed for g in blocking(gates)) else 1
 
 
 def _training_section(report, args) -> str:
@@ -254,6 +267,8 @@ def _training_section(report, args) -> str:
         f"--lr {args.lr} --accumulate {args.accumulate} --d-model {args.d_model} "
         f"--layers {args.layers} --noise {args.noise} --seed {args.seed} "
         f"--floor-trials {args.floor_trials} --option-scoring {args.option_scoring}"
+        + (" --match-normalize" if args.match_normalize else "")
+        + (" --match-residual" if args.match_residual else "")
     )
     lines = [
         "# Reference run",
@@ -480,6 +495,16 @@ def build_parser() -> argparse.ArgumentParser:
     tr.add_argument("--layers", type=int, default=3)
     tr.add_argument("--seed", type=int, default=0)
     tr.add_argument("--floor-trials", type=int, default=100)
+    tr.add_argument(
+        "--match-normalize",
+        action="store_true",
+        help="dot-product head: cosine similarity with a learnable temperature",
+    )
+    tr.add_argument(
+        "--match-residual",
+        action="store_true",
+        help="dot-product head: add each option's input embedding to its key",
+    )
     tr.add_argument("--log-every", type=int, default=25)
     tr.add_argument(
         "--option-scoring",
