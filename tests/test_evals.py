@@ -29,6 +29,7 @@ from trigon.evals import (
     summarize,
     synthetic_outcome_cases,
 )
+from trigon.evals.cardinality import CardinalityResult
 from trigon.evals.jaggedness import (
     NegationCoherenceBenchmark,
     NoulChoiceAgreementBenchmark,
@@ -340,3 +341,27 @@ def test_reports_render_to_markdown_and_json():
 def test_summarize_refuses_an_empty_run():
     with pytest.raises(ValueError, match="no outcomes"):
         summarize("empty", "model", [])
+
+
+def test_json_report_covers_every_suite_the_markdown_does():
+    """A report and its ``.json`` sibling must not disagree about what ran.
+
+    ``render_json`` took three arguments while ``render_markdown`` took five,
+    so a cardinality or workflow run wrote a JSON file that recorded neither.
+    """
+    import inspect
+    import json
+
+    assert inspect.signature(render_json).parameters.keys() == (
+        inspect.signature(render_markdown).parameters.keys()
+    )
+
+    failing = CardinalityResult(
+        options=10_000, shortlist=256, recall=0.94, limit=0.99, queries=200, drop_slots=2
+    )
+    payload = json.loads(render_json([], [], {}, [failing], []))
+    assert payload["cardinality"][0]["recall"] == 0.94
+    assert payload["cardinality"][0]["passed"] is False
+    # The CLI exits non-zero on this run, so the file a consumer reads must
+    # not report it as a pass.
+    assert payload["passed"] is False

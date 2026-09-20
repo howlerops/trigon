@@ -23,9 +23,10 @@ from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 
 from ..schema import CompiledRequest
+from ..schema.tokens import TokenEstimator
 from ..types import SystemOneRequest
 
-__all__ = ["Backend", "BackendOutput", "QuestionOutput", "validate_output"]
+__all__ = ["Backend", "BackendOutput", "QuestionOutput", "estimator_of", "validate_output"]
 
 
 @dataclass(frozen=True)
@@ -64,6 +65,20 @@ class Backend(Protocol):
         ...
 
     def infer(self, compiled: CompiledRequest, request: SystemOneRequest) -> BackendOutput: ...
+
+
+def estimator_of(backend: object) -> TokenEstimator | None:
+    """The backend's own tokenizer, if it has an exact one.
+
+    A backend whose tensors are built from a real tokenizer must be compiled
+    with that same tokenizer, or the compiled token counts and the tensors
+    disagree and inference fails. Rather than asking every call site to
+    remember ``backend.make_compiler()``, ``Engine`` reads this and wires the
+    compiler itself -- so the gateway, the CLI and the eval harness cannot
+    drift apart on it. Backends without an exact tokenizer return ``None`` and
+    get the character heuristic.
+    """
+    return getattr(backend, "estimator", None)
 
 
 def validate_output(output: BackendOutput, compiled: CompiledRequest) -> None:

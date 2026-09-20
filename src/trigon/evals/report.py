@@ -156,7 +156,16 @@ def render_json(
     results: Sequence[SuiteResult],
     gates: Sequence[GateResult] = (),
     slices: dict[str, CalibrationReport] | None = None,
+    cardinality: Sequence = (),
+    workflows: Sequence = (),
 ) -> str:
+    """The same run as ``render_markdown``, machine-readable.
+
+    It takes the same five arguments for a reason: a report and its ``.json``
+    sibling that disagree about which suites ran is worse than having only one
+    of them. ``passed`` is the CLI's own exit condition, so a consumer reading
+    this file reaches the same verdict the command did.
+    """
     return json.dumps(
         {
             "results": [r.to_dict() for r in results],
@@ -165,6 +174,9 @@ def render_json(
                 for g in gates
             ],
             "slices": {k: v.to_dict() for k, v in (slices or {}).items()},
+            "cardinality": [c.to_dict() for c in cardinality],
+            "workflows": [w.to_dict() for w in workflows],
+            "passed": all(g.passed for g in gates) and all(c.passed for c in cardinality),
         },
         indent=2,
         sort_keys=True,

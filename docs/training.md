@@ -129,9 +129,22 @@ gates read.** Fitting and reporting on the same data is how a calibration
 number stops meaning anything.
 
 **A run is servable, not just reportable.** `--save-model` writes the weights
-alongside the config needed to rebuild them, and `trigon ask --backend torch
---weights` loads it. Without that, a calibration report describes a model that
-no longer exists.
+alongside the config needed to rebuild them; `trigon ask --backend torch
+--weights` and `trigon serve --backend torch --weights` both load it. Without
+that, a calibration report describes a model that no longer exists.
+
+"Servable" has to mean *over the API*, not only from the CLI. It did not for a
+while: the gateway built its compiler with the character heuristic while the
+backend built tensors from its own tokenizer, so every torch request returned a
+500 — with the whole suite green, because nothing exercised that path. `Engine`
+now takes the estimator from the backend, and `tests/test_server.py` asserts the
+gateway and the CLI answer identically.
+
+**A build is named after its weights.** `model_version` is the only identifier
+that reaches the caller, so an untrained model must not answer under a trained
+one's name. The version is stamped when training finishes — before the report is
+rendered — from a hash of every parameter, so two runs are distinguishable and
+the report, the checkpoint and the served response all name the same model.
 
 **The data carries irreducible noise.** `--noise 0.2` flips a fifth of the
 labels, which is what makes calibration testable at all: on a noiseless set a

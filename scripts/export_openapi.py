@@ -1,9 +1,10 @@
 #!/usr/bin/env python
 """Write the OpenAPI spec from the reference gateway.
 
-Both SDKs are generated from the checked-in spec, so the spec is checked in
-rather than produced at build time, and ``tests/test_openapi_drift.py`` fails
-if this script would change it. Run it after any change to the contract.
+The spec is checked in rather than produced at build time, and
+``tests/test_openapi_drift.py`` fails if this script would change it, so a
+contract change cannot land silently. The phase-4 SDKs will be generated from
+the checked-in file. Run this after any change to the contract.
 """
 
 from __future__ import annotations

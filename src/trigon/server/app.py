@@ -43,14 +43,14 @@ def create_router(config: ServerConfig | None = None) -> TieredRouter:
     conformal = config.load_conformal()
 
     workhorse = Engine(
-        _backend(config.backend),
+        _backend(config.backend, config.weights),
         scaler=scaler,
         conformal=conformal,
         config=EngineConfig(domain=config.domain, tier="workhorse"),
     )
     premium = (
         Engine(
-            _backend(config.premium_backend),
+            _backend(config.premium_backend, config.premium_weights),
             scaler=scaler,
             conformal=conformal,
             config=EngineConfig(domain=config.domain, tier="premium"),
@@ -65,13 +65,15 @@ def create_router(config: ServerConfig | None = None) -> TieredRouter:
     )
 
 
-def _backend(name: str) -> Any:
+def _backend(name: str, weights: str | None = None) -> Any:
     if name == "lexical":
+        if weights:
+            raise ValueError("the lexical backend has no weights to load")
         return LexicalBackend()
     if name == "torch":
         from ..backends.torch_readout import TorchReadoutBackend
 
-        return TorchReadoutBackend()
+        return TorchReadoutBackend.load(weights) if weights else TorchReadoutBackend()
     raise ValueError(f"unknown backend {name!r}; known backends are 'lexical' and 'torch'")
 
 
@@ -133,8 +135,10 @@ def build_app(config: ServerConfig | None = None, router: TieredRouter | None = 
             "status": "ok",
             "version": __version__,
             # Deliberately exposed: an uncalibrated deployment is allowed, a
-            # silently uncalibrated one is not.
+            # silently uncalibrated one is not. Same for an untrained one,
+            # which is the worse failure and looks identical from outside.
             "calibrated": config.is_calibrated,
+            "trained": config.is_trained,
             "context_tokens": DEFAULT_BUDGET.context_tokens,
             "latency_target_ms": {
                 "p50": DEFAULT_LATENCY_TARGET.p50_ms,

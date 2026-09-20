@@ -68,13 +68,15 @@ pytest -q
 ruff check src tests scripts
 trigon eval all -n 200             # exits non-zero on a failed gate
 trigon train --out reports/run.md --save-model reports/run.pt   # train, calibrate, gate
-trigon ask request.json --backend torch --weights reports/run.pt # serve that model
+trigon ask request.json --backend torch --weights reports/run.pt # one request
+trigon serve --backend torch --weights reports/run.pt            # behind the API
 python scripts/export_openapi.py   # after ANY change to the contract
 ```
 
 `tests/test_openapi_drift.py` fails if the checked-in spec and the gateway
-disagree. Both SDKs are generated from that spec, so regenerate it in the same
-commit as the change.
+disagree, so regenerate it in the same commit as the change. The SDKs are a
+phase-4 deliverable and will be generated from that file; nothing reads it yet,
+which is exactly why it has to be kept honest now.
 
 ## When adding a backend
 
@@ -84,8 +86,17 @@ probabilities cannot be calibrated post hoc. Return one entry per compiled
 question, in declared label order. `validate_output` runs on every path and will
 reject a wrong count, a wrong head or a non-finite value.
 
-If your backend has an exact tokenizer, expose it as `.estimator` and build the
-compiler with it (`make_compiler()`), so compiled token counts match the tensors.
+If your backend has an exact tokenizer, expose it as `.estimator`. `Engine` picks
+it up (`backends.base.estimator_of`) and compiles with it, so compiled token
+counts match the tensors. That wiring is the engine's job rather than each call
+site's because it was not: the gateway compiled with the character heuristic
+while the torch backend built tensors from its own tokenizer, and every torch
+request over HTTP died with a 500 while 190 tests stayed green.
+
+Name the build after its weights. `model_version` is the only build identifier
+that reaches the caller, so a randomly initialised model must not answer under
+the same name as a trained one — `TorchReadoutBackend.stamp_version()` is called
+when training finishes and when a checkpoint is written.
 
 ## When adding a benchmark
 

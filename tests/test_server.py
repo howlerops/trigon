@@ -139,3 +139,121 @@ def test_request_level_threshold_overrides_the_deployment_policy():
         json={**ROUTING_BODY, "options": {"escalate_below_confidence": 0.99}},
     ).json()
     assert body["tier"] == "escalated"
+
+
+# -- serving a trained model -------------------------------------------------
+#
+# These exist because the whole suite was green while the torch backend could
+# not be served at all: the gateway compiled with the character heuristic while
+# the backend built tensors from its own tokenizer, and every request died with
+# a 500. Nothing above this line touched the torch path over HTTP.
+
+
+def _torch_body() -> dict:
+    return {
+        "state": "the invoice never arrived and the customer wants a refund",
+        "questions": {
+            "intent": {
+                "type": "choice",
+                "instructions": "Route this ticket.",
+                "options": [
+                    {"name": "billing", "criteria": "an invoice, charge or refund"},
+                    {"name": "shipping", "criteria": "a parcel or a delivery"},
+                ],
+            },
+            "urgent": {"type": "noul", "instructions": "Needs a human within the hour?"},
+        },
+    }
+
+
+def _ask(config: ServerConfig, body: dict) -> dict:
+    """POST one request at a gateway built from ``config``."""
+    return TestClient(build_app(config)).post("/v1/systemone", json=body).json()
+
+
+def _health(config: ServerConfig) -> dict:
+    return TestClient(build_app(config)).get("/healthz").json()
+
+
+def test_torch_backend_is_actually_servable():
+    """The compiler must use the backend's tokenizer, not the heuristic."""
+    pytest.importorskip("torch", reason="the reference model needs the 'train' extra")
+    client = TestClient(build_app(ServerConfig(backend="torch")))
+    response = client.post("/v1/systemone", json=_torch_body())
+    assert response.status_code == 200, response.text
+    assert set(response.json()["answers"]) == {"intent", "urgent"}
+
+
+def test_gateway_and_cli_answer_identically(tmp_path):
+    """Two entry points, one Engine. If they drift, one of them is lying."""
+    pytest.importorskip("torch", reason="the reference model needs the 'train' extra")
+    from trigon.cli import _engine
+    from trigon.types import SystemOneRequest
+
+    body = _torch_body()
+    over_http = _ask(ServerConfig(backend="torch"), body)
+    direct = _engine("torch", None, None).answer(SystemOneRequest.model_validate(body))
+
+    assert over_http["answers"]["intent"]["probabilities"] == pytest.approx(
+        direct.answers["intent"].probabilities
+    )
+    assert over_http["answers"]["urgent"]["probability"] == pytest.approx(
+        direct.answers["urgent"].probability
+    )
+
+
+def test_serving_weights_changes_the_answers(tmp_path):
+    """A loaded checkpoint must reach the model, not be accepted and ignored."""
+    torch = pytest.importorskip("torch", reason="the reference model needs the 'train' extra")
+    from trigon.backends.torch_readout import TorchReadoutBackend
+
+    trained = TorchReadoutBackend(seed=0)
+    with torch.no_grad():
+        for parameter in trained.model.parameters():
+            parameter.add_(torch.randn_like(parameter) * 0.05)
+    checkpoint = tmp_path / "run.pt"
+    trained.save(checkpoint)
+
+    body = _torch_body()
+    bare = _ask(ServerConfig(backend="torch"), body)
+    loaded = _ask(ServerConfig(backend="torch", weights=str(checkpoint)), body)
+
+    assert (
+        loaded["answers"]["intent"]["probabilities"] != bare["answers"]["intent"]["probabilities"]
+    )
+
+
+def test_healthz_admits_when_a_deployment_is_untrained(tmp_path):
+    """Untrained is the worse failure and looks identical from outside."""
+    pytest.importorskip("torch", reason="the reference model needs the 'train' extra")
+    from trigon.backends.torch_readout import TorchReadoutBackend
+
+    assert _health(ServerConfig(backend="torch"))["trained"] is False
+
+    checkpoint = tmp_path / "run.pt"
+    TorchReadoutBackend(seed=0).save(checkpoint)
+    assert _health(ServerConfig(backend="torch", weights=str(checkpoint)))["trained"] is True
+
+    # The lexical floor has no weights to be missing.
+    assert _health(ServerConfig(backend="lexical"))["trained"] is True
+
+
+def test_response_distinguishes_an_untrained_model_from_a_trained_one(tmp_path):
+    """``model_version`` is the only build identifier that reaches the caller."""
+    pytest.importorskip("torch", reason="the reference model needs the 'train' extra")
+    from trigon.backends.torch_readout import TorchReadoutBackend
+
+    body = _torch_body()
+    bare = _ask(ServerConfig(backend="torch"), body)
+    assert bare["model"].endswith("-untrained")
+
+    checkpoint = tmp_path / "run.pt"
+    TorchReadoutBackend(seed=0).save(checkpoint)
+    served = _ask(ServerConfig(backend="torch", weights=str(checkpoint)), body)
+    assert not served["model"].endswith("-untrained")
+    assert served["model"] != bare["model"]
+
+
+def test_lexical_backend_rejects_weights_rather_than_ignoring_them():
+    with pytest.raises(ValueError, match="no weights"):
+        build_app(ServerConfig(backend="lexical", weights="reports/reference-run.pt"))

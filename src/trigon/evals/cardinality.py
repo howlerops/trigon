@@ -56,6 +56,17 @@ class CardinalityResult:
     def passed(self) -> bool:
         return self.recall >= self.limit
 
+    def to_dict(self) -> dict:
+        return {
+            "options": self.options,
+            "shortlist": self.shortlist,
+            "recall": self.recall,
+            "limit": self.limit,
+            "queries": self.queries,
+            "drop_slots": self.drop_slots,
+            "passed": self.passed,
+        }
+
     def __str__(self) -> str:
         verdict = "PASS" if self.passed else "FAIL"
         return (

@@ -18,11 +18,16 @@ __all__ = ["ServerConfig"]
 @dataclass
 class ServerConfig:
     backend: str = "lexical"
+    # Path to a checkpoint written by ``trigon train``. Without it a torch
+    # backend serves randomly initialised weights, which answer every question
+    # with noise -- so the gateway reports whether it has any.
+    weights: str | None = None
     domain: str | None = None
     # Paths to fitted artifacts. Absent means "serve uncalibrated and say so".
     temperature_path: str | None = None
     conformal_dir: str | None = None
     premium_backend: str | None = None
+    premium_weights: str | None = None
     escalate_below_confidence: float = 0.35
 
     @classmethod
@@ -30,10 +35,12 @@ class ServerConfig:
         source = env if env is not None else dict(os.environ)
         return cls(
             backend=source.get("TRIGON_BACKEND", "lexical"),
+            weights=source.get("TRIGON_WEIGHTS") or None,
             domain=source.get("TRIGON_DOMAIN") or None,
             temperature_path=source.get("TRIGON_TEMPERATURE_PATH") or None,
             conformal_dir=source.get("TRIGON_CONFORMAL_DIR") or None,
             premium_backend=source.get("TRIGON_PREMIUM_BACKEND") or None,
+            premium_weights=source.get("TRIGON_PREMIUM_WEIGHTS") or None,
             escalate_below_confidence=float(source.get("TRIGON_ESCALATE_BELOW_CONFIDENCE", "0.35")),
         )
 
@@ -56,3 +63,13 @@ class ServerConfig:
     def is_calibrated(self) -> bool:
         """Surfaced on /healthz: serving uncalibrated is allowed, hiding it is not."""
         return bool(self.temperature_path)
+
+    @property
+    def is_trained(self) -> bool:
+        """Whether the serving backend has learned anything.
+
+        Also surfaced on /healthz. A torch backend with no checkpoint answers
+        every question from randomly initialised weights, which is a far worse
+        failure than being uncalibrated and looks identical from outside.
+        """
+        return self.backend != "torch" or bool(self.weights)

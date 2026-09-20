@@ -193,6 +193,11 @@ def train(
         )
 
     model.eval()
+    # The weights are final, so the build can be named after them -- before the
+    # eval report is rendered, not only when a checkpoint is written. Otherwise
+    # a report about a trained model names it "untrained".
+    if hasattr(backend, "stamp_version"):
+        backend.stamp_version()
     return TrainingReport(
         epochs=tuple(epoch_reports),
         n_cases=len(cases),

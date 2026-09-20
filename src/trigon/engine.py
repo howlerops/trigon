@@ -1,7 +1,8 @@
 """The serving pipeline: compile, shortlist, infer, calibrate, answer.
 
-One place owns the order of operations, so the gateway, the eval harness and
-the SDK smoke tests cannot drift apart:
+One place owns the order of operations, so the gateway and the eval harness
+cannot drift apart -- and so the phase-4 SDKs have one pipeline to mirror
+rather than three:
 
 1. narrow any question that trips the large-cardinality trigger;
 2. compile the schema-first layout and its block mask;
@@ -21,7 +22,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 
-from .backends.base import Backend, QuestionOutput, validate_output
+from .backends.base import Backend, QuestionOutput, estimator_of, validate_output
 from .calibration.conformal import ConformalPredictor
 from .calibration.temperature import TemperatureScaler
 from .confidence import ConfidenceMethod, choice_confidence, score_confidence
@@ -75,7 +76,12 @@ class Engine:
     ) -> None:
         self.config = config or EngineConfig()
         self.backend = backend
-        self.compiler = compiler or SchemaCompiler(budget=self.config.budget)
+        # The backend's own tokenizer wins when it has one: compiled token
+        # counts have to match the tensors the backend builds, and a mismatch
+        # is a 500 at serve time rather than anything a caller can fix.
+        self.compiler = compiler or SchemaCompiler(
+            budget=self.config.budget, estimator=estimator_of(backend)
+        )
         self.scaler = scaler or TemperatureScaler()
         self.conformal = conformal or {}
         self.shortlister = shortlister or LexicalShortlister()

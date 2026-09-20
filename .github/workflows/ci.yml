@@ -81,7 +81,15 @@ jobs:
           pip install torch --index-url https://download.pytorch.org/whl/cpu
           pip install -e ".[dev,server,train]"
       - name: Train, calibrate, gate
-        run: trigon train -n 2500 --eval-n 6000 --epochs 6 --out reports/reference-run.md
+        # The same flags the committed reports/reference-run.md prints at the
+        # top of itself, so CI reproduces that run rather than a differently
+        # shaped model under the same name. --save-model because a report about
+        # a model nobody can reload is a claim rather than a result.
+        run: >
+          trigon train -n 2500 --eval-n 6000 --epochs 6 --lr 0.01
+          --d-model 128 --layers 2 --noise 0.2
+          --option-scoring readout_per_option
+          --out reports/reference-run.md --save-model reports/reference-run.pt
       - uses: actions/upload-artifact@v4
         with:
           name: reference-run

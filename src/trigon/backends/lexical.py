@@ -1,7 +1,7 @@
 """The lexical floor: a dependency-free baseline that is not a model.
 
 Its job is to be the bottom of every Pareto plot and to keep the whole stack --
-gateway, evals, SDKs, load tests -- runnable with no weights and no GPU. It
+gateway, evals, load tests -- runnable with no weights and no GPU. It
 scores each option by weighted token overlap between the option's name and
 criteria and the state, which puts it meaningfully above chance on keyword-ish
 tasks like intent routing and at chance on anything requiring inference. That

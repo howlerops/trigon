@@ -67,6 +67,14 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
     config = ServerConfig.from_env()
     config.backend = args.backend
+    if args.weights:
+        config.weights = args.weights
+    if config.backend == "torch" and not config.weights:
+        print(
+            "warning: serving torch with no --weights means randomly initialised "
+            "weights; /healthz will report trained=false",
+            file=sys.stderr,
+        )
     uvicorn.run(build_app(config), host=args.host, port=args.port)
     return 0
 
@@ -125,7 +133,9 @@ def cmd_eval(args: argparse.Namespace) -> int:
         out = pathlib.Path(args.out)
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(markdown)
-        out.with_suffix(".json").write_text(render_json(results, gates, slices))
+        out.with_suffix(".json").write_text(
+            render_json(results, gates, slices, cardinality, workflows)
+        )
         print(f"\nwrote {out} and {out.with_suffix('.json')}", file=sys.stderr)
 
     # Non-zero exit on any failed gate, so CI can depend on this directly.
@@ -394,6 +404,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     serve = sub.add_parser("serve", help="run the reference gateway")
     shared(serve)
+    serve.add_argument("--weights", default=None, help="a checkpoint written by 'trigon train'")
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8000)
     serve.set_defaults(func=cmd_serve)

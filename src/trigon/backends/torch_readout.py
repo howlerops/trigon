@@ -41,6 +41,7 @@ Heads, all categorical, none of them a regression:
 
 from __future__ import annotations
 
+import hashlib
 import math
 import time
 from pathlib import Path
@@ -67,6 +68,21 @@ from .base import BackendOutput, QuestionOutput
 from .tokenizer import READOUT_ID, HashingTokenizer
 
 __all__ = ["PrefillOnlyModel", "ReadoutConfig", "TorchReadoutBackend"]
+
+TRAINED_VERSION_PREFIX = "trigon-reference-0.1.0"
+# A randomly initialised model answers every question with noise. It says so in
+# its own version string, because ``model_version`` travels in the response and
+# is the only thing a caller downstream has to go on.
+UNTRAINED_VERSION = f"{TRAINED_VERSION_PREFIX}-untrained"
+
+
+def _weights_fingerprint(model) -> str:
+    """Eight hex characters over every parameter, so two checkpoints differ."""
+    digest = hashlib.blake2b(digest_size=4)
+    for name, tensor in sorted(model.state_dict().items()):
+        digest.update(name.encode())
+        digest.update(tensor.detach().cpu().contiguous().numpy().tobytes())
+    return digest.hexdigest()
 
 
 class ReadoutConfig:
@@ -178,7 +194,7 @@ class TorchReadoutBackend:
         *,
         model: PrefillOnlyModel | None = None,
         tokenizer: HashingTokenizer | None = None,
-        version: str = "trigon-reference-0.1.0",
+        version: str = UNTRAINED_VERSION,
         seed: int | None = 0,
     ) -> None:
         self.config = config or ReadoutConfig()
@@ -194,6 +210,18 @@ class TorchReadoutBackend:
 
     @property
     def model_version(self) -> str:
+        return self._version
+
+    def stamp_version(self) -> str:
+        """Name this build after the weights it actually has.
+
+        Called when training finishes and when a checkpoint is written, so the
+        eval report, the checkpoint and the served response all name the same
+        model. A no-op once the version carries a fingerprint, so an explicitly
+        named build keeps its name.
+        """
+        if "+" not in self._version:
+            self._version = f"{TRAINED_VERSION_PREFIX}+{_weights_fingerprint(self.model)}"
         return self._version
 
     @property
@@ -216,9 +244,13 @@ class TorchReadoutBackend:
         """
         target = Path(path)
         target.parent.mkdir(parents=True, exist_ok=True)
+        # Two checkpoints must not answer under one name: /healthz reports
+        # trained-ness, but ``model_version`` is the field the response carries,
+        # and a caller reading it has to be able to tell which build answered.
+        version = self.stamp_version()
         torch.save(
             {
-                "version": self._version,
+                "version": version,
                 "config": {
                     "vocab_size": self.config.vocab_size,
                     "d_model": self.config.d_model,
@@ -238,9 +270,14 @@ class TorchReadoutBackend:
         """Rebuild a backend from a checkpoint written by ``save``."""
         payload = torch.load(Path(path), map_location="cpu", weights_only=False)
         config = ReadoutConfig(**payload["config"])
-        backend = cls(config, version=version or payload.get("version", "trigon-reference"))
+        backend = cls(config, version=version or payload.get("version", TRAINED_VERSION_PREFIX))
         backend.model.load_state_dict(payload["state_dict"])
         backend.model.eval()
+        if version is None:
+            # An unfingerprinted checkpoint -- written before the weights were
+            # part of the name, or by hand -- is stamped from what was actually
+            # loaded, so two such checkpoints cannot answer under one version.
+            backend.stamp_version()
         return backend
 
     # -- inference -------------------------------------------------------

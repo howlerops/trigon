@@ -1,5 +1,6 @@
-"""The checked-in spec is what both SDKs are generated from, so it must match
-the reference gateway exactly. If this fails, run scripts/export_openapi.py."""
+"""The checked-in spec is the published contract -- and what the phase-4 SDKs
+will be generated from -- so it must match the reference gateway exactly.
+If this fails, run scripts/export_openapi.py."""
 
 from __future__ import annotations
 

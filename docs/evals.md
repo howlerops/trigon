@@ -356,3 +356,6 @@ is the honest answer: its top two probabilities are 0.323 and 0.320.
 - The API pins model versions. Responses name a concrete build, never an
   alias — answers change under users when an alias moves, and
   `tests/test_server.py` asserts the response carries a version, not a name.
+  The build is named from a hash of its weights, so two runs cannot answer
+  under one version and an untrained deployment says so in the version string
+  as well as on `/healthz`.
