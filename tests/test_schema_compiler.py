@@ -224,6 +224,7 @@ def test_attention_cost_is_block_diagonal_in_the_schema():
 def test_state_is_the_quadratic_term():
     """Doubling state roughly quadruples its contribution; doubling the number
     of questions does not."""
+
     def cost(state_words: int, n_questions: int) -> int:
         return compile_request(
             SystemOneRequest(

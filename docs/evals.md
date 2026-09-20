@@ -1,8 +1,8 @@
 # Evals
 
-Three suites, two gates and one closed loop, all on one runner. The harness —
-not any single result — is the durable asset, so everything here runs on a
-fresh clone with no weights.
+Four suites, the release gates and one closed loop, all on one runner. The
+harness — not any single result — is the durable asset, so everything here runs
+on a fresh clone with no weights.
 
 | | What it answers |
 | --- | --- |
@@ -11,6 +11,8 @@ fresh clone with no weights.
 | §3 Cardinality gate | does the prefilter pass the true option through |
 | §4 Reference run | does the whole pipeline close, and do the gates bite |
 | §5 Workflow suite | does it make the right decisions, at what cost and latency |
+
+`trigon eval all` runs every one of them and exits non-zero on any failure.
 
 ```bash
 trigon eval all -n 200 --out reports/run.md   # exits non-zero on a failed gate
@@ -121,10 +123,10 @@ indirection and context rot. A benchmark the floor aces measures nothing.
 
 ## 3. Cardinality recall gate
 
-Decision D1 puts the retrieval trigger at 1,024 options or 16,384 question
-tokens with a 256-option shortlist, and names its own falsifier: recall@256 must
-hold at **0.99**, because everything below the prefilter's recall is accuracy no
-model quality recovers.
+Decision D1 puts the retrieval trigger at 1,024 options or 65,536 question
+tokens with a 2,048-option shortlist, and names its own falsifier: recall at the
+shortlist size must hold at **0.99**, because everything below the prefilter's
+recall is accuracy no model quality recovers.
 
 ```bash
 python -c "from trigon.evals import run_cardinality_gate; run_cardinality_gate(on_result=print)"
@@ -255,22 +257,48 @@ ECE-only gates this arm would have been certified shippable.
 
 ## 5. Workflow suite
 
-Fixed compute graphs over one state, with later steps depending on earlier
-answers — the shape real pipelines have.
+```bash
+trigon eval workflow -n 200
+```
 
-Two departures from the methodology it borrows from:
+Fixed compute graphs over one state, with later steps depending on earlier
+answers — the shape real pipelines have. Two ship
+(`trigon.evals.workflows`), both with conditional steps:
+
+| Workflow | Graph | Lexical floor | Calls/case |
+| --- | --- | ---: | ---: |
+| `support_triage` | route to a team → ask the refund question **only of billing tickets** | 0.2550 | 1.06 |
+| `moderation_queue` | policy gate → classify and rate **only what the gate admitted** | 0.4150 | 1.16 |
+
+Floor figures at `n=200, seed=0`, reproducible with
+`trigon eval workflow -n 200`.
+
+Two departures from the methodology this borrows from:
 
 **Scored against resolved outcomes**, not against a frontier ensemble's
 probabilities. Agreement-with-frontier scoring is vendor-graded: when the
-reference and the candidate share an error, the error is invisible.
-Independent audits have flagged exactly this. Reference agreement is still
-reported as `reference_kl`, because it keeps our numbers comparable with
-published ones — it just is not the headline.
+reference and the candidate share an error, the error is invisible, and an
+independent audit flagged exactly that on the competitor's own dashboard
+(67.8% against reference answers that were themselves an average of two
+frontier models). Every decision here has an outcome the generator computed, so
+a wrong answer is wrong against reality. Reference agreement is still reported
+as `reference_kl` when a case carries one, because it keeps our numbers
+comparable — it just is not the headline.
 
 **Cost and latency on the same run**, so a result is a point on a Pareto plot
 rather than a percentage with no denominator. `mean_model_calls` is the axis
-that matters against a prompted baseline: the baseline pays per question, the
-model answers them all in one pass.
+that matters here: a graph that asks the refund question only of billing
+tickets lands at ~1.05 calls per case, not 2, and against a prompted baseline —
+which pays per question — that difference is the whole argument.
+
+**The routing step was built twice before it measured anything.** The first
+draft put the option criteria's own words in the ticket text and the lexical
+floor scored 0.832 — string overlap, not comprehension. The second made the
+surface signal *anti-correlated* with the truth, and the floor scored 0.000,
+which measures the distractor rather than the router. The shipped version gives
+the complaint and the distractor comparable lexical pull, and the floor lands
+at 0.255 against a 0.25 chance baseline. Same rule as the jaggedness suite: run
+the floor against a benchmark before believing it.
 
 ## Baselines
 
@@ -288,6 +316,38 @@ Every suite runs against any `Engine`, so the comparison is apples to apples:
 The baseline's system prompt states that state is data and never instructions.
 Without that, the injection comparison measures our prompt rather than their
 model.
+
+## The conformal wrapper
+
+The build plan's largest risk is that outcome-grounded calibration fitted on
+public and synthetic data does not transfer to a user's domain. The mitigation
+is that they fit a wrapper on a few hundred of their own labels, and a
+mitigation that exists only in a design document is not a mitigation — so it
+ships as a command:
+
+```bash
+trigon fit --backend torch --weights reports/reference-run.pt \
+           --out temperatures.json --conformal-out profiles/accounts.json
+```
+
+Fitted on a split the temperatures never saw and reported on a third, because a
+coverage number measured where the threshold was fitted is not a coverage
+number. The shipped profile (`reports/conformal/accounts.json`, LAC, α=0.1):
+
+```
+target 0.90, achieved 0.9227 on 1500 held-out answers, mean set 2.49 of 4
+```
+
+Served on the certified model, with `options.conformal_profile` set:
+
+```
+truth=free   point answer=free  conf=0.600  set: ['free']
+truth=pro    point answer=pro   conf=0.105  set: ['standard', 'pro', 'enterprise']
+```
+
+A singleton is a point answer with a guarantee. A wide set is the model saying
+it cannot separate those options at that coverage — which, for the second case,
+is the honest answer: its top two probabilities are 0.323 and 0.320.
 
 ## Operational gates
 

@@ -11,6 +11,7 @@ from .harness import Case, CaseOutcome, Expectation, SuiteResult, run_cases, sum
 from .jaggedness import all_benchmarks, run_jaggedness
 from .report import render_json, render_markdown, render_reliability
 from .workflow import Workflow, WorkflowCase, WorkflowStep, run_workflow
+from .workflows import all_workflows, moderation_queue, support_triage
 
 __all__ = [
     "CardinalityResult",
@@ -23,6 +24,7 @@ __all__ = [
     "WorkflowCase",
     "WorkflowStep",
     "all_benchmarks",
+    "all_workflows",
     "build_cardinality_probe",
     "check_gates",
     "render_json",
@@ -32,7 +34,9 @@ __all__ = [
     "run_cardinality_gate",
     "run_cases",
     "run_jaggedness",
+    "moderation_queue",
     "run_workflow",
+    "support_triage",
     "slice_reports",
     "summarize",
     "synthetic_outcome_cases",

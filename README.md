@@ -106,7 +106,10 @@ pip install -e ".[dev,server]"
 
 trigon ask request.json            # one request, no weights required
 trigon serve --port 8000           # the reference gateway
-trigon eval all -n 200             # three suites; exits non-zero on a failed gate
+trigon eval all -n 200             # every suite and gate; non-zero on a failure
+trigon eval workflow -n 200        # or one suite: calibration | jaggedness |
+                                   #   cardinality | workflow
+trigon fit --conformal-out p.json  # fit the post-hoc calibration layer
 trigon spec                        # the OpenAPI contract
 ```
 
@@ -170,6 +173,22 @@ about it, and each changed the plan:
   head — the one that makes huge option sets affordable — finished at 38.9%,
   *below* the 39.2% marginal predictor, while still passing every ECE gate.
 
+## When the probabilities cannot be trusted in your domain
+
+The largest risk in the plan is that calibration fitted on public and synthetic
+data does not transfer. The mitigation is a conformal wrapper you fit on a few
+hundred of your own labels, and it ships as a command rather than a promise:
+
+```bash
+trigon fit --backend torch --weights model.pt --conformal-out profiles/mine.json
+```
+
+It gives a distribution-free coverage guarantee that holds whether or not the
+underlying model is well calibrated. The shipped profile targets 90% and
+achieves 0.9227 on held-out data with a mean set of 2.49 of 4 options — a
+singleton where the model is confident, a wider set where it genuinely cannot
+separate the options.
+
 ## Layout
 
 ```
@@ -183,7 +202,7 @@ src/trigon/
   training/         proper scoring rules and the outcome-grounded training loop
   engine.py         the pipeline, in one place so nothing can drift
   server/           reference gateway; generates the OpenAPI spec
-  evals/            three suites, two gates, one runner, one closed loop
+  evals/            four suites, the release gates, one runner, one closed loop
 spec/openapi.json   the contract, drift-tested against the gateway
 docs/               architecture, training, data + licence audit, evals, decisions
 ```

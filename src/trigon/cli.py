@@ -80,11 +80,14 @@ def cmd_spec(args: argparse.Namespace) -> int:
 
 def cmd_eval(args: argparse.Namespace) -> int:
     from .evals import (
+        all_workflows,
         check_gates,
         render_json,
         render_markdown,
         run_calibration_suite,
+        run_cardinality_gate,
         run_jaggedness,
+        run_workflow,
         synthetic_outcome_cases,
     )
 
@@ -100,10 +103,23 @@ def cmd_eval(args: argparse.Namespace) -> int:
     if args.suite in {"jaggedness", "all"}:
         results.extend(run_jaggedness(engine, n=args.n, seed=args.seed))
 
-    if not results:
+    cardinality: list = []
+    if args.suite in {"cardinality", "all"}:
+        # Decision D1's falsifier. Capped by default because the top of the
+        # range is minutes, not seconds; --cardinality-max opens it up.
+        counts = tuple(c for c in (256, 1_024, 4_096, 10_000) if c <= args.cardinality_max)
+        cardinality = run_cardinality_gate(option_counts=counts, n_queries=args.n, seed=args.seed)
+
+    workflows: list = []
+    if args.suite in {"workflow", "all"}:
+        workflows = [
+            run_workflow(engine, wf, cases) for wf, cases in all_workflows(n=args.n, seed=args.seed)
+        ]
+
+    if not results and not cardinality and not workflows:
         raise SystemExit(f"unknown suite {args.suite!r}")
 
-    markdown = render_markdown(results, gates, slices)
+    markdown = render_markdown(results, gates, slices, cardinality, workflows)
     print(markdown)
     if args.out:
         out = pathlib.Path(args.out)
@@ -112,8 +128,9 @@ def cmd_eval(args: argparse.Namespace) -> int:
         out.with_suffix(".json").write_text(render_json(results, gates, slices))
         print(f"\nwrote {out} and {out.with_suffix('.json')}", file=sys.stderr)
 
-    # Non-zero exit on a failed gate, so CI can depend on this directly.
-    return 0 if all(g.passed for g in gates) else 1
+    # Non-zero exit on any failed gate, so CI can depend on this directly.
+    passed = all(g.passed for g in gates) and all(c.passed for c in cardinality)
+    return 0 if passed else 1
 
 
 def cmd_train(args: argparse.Namespace) -> int:
@@ -270,13 +287,21 @@ def _fit_temperatures(engine, cases):
 
 
 def cmd_fit(args: argparse.Namespace) -> int:
-    """Fit temperatures on the synthetic outcome set and save them."""
+    """Fit the post-hoc calibration layer on held-out labelled data.
+
+    This is the tool the build plan's biggest risk depends on: outcome-grounded
+    calibration fitted on public and synthetic data may not transfer to a
+    user's domain, and the mitigation is that they can fit a conformal wrapper
+    on a few hundred of their own labels. A mitigation that exists only in a
+    design document is not a mitigation, so it ships as a command.
+    """
     import math
 
+    from .calibration.conformal import ConformalMethod, fit_conformal
     from .calibration.temperature import TemperatureScaler
     from .evals import run_cases, synthetic_outcome_cases
 
-    engine = _engine(args.backend, args.domain)
+    engine = _engine(args.backend, args.domain, weights=args.weights)
     outcomes = run_cases(
         engine, synthetic_outcome_cases(n=args.n, seed=args.seed, noise=args.noise)
     )
@@ -304,7 +329,51 @@ def cmd_fit(args: argparse.Namespace) -> int:
 
     scaler.save(args.out)
     print(json.dumps(scaler.to_dict(), indent=2, sort_keys=True))
+
+    if args.conformal_out:
+        # Fitted on a split the temperatures never saw, and reported on a
+        # third: a coverage number measured where the threshold was fitted is
+        # not a coverage number.
+        calib = synthetic_outcome_cases(n=args.n, seed=args.seed + 500, noise=args.noise)
+        test = synthetic_outcome_cases(n=args.n, seed=args.seed + 900, noise=args.noise)
+        rows = _choice_rows(engine, calib)
+        held = _choice_rows(engine, test)
+        predictor = fit_conformal(
+            [p for p, _ in rows],
+            [y for _, y in rows],
+            alpha=args.alpha,
+            method=ConformalMethod(args.conformal_method),
+        )
+        out = pathlib.Path(args.conformal_out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        predictor.save(out)
+
+        from .calibration import coverage, mean_set_size
+
+        sets = [predictor.predict(p).indices for p, _ in held]
+        achieved = coverage(sets, [y for _, y in held])
+        print(
+            f"\nconformal '{out.stem}': target {predictor.target_coverage:.2f}, "
+            f"achieved {achieved:.4f} on {len(held)} held-out answers, "
+            f"mean set {mean_set_size(sets):.2f} of 4 options",
+            file=sys.stderr,
+        )
     return 0
+
+
+def _choice_rows(engine, cases) -> list[tuple[list[float], int]]:
+    """Choice distributions and their true labels, aligned."""
+    from .evals import run_cases
+
+    rows = []
+    for outcome in run_cases(engine, cases):
+        for question in outcome.questions.values():
+            if question.primitive != "choice" or question.expected is None:
+                continue
+            label = question.expected.hard_label
+            if label is not None:
+                rows.append((list(question.probabilities), label))
+    return rows
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -334,7 +403,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     ev = sub.add_parser("eval", help="run an eval suite; exits non-zero on a failed gate")
     shared(ev)
-    ev.add_argument("suite", choices=["calibration", "jaggedness", "all"])
+    ev.add_argument(
+        "suite", choices=["calibration", "jaggedness", "cardinality", "workflow", "all"]
+    )
+    ev.add_argument(
+        "--cardinality-max",
+        type=int,
+        default=4_096,
+        help="largest option count in the cardinality gate (10000 is minutes, not seconds)",
+    )
     ev.add_argument("-n", type=int, default=100, help="cases per benchmark")
     ev.add_argument("--seed", type=int, default=0)
     ev.add_argument("--noise", type=float, default=0.1, help="label noise in the synthetic set")
@@ -349,6 +426,19 @@ def build_parser() -> argparse.ArgumentParser:
     fit.add_argument("-n", type=int, default=400)
     fit.add_argument("--seed", type=int, default=1)
     fit.add_argument("--noise", type=float, default=0.1)
+    fit.add_argument("--weights", default=None, help="a checkpoint written by 'trigon train'")
+    fit.add_argument(
+        "--conformal-out",
+        default=None,
+        help="also fit a conformal profile and write it here",
+    )
+    fit.add_argument("--alpha", type=float, default=0.1, help="1 - target coverage")
+    fit.add_argument(
+        "--conformal-method",
+        default="lac",
+        choices=["lac", "aps"],
+        help="lac gives the smallest sets; aps tracks difficulty",
+    )
     fit.set_defaults(func=cmd_fit)
 
     tr = sub.add_parser("train", help="train the reference model, calibrate it, and run the gates")

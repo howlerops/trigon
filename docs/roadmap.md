@@ -20,7 +20,7 @@ not survive being checked.
 
 - **API spec** — `spec/openapi.json`, generated from the reference gateway,
   with `tests/test_openapi_drift.py` failing if the two ever disagree.
-- **Eval methodology frozen** — three suites, one runner, release gates that
+- **Eval methodology frozen** — four suites, one runner, release gates that
   exit non-zero. `trigon eval all`.
 - **Jaggedness suite runs against an LLM baseline** —
   `LLMBaselineBackend` wears the same interface as every other backend, so the
@@ -30,8 +30,11 @@ not survive being checked.
 - **Budgets and gates** — `trigon.limits`, single-sourced.
 
 - **The loop is closed** — `trigon train` fits the reference model on
-  outcome-grounded data, calibrates it and runs the gates, so the gates are
-  exercised by a model rather than only defined.
+  outcome-grounded data, calibrates it, runs the gates and writes a servable
+  checkpoint, so the gates are exercised by a model rather than only defined.
+- **The calibration-transfer mitigation ships** — `trigon fit --conformal-out`
+  fits the wrapper the plan's biggest risk depends on, and a fitted profile is
+  committed.
 
 Not phase 0, and not here: real weights on a real backbone, the vLLM fork, the
 Rust gateway, the ANN stage, the SDKs.

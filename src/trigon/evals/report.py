@@ -47,12 +47,21 @@ def render_markdown(
     results: Sequence[SuiteResult],
     gates: Sequence[GateResult] = (),
     slices: dict[str, CalibrationReport] | None = None,
+    cardinality: Sequence = (),
+    workflows: Sequence = (),
 ) -> str:
     """The release report."""
     out: list[str] = ["# Eval report", ""]
-    models = sorted({r.model for r in results})
+    models = sorted({r.model for r in results} | {w.model for w in workflows})
     out.append(f"Model(s): {', '.join(models)}")
     out.append("")
+
+    if not results:
+        out.append("_No calibration or jaggedness suites in this run._")
+        out.append("")
+        _append_cardinality(out, cardinality)
+        _append_workflows(out, workflows)
+        return "\n".join(out)
 
     out.append("## Suites")
     out.append("")
@@ -103,6 +112,9 @@ def render_markdown(
                 f"{rep.overconfidence:+.3f} | {rep.ece:.4f} |"
             )
         out.append("")
+
+    _append_cardinality(out, cardinality)
+    _append_workflows(out, workflows)
 
     primary = next((r for r in results if r.calibration is not None), None)
     if primary and primary.calibration is not None and primary.calibration.floor:
@@ -157,6 +169,41 @@ def render_json(
         indent=2,
         sort_keys=True,
     )
+
+
+def _append_cardinality(out: list[str], cardinality: Sequence) -> None:
+    """Decision D1's falsifier, swept across option count and query difficulty."""
+    if not cardinality:
+        return
+    out.append("## Cardinality recall gate")
+    out.append("")
+    out.append("| Options | Fields stated | Shortlist | Recall | Limit | |")
+    out.append("| ---: | ---: | ---: | ---: | ---: | --- |")
+    for r in cardinality:
+        out.append(
+            f"| {r.options:,} | {4 - r.drop_slots} of 4 | {r.shortlist:,} | "
+            f"{r.recall:.4f} | {r.limit:.2f} | {'PASS' if r.passed else '**FAIL**'} |"
+        )
+    out.append("")
+
+
+def _append_workflows(out: list[str], workflows: Sequence) -> None:
+    """Scored against resolved outcomes, with cost on the same run."""
+    if not workflows:
+        return
+    out.append("## Workflows")
+    out.append("")
+    out.append(
+        "| Workflow | Cases | Outcome accuracy | Model calls / case | Tokens | p50 ms | p99 ms |"
+    )
+    out.append("| --- | ---: | ---: | ---: | ---: | ---: | ---: |")
+    for w in workflows:
+        out.append(
+            f"| {w.workflow} | {w.n_cases} | {_fmt(w.outcome_accuracy)} | "
+            f"{w.mean_model_calls:.2f} | {w.mean_prefill_tokens:.0f} | "
+            f"{w.latency_p50_ms:.1f} | {w.latency_p99_ms:.1f} |"
+        )
+    out.append("")
 
 
 def _fmt(value: float | None) -> str:

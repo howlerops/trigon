@@ -241,7 +241,8 @@ def test_confidence_is_computed_before_truncation(engine):
     )
     full = engine.answer(base).answers["intent"]
     trimmed = engine.answer(
-        base.model_copy(update={"options": base.options.model_copy(
-            update={"top_probabilities": 5})})
+        base.model_copy(
+            update={"options": base.options.model_copy(update={"top_probabilities": 5})}
+        )
     ).answers["intent"]
     assert trimmed.confidence == pytest.approx(full.confidence)

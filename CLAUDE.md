@@ -4,7 +4,14 @@
 
 Phase 0 of the build plan in `docs/roadmap.md`: the contract, the calibration
 layer, the serving pipeline and the eval harness for a prefill-only, typed,
-calibrated decision model. No trained weights yet.
+calibrated decision model.
+
+The loop closes: `trigon train` fits the reference model, calibrates it, runs
+the gates and writes a servable checkpoint, and `trigon ask --weights` serves
+it. Three runs are committed under `reports/`. The reference model is a
+spike — 128-wide, two layers, a hashing tokenizer — so its accuracy is not a
+result; that the gates are exercised by a model rather than asserted about one
+is.
 
 ## Ground rules
 

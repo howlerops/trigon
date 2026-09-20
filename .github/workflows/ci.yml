@@ -58,13 +58,9 @@ jobs:
       - name: Cardinality recall gate
         # Decision D1's falsifier. Capped below the full sweep because the
         # 10k-option pass takes minutes; the nightly job runs the whole range.
-        run: |
-          python - <<'PY'
-          from trigon.evals import run_cardinality_gate
-          results = run_cardinality_gate(option_counts=(256, 1024), n_queries=100,
-                                         on_result=print)
-          raise SystemExit(0 if all(r.passed for r in results) else 1)
-          PY
+        run: trigon eval cardinality -n 100 --cardinality-max 1024
+      - name: Workflow suite
+        run: trigon eval workflow -n 150 --out reports/workflows.md
       - uses: actions/upload-artifact@v4
         with:
           name: eval-reports

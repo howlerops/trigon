@@ -15,7 +15,9 @@ a checkpoint. No weights are committed.
 | `served-model.md` | a smaller run (1,200 cases, 5 epochs) that **failed two gates** |
 
 Sidecars beside each report carry the fitted temperatures and the loss curve in
-machine-readable form. The dot-product arm has none: the two runs were launched
+machine-readable form. `conformal/accounts.json` is a fitted conformal profile
+for the certified model — target 90% coverage, 0.9227 achieved on a held-out
+split, mean set 2.49 of 4 options. The dot-product arm has none: the two runs were launched
 in parallel before sidecar names were derived from the report name, so they
 collided and the last writer won. The loss curve and gates are in its markdown
 report; the fix is in `trigon.cli`.

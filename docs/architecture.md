@@ -151,9 +151,14 @@ has no confidence field: a Noul at 0.5 is the model saying it does not know.
 ## Large cardinality
 
 Above the budgets in `trigon.limits`, a Choice goes embed → prefilter →
-model rescoring of a 256-option shortlist. Options the prefilter dropped come
-back with probability 0 rather than disappearing: the caller declared them, so
-the answer mentions them.
+model rescoring of a **2,048-option shortlist**. Options the prefilter dropped
+come back with probability 0 rather than disappearing: the caller declared
+them, so the answer mentions them.
+
+The shortlist was 256, matched to a competitor's cap rather than derived from
+anything, and at that size the recall gate failed on underdetermined queries.
+2,048 options fit the 65,536-token per-question budget with the criteria
+intact, and recall holds at 1.0000 — see `docs/decisions.md` §1.
 
 The number that governs this is `recall_at_k`. Everything below the
 prefilter's recall is accuracy no model quality can recover, so it is checked

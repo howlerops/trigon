@@ -50,15 +50,19 @@ question. Above the crossover the compiler switches to dot-product scoring
 where per-option slots stop being affordable at all.
 
 The **token** trigger is per-question, and it is why a count-only trigger is
-not enough. A bare option name runs ~4 tokens, so 1,024 names is ~4k tokens and
-fits comfortably. The same 1,024 options *with criteria* run ~20 tokens each —
-20k tokens against a 16,384-token per-question budget, which does not. Option
-count alone cannot predict whether a question is admissible; tokens can.
+not enough. A bare option name runs ~4 tokens, so 1,024 names is ~4k tokens.
+The same 1,024 options *with criteria* run ~20 tokens each — 20k tokens, which
+overran the 16,384-token budget this section originally set and still sizes a
+third of the 65,536 it has now. Option count alone cannot predict whether a
+question is admissible; tokens can.
 
-**Shortlist size: 256.** Chosen so the post-retrieval path is never narrower
-than the 255-option cap the competitor imposes natively. Large-N is a
-convenience edge, not a moat, and it would be a strange edge to ship if our
-two-stage path scored fewer candidates than their one-stage path.
+**Shortlist size: 2,048**, raised from 256. The original 256 was chosen to sit
+just above the 255-option cap the competitor imposes natively, so that our
+two-stage path never scored fewer candidates than their one-stage path. That
+was a limit matched to someone else's product rather than derived from
+anything, and it is precisely where the recall gate failed. At 2,048 the
+shortlist fits the per-question budget with the option criteria intact, and
+recall holds at 1.0000 across every difficulty the probe generates.
 
 **What would change our mind, and what happened when we ran it.**
 `recall_at_k` at the shortlist size, gated at **0.99**, because everything

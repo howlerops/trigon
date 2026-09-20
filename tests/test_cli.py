@@ -69,3 +69,44 @@ def test_spec_prints_the_contract(capsys):
 def test_unknown_backend_fails_with_a_useful_message():
     with pytest.raises(SystemExit, match="lexical"):
         main(["ask", "-", "--backend", "nope"])
+
+
+def test_eval_runs_the_cardinality_gate(capsys):
+    main(["eval", "cardinality", "-n", "20", "--cardinality-max", "256"])
+    out = capsys.readouterr().out
+    assert "Cardinality recall gate" in out
+    assert "Fields stated" in out
+
+
+def test_eval_runs_the_workflow_suite(capsys):
+    main(["eval", "workflow", "-n", "20"])
+    out = capsys.readouterr().out
+    assert "Workflows" in out
+    assert "support_triage" in out and "moderation_queue" in out
+    assert "Model calls / case" in out
+
+
+def test_eval_all_includes_every_suite(capsys):
+    main(["eval", "all", "-n", "20", "--cardinality-max", "256"])
+    out = capsys.readouterr().out
+    for section in ("## Suites", "Cardinality recall gate", "## Workflows", "Release gates"):
+        assert section in out, section
+
+
+def test_fit_writes_a_conformal_profile(tmp_path, capsys):
+    import pytest as _pytest
+
+    from trigon.calibration import ConformalPredictor
+
+    profile = tmp_path / "profiles" / "default.json"
+    with _pytest.warns(Warning):
+        main(
+            ["fit", "--out", str(tmp_path / "t.json"), "-n", "200", "--conformal-out", str(profile)]
+        )
+    capsys.readouterr()
+    loaded = ConformalPredictor.load(profile)
+    assert loaded.target_coverage == 0.9
+    # One Choice question per case in the synthetic generator ("plan");
+    # "size" is a Score and "at_risk" a Noul, and conformal sets are over
+    # categorical labels.
+    assert loaded.calibration_n == 200
