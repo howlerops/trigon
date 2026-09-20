@@ -82,10 +82,20 @@ Compute: ~$30–70k total — teacher labels, training, serving burn-in.
 ## Cut order under schedule pressure
 
 1. KV-cache quantization
-2. Large-N retrieval stage
+2. ~~Large-N retrieval stage~~ — **promoted out of the cut order**
 3. Premium tier
 
-All three are optimisations, not dependencies. **Never cut the calibration
+The plan listed large-N retrieval second to cut, as an optimisation. Running
+D1's falsifier says otherwise. At 10,000 options, a lexical prefilter holds
+recall@256 ≥ 0.99 only for queries that state three or four of four fields; at
+two fields it returns 0.94, and buying the recall back needs a ~1,536-option
+shortlist, which fits the per-question token budget only with the option
+criteria stripped out — and the criteria are what tell the model how to choose.
+Semantic retrieval is what makes high-cardinality routing work on realistic
+queries, so cutting it does not cost an optimisation, it costs the feature.
+Numbers in `docs/decisions.md` §1.
+
+The remaining two are optimisations, not dependencies. **Never cut the calibration
 training or the eval suites.** They are the product — the differentiator is
 published calibration evidence, and there is no version of this project that
 ships without it.

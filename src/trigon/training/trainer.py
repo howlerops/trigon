@@ -46,6 +46,13 @@ class TrainingConfig:
     grad_clip: float = 1.0
     seed: int = 0
     ordinal: OrdinalConfig = field(default_factory=OrdinalConfig)
+    #: Torch intra-op threads. One is not a typo: a request compiles to a few
+    #: hundred tokens at spike width, so every matmul is small enough that
+    #: thread-launch overhead exceeds the work it parallelises. Measured on
+    #: four cores, four threads ran this loop several times slower than one.
+    #: Raise it only when the model is big enough for the parallelism to pay,
+    #: and measure rather than assume.
+    torch_threads: int | None = 1
     # Fraction of a warmup, as a share of total steps.
     warmup: float = 0.05
     log_every: int = 0
@@ -105,6 +112,8 @@ def train(
     compiler = compiler or backend.make_compiler()
     rng = random.Random(config.seed)
     torch.manual_seed(config.seed)
+    if config.torch_threads is not None:
+        torch.set_num_threads(config.torch_threads)
 
     model = backend.model
     model.train()

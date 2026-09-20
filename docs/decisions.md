@@ -58,22 +58,75 @@ two-stage path scored fewer candidates than their one-stage path.
 `recall_at_k` at the shortlist size, gated at **0.99**, because everything
 below the prefilter's recall is accuracy no model quality recovers.
 
-That falsifier is implemented and runs: `trigon.evals.cardinality`. It could
-not be run on the corpus the plan named. UFET has no stated licence and its
-distant-supervision half derives from LDC-licensed Gigaword (`docs/data.md`),
-and no permissively-licensed corpus exists anywhere near the 1,024-option
-regime the trigger fires in — the largest green set in the audit is CLINC150 at
-151 classes. So the probe generates confusable option sets at 256 to 10,000
+That falsifier is implemented (`trigon.evals.cardinality`), it has been run,
+and **it failed** — which is the most useful thing a falsifier can do.
+
+It could not be run on the corpus the plan named. UFET has no stated licence
+and its distant-supervision half derives from LDC-licensed Gigaword
+(`docs/data.md`), and no permissively-licensed corpus exists near the
+1,024-option regime; the largest green set in the audit is CLINC150 at 151
+classes. So the probe generates confusable option sets at 256 to 10,000
 options, every true option surrounded by near-neighbours sharing most of its
 words. For a recall measurement that is arguably better than a found corpus:
-distractor similarity becomes a dial instead of whatever the data happened to
-contain.
+difficulty becomes a dial instead of whatever the data happened to contain.
 
-Results are in `docs/evals.md`. If the gate cannot be held at 256, the
-shortlist goes up and the latency cost gets published — it does not get quietly
-absorbed by lowering the gate.
+That dial is the point. Results, at a 256-option shortlist:
 
----
+| Query states | 1,024 options | 4,096 | 10,000 |
+| --- | ---: | ---: | ---: |
+| all 4 fields | 1.0000 | 1.0000 | 1.0000 |
+| 3 of 4 | 1.0000 | 1.0000 | 1.0000 |
+| **2 of 4** | 1.0000 | 1.0000 | **0.9400** ❌ |
+
+The first two rows say nothing: when a query names every field, the true option
+is a 4/4 lexical match and every distractor is at best 3/4, so any prefilter
+wins. Real tickets do not name every field. At two fields stated the gate
+fails at 10,000 options.
+
+**How far a bigger shortlist gets us, measured rather than assumed:**
+
+| Shortlist | recall (2 of 4 fields, 10,000 options) |
+| ---: | ---: |
+| 256 | 0.9533 |
+| 1,024 | 0.9800 |
+| **1,536** | **1.0000** ✅ |
+
+So the shortlist that holds the gate is about 1,536 — six times what we
+budgeted. And that is where it collides with the token budget from the top of
+this section:
+
+| Shortlist | With criteria | Names only | Per-question budget |
+| ---: | ---: | ---: | ---: |
+| 256 | 7,367 | 2,735 | 16,384 |
+| 1,024 | 29,209 ❌ | 10,775 | 16,384 |
+| 1,536 | 43,775 ❌ | 16,138 ⚠️ | 16,384 |
+
+A 1,536-option shortlist fits **only if the criteria are stripped** — and the
+criteria are what tell the model how to choose between options. Even then it
+uses 16,138 of 16,384 tokens, leaving 1.5% headroom.
+
+**What we are changing.** Three things.
+
+1. **The gate is restated with a difficulty level.** "recall@256 ≥ 0.99" is
+   not a claim until it says which queries. It holds to 10,000 options for
+   queries stating three or four of four fields; it does not hold at two.
+   `run_cardinality_gate` sweeps difficulty by default so the published number
+   is a curve rather than a flattering point.
+
+2. **Within retrieval, go two-stage.** Lexical prefilter to ~1,536 *names
+   only*, then rerank to 256 *with criteria*. Both stages fit their budgets,
+   and it needs no new infrastructure.
+
+3. **The ANN stage moves in the cut order.** The plan lists large-N retrieval
+   second to cut, as an optimisation. This measurement says otherwise: lexical
+   matching cannot separate options a short query underdetermines, and buying
+   the recall with shortlist size spends the entire token budget and the
+   criteria with it. Semantic retrieval is the thing that makes
+   high-cardinality routing work on realistic queries. `docs/roadmap.md` is
+   updated.
+
+None of that is a reason to lower the gate, which was the one option D1 ruled
+out in advance.
 
 ## 2. Ordinal-aware loss for Score, or plain cross-entropy
 
@@ -313,7 +366,20 @@ The same principle as the schema KV prefix and the attention mask, which is why
 it is worth naming: anything derived only from the schema is derived once. The
 bug survived unit tests because a shortlist of 500 options is instant; it only
 showed up when the cardinality gate ran the feature at the scale it was built
-for. Benchmarks at production scale find things correctness tests do not.
+for.
+
+The gate found a second bug in the same run, this time in itself: the probe
+drew option names by rejection sampling from a vocabulary of 2,744
+combinations, so asking it for 10,000 distinct names did not terminate. Names
+are now enumerated and shuffled, with a numeric discriminator past the
+vocabulary — which is also what real taxonomies do once they outgrow their
+naming scheme.
+
+Two bugs, both invisible below the scale the feature exists for, both found by
+running it at that scale. Load tests are not an optimisation exercise; they are
+where this class of defect becomes visible at all, which is an argument for
+moving phase 3's load testing earlier rather than treating it as a late
+validation step.
 
 ### The floor backend is a real baseline, not a mock
 

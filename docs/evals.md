@@ -113,8 +113,21 @@ hold at **0.99**, because everything below the prefilter's recall is accuracy no
 model quality recovers.
 
 ```bash
-python -c "from trigon.evals import run_cardinality_gate; [print(r) for r in run_cardinality_gate()]"
+python -c "from trigon.evals import run_cardinality_gate; run_cardinality_gate(on_result=print)"
 ```
+
+**The gate sweeps query difficulty, and the difficulty is the measurement.**
+When a query names all four fields of its true option, that option is a 4/4
+lexical match against distractors that are at best 3/4, and recall@256 reads
+1.0000 at every option count — which tells you nothing except that exact
+matching is easy. `drop_slots` leaves fields unstated, as real tickets do.
+
+At a 256-option shortlist the gate holds to 10,000 options for queries stating
+three or four fields, and **fails at two** (0.9400). Holding it there needs a
+~1,536-option shortlist, which fits the per-question token budget only with the
+option criteria stripped. The full table, and the three changes it forced, are
+in `docs/decisions.md` §1 — including moving the ANN stage out of the cut
+order.
 
 The option sets are generated, and that is a consequence of the licence audit
 rather than a convenience: UFET — the ~10k-type corpus the build plan named for

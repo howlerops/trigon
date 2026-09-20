@@ -126,13 +126,14 @@ def cmd_train(args: argparse.Namespace) -> int:
     from .backends.torch_readout import ReadoutConfig, TorchReadoutBackend
     from .engine import Engine
     from .evals import check_gates, render_markdown, run_calibration_suite, synthetic_outcome_cases
+    from .schema import OptionScoring
     from .training import TrainingConfig
     from .training import train as run_training
 
     backend = TorchReadoutBackend(
         ReadoutConfig(d_model=args.d_model, n_layers=args.layers), seed=args.seed
     )
-    compiler = backend.make_compiler()
+    compiler = backend.make_compiler(option_scoring=OptionScoring(args.option_scoring))
 
     train_cases = synthetic_outcome_cases(n=args.n, seed=args.seed, noise=args.noise)
     # A separate seed, so the held-out split is genuinely unseen rather than a
@@ -169,16 +170,62 @@ def cmd_train(args: argparse.Namespace) -> int:
         floor_trials=args.floor_trials,
     )
     gates = check_gates(after)
+    markdown = _training_section(report, args) + render_markdown(
+        [before, after], gates, slices
+    )
 
-    print(render_markdown([before, after], gates, slices))
+    print(markdown)
     if args.out:
         out = pathlib.Path(args.out)
         out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(render_markdown([before, after], gates, slices))
+        out.write_text(markdown)
         scaler.save(out.with_name("temperatures.json"))
         out.with_name("training.json").write_text(_json.dumps(report.to_dict(), indent=2))
         print(f"\nwrote {out}, temperatures.json and training.json", file=sys.stderr)
     return 0 if all(g.passed for g in gates) else 1
+
+
+def _training_section(report, args) -> str:
+    """Put the run's own settings and loss curve above the eval report.
+
+    A calibration number is not interpretable without the run that produced it,
+    and the Bayes-optimal loss is computable for this generator -- so the
+    report states how far from optimal the model actually got rather than
+    leaving the reader to guess whether the loss is good.
+    """
+    import math
+
+    correct = 1.0 - args.noise + args.noise / 4
+    wrong = args.noise / 4
+    floor_categorical = -(correct * math.log(correct) + 3 * wrong * math.log(wrong))
+    floor_binary = -(
+        (1 - args.noise) * math.log(1 - args.noise) + args.noise * math.log(args.noise)
+    )
+    # Two categorical questions and one Noul per case.
+    bayes = (2 * floor_categorical + floor_binary) / 3
+    chance = (2 * math.log(4) + math.log(2)) / 3
+
+    lines = [
+        "# Reference run",
+        "",
+        f"`{args.n}` training cases, `{args.epochs}` epochs, lr `{args.lr}`, "
+        f"d_model `{args.d_model}`, layers `{args.layers}`, "
+        f"option scoring `{args.option_scoring}`, label noise `{args.noise}`.",
+        "",
+        "| Epoch | Mean loss | Seconds |",
+        "| ---: | ---: | ---: |",
+    ]
+    for epoch in report.epochs:
+        lines.append(f"| {epoch.epoch} | {epoch.mean_loss:.4f} | {epoch.seconds:.0f} |")
+    achieved = (chance - report.final_loss) / max(chance - bayes, 1e-9)
+    lines += [
+        "",
+        f"Chance is `{chance:.4f}` and the Bayes-optimal loss for this generator "
+        f"is `{bayes:.4f}` — the label noise puts a floor under how well anything "
+        f"can do. The run closed **{achieved:.0%}** of that gap.",
+        "",
+    ]
+    return "\n".join(lines)
 
 
 def _fit_temperatures(engine, cases):
@@ -306,6 +353,13 @@ def build_parser() -> argparse.ArgumentParser:
     tr.add_argument("--seed", type=int, default=0)
     tr.add_argument("--floor-trials", type=int, default=100)
     tr.add_argument("--log-every", type=int, default=25)
+    tr.add_argument(
+        "--option-scoring",
+        default="auto",
+        choices=["auto", "readout_per_option", "dot_product"],
+        help="phase-1 ablation: a readout slot per option, or one slot dotted "
+        "with pooled option states",
+    )
     tr.add_argument("--out", default=None, help="write the report here")
     tr.set_defaults(func=cmd_train)
     return parser
