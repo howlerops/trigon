@@ -66,10 +66,24 @@ class ServerConfig:
 
     @property
     def is_trained(self) -> bool:
-        """Whether the serving backend has learned anything.
+        """Whether **every** configured tier has learned anything.
 
-        Also surfaced on /healthz. A torch backend with no checkpoint answers
-        every question from randomly initialised weights, which is a far worse
+        Surfaced on /healthz. A torch backend with no checkpoint answers every
+        question from randomly initialised weights, which is a far worse
         failure than being uncalibrated and looks identical from outside.
+
+        Both tiers count. An untrained premium tier is the harder one to
+        notice: it answers only the questions the workhorse could not settle,
+        so it is exactly the traffic nobody is watching, and a deployment that
+        reported ``trained`` for the workhorse alone would say nothing about
+        it.
         """
-        return self.backend != "torch" or bool(self.weights)
+        return self._tier_is_trained(self.backend, self.weights) and self._tier_is_trained(
+            self.premium_backend, self.premium_weights
+        )
+
+    @staticmethod
+    def _tier_is_trained(backend: str | None, weights: str | None) -> bool:
+        if backend is None:
+            return True  # a tier that is not configured cannot be untrained
+        return backend != "torch" or bool(weights)

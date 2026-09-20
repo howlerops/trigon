@@ -257,3 +257,24 @@ def test_response_distinguishes_an_untrained_model_from_a_trained_one(tmp_path):
 def test_lexical_backend_rejects_weights_rather_than_ignoring_them():
     with pytest.raises(ValueError, match="no weights"):
         build_app(ServerConfig(backend="lexical", weights="reports/reference-run.pt"))
+
+
+def test_healthz_counts_the_premium_tier_as_well(tmp_path):
+    """An untrained premium tier is the harder one to notice: it answers only
+    what the workhorse could not settle, which is the traffic nobody watches."""
+    pytest.importorskip("torch", reason="the reference model needs the 'train' extra")
+    from trigon.backends.torch_readout import TorchReadoutBackend
+
+    untrained_premium = ServerConfig(backend="lexical", premium_backend="torch")
+    assert _health(untrained_premium)["trained"] is False
+
+    checkpoint = tmp_path / "premium.pt"
+    TorchReadoutBackend(seed=0).save(checkpoint)
+    assert (
+        _health(
+            ServerConfig(
+                backend="lexical", premium_backend="torch", premium_weights=str(checkpoint)
+            )
+        )["trained"]
+        is True
+    )
