@@ -73,8 +73,10 @@ def test_training_reduces_loss():
     cases = synthetic_outcome_cases(n=120, seed=0, noise=0.2)
     report = train(backend, cases, TrainingConfig(epochs=3, accumulate=8, learning_rate=1e-2))
     assert report.final_loss < report.first_loss
-    assert report.n_cases == 120
-    assert report.n_questions == 360  # three answerable questions per case
+    # 10% is held out to choose which epoch to keep, so the report counts the
+    # cases gradients were actually taken on -- not the ones handed in.
+    assert report.n_cases == 108
+    assert report.n_questions == 324  # three answerable questions per case
 
 
 def test_training_leaves_the_model_in_eval_mode():
@@ -324,3 +326,84 @@ def test_an_empty_batch_is_not_an_error():
     from trigon.backends.torch_readout import TorchReadoutBackend
 
     assert TorchReadoutBackend(seed=0).logits_batch([]) == []
+
+
+# -- keeping the best epoch --------------------------------------------------
+
+
+def test_the_best_epoch_is_kept_not_the_last():
+    """The 8,000-case run's loss bottomed at epoch 4 and rose for the next
+    four. Keeping the last epoch ships weights the run had already beaten."""
+    from trigon.backends.torch_readout import ReadoutConfig, TorchReadoutBackend
+    from trigon.evals.datasets import synthetic_outcome_cases
+    from trigon.training import TrainingConfig, train
+
+    backend = TorchReadoutBackend(ReadoutConfig(d_model=64, n_layers=1), seed=0)
+    report = train(
+        backend,
+        synthetic_outcome_cases(n=400, seed=0, noise=0.2),
+        # A learning rate high enough that later epochs get worse, which is the
+        # case the selection exists for.
+        TrainingConfig(epochs=4, learning_rate=0.3, accumulate=16, seed=0),
+        compiler=backend.make_compiler(),
+    )
+    losses = [e.validation_loss for e in report.epochs]
+    assert all(v is not None for v in losses), "a holdout should have been taken"
+    best = min(range(len(losses)), key=lambda i: losses[i]) + 1
+    assert report.kept_epoch == best
+
+
+def test_selection_uses_data_the_gradients_never_saw():
+    """Selecting on training loss picks the epoch that memorised hardest."""
+    from trigon.backends.torch_readout import ReadoutConfig, TorchReadoutBackend
+    from trigon.evals.datasets import synthetic_outcome_cases
+    from trigon.training import TrainingConfig, train
+
+    cases = synthetic_outcome_cases(n=400, seed=0, noise=0.2)
+    backend = TorchReadoutBackend(ReadoutConfig(d_model=64, n_layers=1), seed=0)
+    report = train(
+        backend,
+        cases,
+        TrainingConfig(epochs=2, learning_rate=0.01, accumulate=16, seed=0),
+        compiler=backend.make_compiler(),
+    )
+    # 10% held out by default, so the reported case count is the training half.
+    assert report.n_cases == len(cases) - max(1, int(len(cases) * 0.1))
+
+
+def test_the_holdout_can_be_switched_off():
+    """0 keeps every case for training and the final epoch's weights."""
+    from trigon.backends.torch_readout import ReadoutConfig, TorchReadoutBackend
+    from trigon.evals.datasets import synthetic_outcome_cases
+    from trigon.training import TrainingConfig, train
+
+    cases = synthetic_outcome_cases(n=200, seed=0, noise=0.2)
+    backend = TorchReadoutBackend(ReadoutConfig(d_model=64, n_layers=1), seed=0)
+    report = train(
+        backend,
+        cases,
+        TrainingConfig(epochs=2, learning_rate=0.01, accumulate=16, seed=0, validation_fraction=0),
+        compiler=backend.make_compiler(),
+    )
+    assert report.n_cases == len(cases)
+    assert all(e.validation_loss is None for e in report.epochs)
+    assert report.kept_epoch == len(report.epochs)
+
+
+def test_the_holdout_is_the_same_cases_on_a_rerun():
+    """A run that reproduces has to hold out the same slice."""
+    import random as _random
+
+    from trigon.evals.datasets import synthetic_outcome_cases
+    from trigon.training.trainer import TrainingConfig
+
+    cases = synthetic_outcome_cases(n=300, seed=0, noise=0.2)
+    config = TrainingConfig(seed=0)
+
+    def holdout_ids():
+        shuffled = list(cases)
+        _random.Random(config.seed + 7919).shuffle(shuffled)
+        cut = max(1, int(len(shuffled) * config.validation_fraction))
+        return [c.case_id for c in shuffled[:cut]]
+
+    assert holdout_ids() == holdout_ids()

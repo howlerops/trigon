@@ -169,8 +169,14 @@ def cmd_train(args: argparse.Namespace) -> int:
     from .training import TrainingConfig
     from .training import train as run_training
 
+    tokenizer = None
+    if args.tokenizer == "hashing":
+        from .backends.tokenizer import HashingTokenizer
+
+        tokenizer = HashingTokenizer()
     backend = TorchReadoutBackend(
-        ReadoutConfig(
+        tokenizer=tokenizer,
+        config=ReadoutConfig(
             d_model=args.d_model,
             n_layers=args.layers,
             match_normalize=args.match_normalize,
@@ -268,7 +274,8 @@ def _training_section(report, args) -> str:
         f"--layers {args.layers} --noise {args.noise} --seed {args.seed} "
         f"--floor-trials {args.floor_trials} --option-scoring {args.option_scoring}"
         + (" --match-normalize" if args.match_normalize else "")
-        + (" --match-residual" if args.match_residual else "")
+        + ("" if args.match_residual else " --no-match-residual")
+        + (f" --tokenizer {args.tokenizer}" if args.tokenizer != "bpe" else "")
     )
     lines = [
         "# Reference run",
@@ -496,14 +503,21 @@ def build_parser() -> argparse.ArgumentParser:
     tr.add_argument("--seed", type=int, default=0)
     tr.add_argument("--floor-trials", type=int, default=100)
     tr.add_argument(
+        "--tokenizer",
+        default="bpe",
+        choices=["bpe", "hashing"],
+        help="ablation: the shipped BPE vocabulary, or the hashing fallback",
+    )
+    tr.add_argument(
         "--match-normalize",
         action="store_true",
         help="dot-product head: cosine similarity with a learnable temperature",
     )
     tr.add_argument(
         "--match-residual",
-        action="store_true",
-        help="dot-product head: add each option's input embedding to its key",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="dot-product head: add each option's input embedding to its key (default on)",
     )
     tr.add_argument("--log-every", type=int, default=25)
     tr.add_argument(

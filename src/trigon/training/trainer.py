@@ -56,6 +56,11 @@ class TrainingConfig:
     # Fraction of a warmup, as a share of total steps.
     warmup: float = 0.05
     log_every: int = 0
+    #: Share of ``cases`` held out to pick which epoch to keep. The reference
+    #: run's loss bottomed at epoch 4 and rose for the next four, so a run that
+    #: keeps its last epoch ships weights it had already beaten. 0 disables the
+    #: holdout and keeps the final epoch, which is the old behaviour.
+    validation_fraction: float = 0.1
 
 
 @dataclass(frozen=True)
@@ -63,6 +68,10 @@ class EpochReport:
     epoch: int
     mean_loss: float
     seconds: float
+    #: Loss on the held-out slice, when one was taken. This is what selects
+    #: the kept epoch; ``mean_loss`` is the training loss and will keep
+    #: falling after this one stops.
+    validation_loss: float | None = None
 
 
 @dataclass(frozen=True)
@@ -71,6 +80,8 @@ class TrainingReport:
     n_cases: int
     n_questions: int
     seconds: float
+    #: Which epoch's weights the model ended up holding. Not always the last.
+    kept_epoch: int = 0
 
     @property
     def first_loss(self) -> float:
@@ -83,7 +94,12 @@ class TrainingReport:
     def to_dict(self) -> dict:
         return {
             "epochs": [
-                {"epoch": e.epoch, "mean_loss": e.mean_loss, "seconds": e.seconds}
+                {
+                    "epoch": e.epoch,
+                    "mean_loss": e.mean_loss,
+                    "seconds": e.seconds,
+                    "validation_loss": e.validation_loss,
+                }
                 for e in self.epochs
             ],
             "n_cases": self.n_cases,
@@ -91,6 +107,7 @@ class TrainingReport:
             "seconds": self.seconds,
             "first_loss": self.first_loss,
             "final_loss": self.final_loss,
+            "kept_epoch": self.kept_epoch,
         }
 
 
@@ -121,6 +138,15 @@ def train(
         model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay
     )
 
+    # Held-out slice for choosing which epoch to keep. Taken deterministically
+    # from a shuffle of the same seed, so a rerun holds out the same cases.
+    holdout: list[Case] = []
+    if config.validation_fraction > 0 and len(cases) >= 2 / config.validation_fraction:
+        shuffled = list(cases)
+        random.Random(config.seed + 7919).shuffle(shuffled)
+        cut = max(1, int(len(shuffled) * config.validation_fraction))
+        holdout, cases = shuffled[:cut], shuffled[cut:]
+
     order = list(range(len(cases)))
     steps_per_epoch = max(1, math.ceil(len(order) / config.accumulate))
     total_steps = steps_per_epoch * config.epochs
@@ -130,6 +156,7 @@ def train(
     started = time.perf_counter()
     epoch_reports: list[EpochReport] = []
     counted_questions = 0
+    best: tuple[float, int, dict] | None = None
 
     for epoch in range(config.epochs):
         rng.shuffle(order)
@@ -189,18 +216,41 @@ def train(
                     flush=True,
                 )
 
+        validation = _validation_loss(backend, compiler, holdout, config) if holdout else None
+        if validation is not None and (best is None or validation < best[0]):
+            best = (
+                validation,
+                epoch + 1,
+                {k: v.detach().clone() for k, v in model.state_dict().items()},
+            )
+
         record = EpochReport(
             epoch=epoch + 1,
             mean_loss=total / max(seen, 1),
             seconds=time.perf_counter() - epoch_started,
+            validation_loss=validation,
         )
         epoch_reports.append(record)
         # Always on stderr, regardless of log_every: a training run with no
         # visible progress is indistinguishable from a hung one, and the first
         # epoch's loss is the cheapest signal that anything is learning at all.
         print(
-            f"  epoch {record.epoch}/{config.epochs}: loss {record.mean_loss:.4f} "
-            f"({record.seconds:.0f}s, {seen / max(record.seconds, 1e-9):.1f} cases/s)",
+            f"  epoch {record.epoch}/{config.epochs}: loss {record.mean_loss:.4f}"
+            + (f" val {validation:.4f}" if validation is not None else "")
+            + f" ({record.seconds:.0f}s, {seen / max(record.seconds, 1e-9):.1f} cases/s)",
+            file=sys.stderr,
+            flush=True,
+        )
+
+    kept = len(epoch_reports)
+    if best is not None and best[1] != kept:
+        # The last epoch is not the best one. Keeping it anyway ships weights
+        # the run had already beaten -- which is not hypothetical: the 8,000
+        # case run bottomed at epoch 4 and rose for the next four.
+        model.load_state_dict(best[2])
+        kept = best[1]
+        print(
+            f"  keeping epoch {kept} (validation {best[0]:.4f}), not the last",
             file=sys.stderr,
             flush=True,
         )
@@ -212,11 +262,48 @@ def train(
     if hasattr(backend, "stamp_version"):
         backend.stamp_version()
     return TrainingReport(
+        kept_epoch=kept,
         epochs=tuple(epoch_reports),
         n_cases=len(cases),
         n_questions=counted_questions,
         seconds=time.perf_counter() - started,
     )
+
+
+@torch.no_grad()
+def _validation_loss(backend, compiler, holdout: Sequence[Case], config: TrainingConfig) -> float:
+    """Mean loss on the held-out slice, in eval mode.
+
+    Selection has to happen on data the gradients never saw, or it selects the
+    epoch that memorised hardest rather than the one that generalised best.
+    """
+    was_training = backend.model.training
+    backend.model.eval()
+    try:
+        total, seen = 0.0, 0
+        for start in range(0, len(holdout), config.accumulate):
+            chunk = holdout[start : start + config.accumulate]
+            items = [(compiler.compile_request(c.request), c.request) for c in chunk]
+            for case, (compiled, _), raw in zip(
+                chunk, items, backend.logits_batch(items), strict=True
+            ):
+                losses = [
+                    question_loss(
+                        raw[q.question_id],
+                        q.kind,
+                        case.expected[q.question_id].hard_label,
+                        config.ordinal,
+                    )
+                    for q in compiled.schema.questions
+                    if case.expected.get(q.question_id) is not None
+                    and case.expected[q.question_id].hard_label is not None
+                ]
+                if losses:
+                    total += float(torch.stack(losses).mean())
+                    seen += 1
+        return total / max(seen, 1)
+    finally:
+        backend.model.train(was_training)
 
 
 def _set_lr(optimizer, config: TrainingConfig, step: int, total: int, warmup: int) -> None:
