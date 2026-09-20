@@ -219,13 +219,14 @@ a phase-0 gate:
 
 | Tier | Licences | May be used for |
 | --- | --- | --- |
-| **Green** | Apache-2.0, MIT, CC0, CC BY 4.0, ODC-BY | Training, eval, redistribution |
-| **Amber** | CC BY-SA, NC clauses, "research use" terms | Eval only. Never in a training mix, never redistributed |
+| **Green** | Apache-2.0, MIT, CC0, CC BY 4.0, CC BY 3.0, ODC-BY | Training, eval, redistribution |
+| **Amber** | CC BY-SA, NC clauses, "research use" terms, platform terms of use | Eval only. Never in a training mix, never redistributed |
 | **Red** | Competition-only terms, unclear provenance, no stated licence | Prototyping on a local copy only; blocked from any shipped artifact |
 
 Concrete consequences for the seed list in the plan: Banking77, MASSIVE,
-Circa, HelpSteer2/3 (CC BY 4.0), GoEmotions, Amazon ESCI (Apache-2.0) and
-Civil Comments (CC0) are green. BoolQ and FEVER (CC BY-SA) are amber — the
+Circa, HelpSteer2/3 (CC BY 4.0), GoEmotions (Apache-2.0) and Civil Comments
+(CC0) are green — each confirmed against its dataset card, not inherited from
+the plan. Amazon ESCI is **not**: see below. BoolQ and FEVER (CC BY-SA) are amber — the
 share-alike term is a redistribution question for a derived model, so they are
 eval-only until counsel says otherwise. The Kaggle entries (ASAP, Home Credit,
 IEEE-CIS) are red by default: competition terms are frequently
@@ -254,10 +255,16 @@ repositories on 2026-09-20 rather than against the plan's assumptions:
   permission from Metaculus for research purposes only".
 - LMSYS is behind a custom, gated dataset licence agreement: **red** until
   counsel reads it.
+- **Amazon ESCI drops from green to amber.** Its repository carries an
+  Apache-2.0 LICENSE and a README saying "this project is licensed under the
+  Apache-2.0 License" — a code licence, with no separate grant for the data.
+  This policy exists precisely to reject that pattern, and applying it to a row
+  we wanted to keep is the test of whether the policy is real.
 
-Two of those change the plan rather than confirming it, and both are written up
-in `docs/data.md`: the cardinality stress test has no licensed corpus, and
-every resolved-outcome corpus is blocked.
+Three of those change the plan rather than confirming it, and all three are
+written up in `docs/data.md`: the cardinality stress test has no licensed
+corpus, every resolved-outcome corpus is blocked, and the trainable pool has no
+e-commerce domain left.
 
 **What would change our mind on the weights licence.** Evidence that the
 practical alternative is not "someone hosts our weights" but "nobody adopts

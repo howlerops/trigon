@@ -246,12 +246,24 @@ def _training_section(report, args) -> str:
     bayes = (2 * floor_categorical + floor_binary) / 3
     chance = (2 * math.log(4) + math.log(2)) / 3
 
+    # Every setting that moves a number in this report, as a command that can
+    # be pasted back. The prose version left out --eval-n and --floor-trials,
+    # so a report could not in fact be reproduced from what it printed.
+    command = (
+        f"trigon train -n {args.n} --eval-n {args.eval_n} --epochs {args.epochs} "
+        f"--lr {args.lr} --accumulate {args.accumulate} --d-model {args.d_model} "
+        f"--layers {args.layers} --noise {args.noise} --seed {args.seed} "
+        f"--floor-trials {args.floor_trials} --option-scoring {args.option_scoring}"
+    )
     lines = [
         "# Reference run",
         "",
-        f"`{args.n}` training cases, `{args.epochs}` epochs, lr `{args.lr}`, "
-        f"d_model `{args.d_model}`, layers `{args.layers}`, "
-        f"option scoring `{args.option_scoring}`, label noise `{args.noise}`.",
+        "Everything below is reproducible from this command — the run is seeded "
+        "end to end, so it returns the same weights and the same gate verdicts:",
+        "",
+        "```bash",
+        command,
+        "```",
         "",
         "| Epoch | Mean loss | Seconds |",
         "| ---: | ---: | ---: |",

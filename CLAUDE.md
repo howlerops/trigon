@@ -7,8 +7,10 @@ layer, the serving pipeline and the eval harness for a prefill-only, typed,
 calibrated decision model.
 
 The loop closes: `trigon train` fits the reference model, calibrates it, runs
-the gates and writes a servable checkpoint, and `trigon ask --weights` serves
-it. Three runs are committed under `reports/`. The reference model is a
+the gates and writes a servable checkpoint, which `trigon ask --weights` and
+`trigon serve --weights` both load — and `tests/test_server.py` asserts the two
+return the same probabilities, because for a while only one of them worked.
+Three runs are committed under `reports/`. The reference model is a
 spike — 128-wide, two layers, a hashing tokenizer — so its accuracy is not a
 result; that the gates are exercised by a model rather than asserted about one
 is.

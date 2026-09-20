@@ -84,10 +84,14 @@ and is a known way to wreck logit calibration; instruct models are pre-damaged
 for this task.
 
 **The workhorse must be small.** ~100 ms latency at $0.042/MTok implies a small
-model. An L4 at ~$0.80/hr doing ~30k prefill tok/s at high utilisation is around
-$0.007/MTok for a ~2B dense model. An 80B-A3B MoE needs H100-class memory per
-replica regardless of active parameters — the wrong workhorse whatever its
-active-parameter count says.
+model. An L4 at ~$0.80/hr doing ~30k prefill tok/s at high utilisation would be
+around $0.007/MTok for a ~2B dense model — but treat that as an assumption to
+be measured, not a number to quote. **The arithmetic checks out and the inputs
+are unsourced**, and this is the entire cost argument, so it needs a measured
+figure from our own phase-3 burn-in. See `docs/roadmap.md`, "what did not
+resolve". An 80B-A3B MoE needs H100-class memory per replica regardless of
+active parameters — the wrong workhorse whatever its active-parameter count
+says, and that part does not depend on the pricing.
 
 | Tier | Model | Role | Hardware |
 | --- | --- | --- | --- |

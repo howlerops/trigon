@@ -39,17 +39,15 @@ will have a calibration cliff at twenty.
 
 ## Licence audit
 
-Policy from `docs/decisions.md` §3. A permissive code licence does not launder
-a research-only corpus.
+Policy and the licence-to-tier mapping live in `docs/decisions.md` §3 and are
+not restated here — the two copies had already drifted apart twice. What the
+tiers permit: **green** trains, evals and redistributes; **amber** evals only,
+never a training mix and never redistributed; **red** is a local copy for
+prototyping and is blocked from every shipped artifact.
 
-| Tier | Licences | May be used for |
-| --- | --- | --- |
-| **Green** | Apache-2.0, MIT, CC0, CC BY 4.0, CC BY 3.0, ODC-BY | training, eval, redistribution |
-| **Amber** | CC BY-SA, NC clauses, "research use", platform terms of use | eval only — never a training mix, never redistributed |
-| **Red** | competition-only, unclear provenance, no stated licence | local prototyping only; blocked from every shipped artifact |
-
-A dataset enters a training mix only by moving to green in this table.
-"Verify" is a blocker for training, not a footnote.
+A permissive code licence does not launder a research-only corpus. A dataset
+enters a training mix only by moving to green. "Verify" is a blocker for
+training, not a footnote.
 
 **Checked against primary sources on 2026-09-20.** Each row below records what
 the dataset's own card or repository states, not what the build plan assumed.
@@ -57,35 +55,45 @@ Rows marked *unchecked* keep the plan's assumption and are still blockers.
 
 | Dataset | Primitive | Licence found | Tier | Evidence |
 | --- | --- | --- | --- | --- |
-| Banking77 | Choice (77) | CC BY 4.0 | **green** | plan; unchecked |
+| Banking77 | Choice (77) | CC BY 4.0 | **green** ✓ | HF `PolyAI/banking77` metadata |
 | CLINC150 | Choice (151) | **CC BY 3.0** | **green** ⬆ | HF `clinc/clinc_oos` metadata |
-| MASSIVE | Choice (60) | CC BY 4.0 | **green** | plan; unchecked |
+| MASSIVE | Choice (60) | CC BY 4.0 | **green** ✓ | HF `AmazonScience/massive` metadata |
 | AG News | Choice (4) | **licence "unknown" on the dataset card** | **red** | HF `fancyzhx/ag_news` |
 | DBpedia-14 | Choice (14) | **CC BY-SA 3.0 + GFDL** | **amber** ⬆ | HF `fancyzhx/dbpedia_14` |
 | BoolQ | Noul | CC BY-SA 3.0 | **amber** | plan; share-alike |
-| Circa | Noul | CC BY 4.0 | **green** | plan; unchecked |
+| Circa | Noul | CC BY 4.0 | **green** ✓ | HF `google-research-datasets/circa` metadata |
 | FEVER | Choice (3) | CC BY-SA 3.0 | **amber** | plan; share-alike |
-| SST-5 | Score | unstated | **red** | unchecked |
+| SST-5 | Score | **no licence field on the HF card** | **red** ✓ | HF `SetFit/sst5` carries no licence |
 | Amazon Reviews 2023 | Score | **Amazon Customer Reviews Terms of Use** (repo scripts MIT) | **amber** | McAuley Lab card; platform terms are not an open licence |
 | ASAP essay scoring | Score + rubric | Kaggle competition terms | **red** | unchecked; competition terms |
-| HelpSteer2/3 | Score | CC BY 4.0 | **green** | plan; unchecked |
-| GoEmotions | Choice (27) + distributions | Apache-2.0 | **green** | plan; unchecked |
+| HelpSteer2/3 | Score | CC BY 4.0 | **green** ✓ | HF `nvidia/HelpSteer2` metadata |
+| GoEmotions | Choice (27) + distributions | Apache-2.0 | **green** ✓ | HF `google-research-datasets/go_emotions` metadata |
 | ChaosNLI | annotator distributions | **no licence field found** | **red** | HF mirror carries no licence |
-| Civil Comments | Noul/Score soft labels | CC0 | **green** | plan; unchecked |
+| Civil Comments | Noul/Score soft labels | CC0-1.0 | **green** ✓ | HF `google/civil_comments` metadata |
 | measuring_hate_speech | Score distributions | **CC BY 4.0** | **green** ⬆ | HF `ucberkeley-dlab/measuring-hate-speech` |
 | deepset prompt-injection; WildGuardMix; ToxicChat | Noul guardrails | not resolved | **amber** | cards not conclusive |
 | UFET | Choice (~10k types) | **no stated licence; distant-supervision half derives from LDC-licensed Gigaword** | **red** | UT Austin dataset page; `uwnlp/open_type` |
-| Amazon ESCI | Choice (4) | Apache-2.0 | **green** | plan; unchecked |
+| Amazon ESCI | Choice (4) | **repo licensed Apache-2.0 as a "project"; no data-specific grant** | **amber** ⬇ | `amazon-science/esci-data` LICENSE + README |
 | WDC Products; Magellan | Noul | "public research", terms unstated | **amber** | unchecked |
 | LMSYS Arena preferences | Choice (A/B/tie) | **custom LMSYS-Chat-1M Dataset License Agreement, gated access** | **red** | HF `lmsys/lmsys-chat-1m` |
 | Home Credit; IEEE-CIS fraud | Noul on structured state | Kaggle competition terms | **red** | unchecked; competition terms |
 | Autocast | Noul/Choice | **code MIT; dataset hosted "with permission from Metaculus for research purposes only"** | **red** | `andyzoujm/autocast` |
 
 Net movement: CLINC150 and measuring_hate_speech clear to **green**, DBpedia-14
-resolves to **amber** and AG News separates out as **red** (the two were one row
-in the plan and do not share a licence).
+resolves to **amber**, AG News separates out as **red** (the two were one row in
+the plan and do not share a licence), and **Amazon ESCI drops from green to
+amber** — its repository says "this project is licensed under the Apache-2.0
+License" and nothing else, which is a code licence being asked to carry data.
+That is the §3 policy applied to us rather than to someone else: the rows we
+*wanted* to be green get the same reading as the rows we expected to fail.
 
-### The two consequences that change the plan
+Six rows the plan assumed were confirmed against the dataset cards rather than
+inherited — Banking77, MASSIVE, Circa, HelpSteer2, GoEmotions and Civil
+Comments are green as stated, and SST-5's card does indeed carry no licence at
+all. Rows still marked *unchecked* are all already amber or red, so verifying
+them can only confirm a blocker, never create one.
+
+### The three consequences that change the plan
 
 **The cardinality stress test has no licensed corpus.** UFET was the plan's
 ~10k-type set and it is unusable: no stated licence, and its distant-supervision
@@ -101,6 +109,13 @@ falsifier against them. For a *recall* measurement a generated set is arguably
 better than a found one, because distractor similarity becomes a dial rather
 than whatever the corpus happened to contain. CLINC150 remains the real-data
 check at 151 classes.
+
+**The green pool lost its e-commerce domain.** Amber means eval only, so ESCI
+leaves the training mix and the green Choice sources are all conversational or
+editorial — Banking77, CLINC150, MASSIVE, GoEmotions. Nothing in the trainable
+set looks like product search. That is a coverage gap to state in the model
+card rather than a blocker: the eval tier still holds ESCI, so the gap is
+measurable even though it cannot be trained on.
 
 **Every resolved-outcome corpus is blocked.** Home Credit, IEEE-CIS and
 Autocast were the three sources of real, resolved outcomes on this list, and all

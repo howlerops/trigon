@@ -107,7 +107,7 @@ already is the answer.
 ```bash
 pip install -e ".[dev,server]"
 
-trigon ask request.json            # one request, no weights required
+trigon ask examples/support-ticket.json   # one request, no weights required
 trigon serve --port 8000           # the reference gateway
 trigon eval all -n 200             # every suite and gate; non-zero on a failure
 trigon eval workflow -n 200        # or one suite: calibration | jaggedness |
@@ -172,10 +172,14 @@ about it, and each changed the plan:
   the per-question token budget let the shortlist grow to 2,048 *with option
   criteria intact*, and recall went to 1.0000 at every difficulty — with plain
   BM25. It was a budget problem wearing a retrieval problem's clothes.
-- **A model that ignores its input passes every calibration gate.** The trained
-  reference model cleared all four at 45.6% accuracy, because reporting true
-  marginals is calibrated by construction. `accuracy_over_baseline` is what
-  rejects it.
+- **A model that ignores its input passes every calibration gate.** Reporting
+  each question's marginal distribution is calibrated by construction, so no
+  ECE gate can see the difference. The dot-product run is the proof: it scored
+  0.3887 against the marginal predictor's 0.3922 — literally worse than
+  ignoring the state — and passed all four calibration gates, adaptive ECE
+  included, at ECE 0.0177. It is blocked on `accuracy_over_baseline` alone.
+  That term is not about calibration at all, and no future gate set may drop
+  it. The reference model passes all five gates.
 - **The context envelope is two limits, not one** — the contract we mirror
   bounds the whole request *and* state-plus-longest-question separately. The
   plan's flat 32k assumption got both the total and the binding constraint
