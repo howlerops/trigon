@@ -81,10 +81,33 @@ trigon serve --backend torch --weights reports/run.pt            # behind the AP
 python scripts/export_openapi.py   # after ANY change to the contract
 ```
 
-`tests/test_openapi_drift.py` fails if the checked-in spec and the gateway
-disagree, so regenerate it in the same commit as the change. The SDKs are a
-phase-4 deliverable and will be generated from that file; nothing reads it yet,
-which is exactly why it has to be kept honest now.
+**Four artifacts are generated, not maintained.** Change the source and
+regenerate in the same commit — CI fails otherwise, which is the point:
+
+| Artifact | From | Regenerate with |
+| --- | --- | --- |
+| `spec/openapi.json` | the gateway | `python scripts/export_openapi.py` |
+| `sdk/python/trigon_client/_generated.py` | that spec | `python scripts/generate_sdk.py` |
+| `src/trigon/data/bpe.json` | the eval corpus | `python scripts/train_tokenizer.py` |
+| the cost tables in `docs/architecture.md` | the compiler and `limits.py` | `python scripts/attention_table.py --write` |
+
+The vocabulary is the one that does not regenerate casually: it changes the
+embedding table, so every existing checkpoint is trained against the old one.
+Checkpoints record `{kind, vocab_size}` and are rebuilt with the tokenizer they
+were trained on, which is why the certified run still loads.
+
+## When adding a tokenizer
+
+Encoding is pure Python and stays that way. The gateway budgets schemas on CPU
+nodes with no weights, and the compiler, the calibration math and the drift
+test all import without `torch` — a tokenizer needing a Rust extension to count
+tokens pulls that dependency into all of them. Training a vocabulary is a
+different matter and lives in `scripts/`.
+
+Expose `encode`, `count`, `exact` and `kind`, and add `kind` to
+`backends.tokenizer.build_tokenizer` so a checkpoint can name you. A model
+served under a vocabulary it was not trained on reads every id as a different
+word and nothing raises.
 
 ## When adding a backend
 

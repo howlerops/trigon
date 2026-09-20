@@ -108,6 +108,7 @@ already is the answer.
 pip install -e ".[dev,server]"
 
 trigon ask examples/support-ticket.json   # one request, no weights required
+python examples/triage_cookbook.py        # the worked example: route, gate, abstain
 trigon serve --port 8000           # the reference gateway
 trigon eval all -n 200             # every suite and gate; non-zero on a failure
 trigon eval workflow -n 200        # or one suite: calibration | jaggedness |
@@ -225,11 +226,22 @@ src/trigon/
   retrieval.py      large-cardinality prefilter and its recall gate
   training/         proper scoring rules and the outcome-grounded training loop
   engine.py         the pipeline, in one place so nothing can drift
+  bpe.py            byte-level BPE, pure Python so the gateway needs no Rust
+  data/bpe.json     the vocabulary, shipped: token counts cannot be a download
   server/           reference gateway; generates the OpenAPI spec
   evals/            four suites, the release gates, one runner, one closed loop
 spec/openapi.json   the contract, drift-tested against the gateway
+sdk/python/         the client, generated from that spec, stdlib only
+examples/           a runnable request, and the worked cookbook
+scripts/            generators: the spec, the SDK, the vocabulary, the cost tables
 docs/               architecture, training, data + licence audit, evals, decisions
 ```
+
+Four things in this tree are **generated** and drift-tested rather than
+maintained: `spec/openapi.json` from the gateway, `sdk/python/` from that spec,
+`src/trigon/data/bpe.json` from the eval corpus, and the cost tables in
+`docs/architecture.md` from the compiler. Changing a source without
+regenerating fails CI in the same commit.
 
 ## Documentation
 
@@ -242,6 +254,28 @@ docs/               architecture, training, data + licence audit, evals, decisio
 - [`docs/data.md`](docs/data.md) — five streams and the dataset licence audit
 - [`docs/evals.md`](docs/evals.md) — the suites, the gates, and the reference run
 - [`docs/roadmap.md`](docs/roadmap.md) — phases, staffing, cut order, risks
+
+## Calling it
+
+```python
+from trigon_client import TrigonClient, choice, noul   # sdk/python, stdlib only
+
+client = TrigonClient("http://localhost:8000")
+response = client.systemone(
+    state="my card was declined at the till and I still got charged",
+    questions={
+        "route": choice("Which queue?", ["billing", "shipping", "account"]),
+        "urgent": noul("Needs a human within the hour?"),
+    },
+)
+response.answers["route"].selected        # "billing"
+response.answers["route"].confidence      # a number you can threshold
+response.answers["urgent"].probability    # no confidence field, by design
+```
+
+The client is generated from `spec/openapi.json` by `scripts/generate_sdk.py`,
+so it cannot describe a contract the gateway does not serve, and it imports
+nothing outside the standard library.
 
 ## Scope
 
