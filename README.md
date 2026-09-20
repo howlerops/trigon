@@ -114,6 +114,23 @@ as they will for a trained one. Getting them took more than a block mask: see
 `docs/decisions.md` on group-local positions and on why state does not attend
 to the schema.
 
+Three more things were established by running the code rather than reasoning
+about it, and each changed the plan:
+
+- **The retrieval gate fails on realistic queries.** `trigon.evals.cardinality`
+  is decision D1's falsifier. At 10,000 options with two of four fields
+  unstated, recall@256 is 0.94 against a 0.99 gate, and holding it needs a
+  shortlist that only fits the token budget with the option criteria stripped
+  out. The ANN stage is therefore load-bearing, not an optimisation, and moved
+  out of the cut order.
+- **A model that ignores its input passes every calibration gate.** The trained
+  reference model cleared all four at 45.6% accuracy, because reporting true
+  marginals is calibrated by construction. `accuracy_over_baseline` is what
+  rejects it.
+- **The context envelope is two limits, not one** — 64k per request and 32k for
+  state plus the longest single question. The plan's flat 32k assumption got
+  both the total and the binding constraint wrong.
+
 ## Layout
 
 ```
