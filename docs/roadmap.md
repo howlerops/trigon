@@ -41,7 +41,7 @@ Rust gateway, the ANN stage, the SDKs.
 
 ### What phase 0 changed
 
-Five findings that alter phase 1's work rather than confirming it. All are
+Eight findings that alter phase 1's work rather than confirming it. All are
 written up in `docs/decisions.md`.
 
 **The context envelope was wrong.** The plan assumed a flat ~32k budget. The
@@ -60,6 +60,23 @@ a training run.
 95th-percentile ECE is about 0.049 — the whole 0.05 gate. `check_gates` now
 gates the measurement before the model.
 
+**A calibration-only gate set certifies the one model guaranteed to be
+useless.** Reporting each question's marginal distribution is calibrated by
+construction, so no ECE gate can reject it. The dot-product arm demonstrated
+this on a real run — 0.3887 accuracy against a 0.3922 marginal predictor, and
+every calibration gate green, adaptive ECE included. `accuracy_over_baseline`
+was added because of it, and no future gate set may drop a term that fails a
+model which ignores its input. This is the finding that most changes what
+"calibration is the product" is allowed to mean.
+
+**Dot-product option scoring did not learn.** The plan scheduled the crossover
+between a readout slot per option and one slot dotted with pooled option states
+as a phase-1 ablation. Run early, the dot-product head finished below the
+marginal predictor while the per-option head reached 0.4561 on identical data
+and seeds. It is the head that makes large option sets affordable at all, so
+this is phase 1's largest technical risk rather than a preference between two
+working designs.
+
 **The cardinality stress test has no licensed corpus.** UFET is unusable (no
 licence; LDC-derived), and nothing permissive exists above 151 classes. The
 recall gate runs on generated confusable sets instead.
@@ -68,6 +85,12 @@ recall gate runs on generated confusable sets instead.
 Autocast are all red. Outcome calibration in v1 rests on verifiable synthetic
 data plus green classification labels — a narrower claim than the plan assumes,
 and one the calibration report has to state.
+
+**The trainable pool has no e-commerce domain.** Amazon ESCI's repository
+licenses "the project" Apache-2.0 and says nothing about the data, which the
+§3 policy reads as amber: eval only. The green Choice corpora left are all
+conversational or editorial. A coverage gap for the model card, and measurable
+because ESCI stays in the eval tier.
 
 ### What is still unverified
 

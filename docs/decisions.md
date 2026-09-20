@@ -471,6 +471,38 @@ Worth noting what temperature scaling did here: almost nothing (0.0112 →
 near-calibrated, and a temperature cannot make a model use its input. Post-hoc
 calibration fixes the shape of a distribution, never what it is conditioned on.
 
+### The dot-product option head did not learn
+
+The plan scheduled the Choice crossover — a readout slot per option below 64,
+one slot dotted with pooled option states above it — as a phase-1 ablation
+between two designs assumed to work. Running it in phase 0 instead, on
+identical data, seeds and hyperparameters, the two arms did not merely differ:
+
+| Arm | Accuracy | ECE | Adaptive ECE | Verdict |
+| --- | ---: | ---: | ---: | --- |
+| Readout slot per option | 0.4561 | 0.0111 | 0.0158 | all five gates pass |
+| One slot, dotted | 0.3887 | 0.0177 | 0.0441 | blocked on accuracy |
+
+0.3887 is below the 0.3922 marginal predictor. The dot-product arm learned
+nothing usable from the state, while passing every calibration gate — it is
+also the cleanest demonstration of the finding above.
+
+This matters more than an ablation result because the dot-product head is what
+makes large option sets affordable: it costs one readout slot at any
+cardinality, and `READOUT_BUDGET_TOKENS` and `MAX_QUESTIONS_PER_REQUEST` are
+sized on the assumption that it works. If it cannot be made to learn, the
+published ceilings for very large Choices rest on a head that does not.
+
+What this is *not* is a verdict on the architecture. A 128-wide, two-layer
+model with a hashing tokenizer is a weak test of a head that has to align two
+learned representations in the same space, and the per-option head needs no
+such alignment — it gets a slot to itself. The plausible readings are that the
+dot-product head needs more capacity, a shared projection, or a scaled
+initialisation, and none of them is ruled out here. What phase 0 establishes is
+that it does not work *by default*, which is exactly the thing that would have
+been expensive to discover in phase 1 with a real backbone and a real
+tokenizer. It is phase 1's largest technical risk, and it is now a known one.
+
 ### An index that is stable across requests should be built once
 
 `LexicalShortlister` rebuilt its whole BM25 corpus — tokenizing every option —

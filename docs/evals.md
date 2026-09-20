@@ -176,14 +176,16 @@ whatever the data happened to contain. CLINC150 stays as the real-data check at
 ## 4. The reference run
 
 ```bash
-trigon train --out reports/reference-run.md
+trigon train --out reports/run.md --save-model reports/run.pt
 ```
 
 Train the reference model on outcome-grounded data, fit a temperature on the
 training split, measure on a held-out split generated from a different seed,
-and run the gates. Committed output: `reports/reference-run.md`. Everything is
-seeded — data generation, weight initialisation and shuffling — so the run
-reproduces from its settings rather than from a checkpoint.
+and run the gates. Everything is seeded — data generation, weight
+initialisation and shuffling — so the run reproduces from its settings rather
+than from a checkpoint, and each report prints the exact command that produced
+it at the top. `reports/reference-run.md` is not what the bare command above
+gives you; run the one in its own header.
 
 Its purpose is not model quality. The reference model is a spike: 128-wide, two
 layers, a hashing tokenizer, 2,500 cases. Its purpose is that the pipeline
