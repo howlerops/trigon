@@ -21,7 +21,14 @@ matter and are the actual deliverable; see `README.md`.
 | Licence | Apache-2.0, code and weights, no field-of-use restriction |
 
 Every number below comes from a committed report that reproduces from the
-command printed at its top.
+command printed at its top — *bit for bit, on that seed*. That is a weaker
+guarantee than it sounds, and the difference matters: the configuration this
+model was trained at decides its own outcome by seed. On seed 0 it clears every
+gate; on a different draw of the same configuration it never leaves chance, and
+on three others it beats this run's final loss by epoch 2. So each figure below
+is one sample from a distribution that was not measured at the time, and
+reproducing it exactly reproduces the sample, not the result. See
+`docs/decisions.md`, "A single-seed training run is not evidence".
 
 ## What it can do
 
@@ -37,7 +44,9 @@ training, so it holds for any model in this architecture.
 
 **Refuse to be confident when it should not be.** Where it is confident it is
 right; where it splits evenly between two options it reports confidence near
-0.10 and that is the case it gets wrong.
+0.10 and that is the case it gets wrong. This is a property of deriving
+confidence from a calibrated distribution rather than of this draw — but the
+three rows it is visible in are still three rows.
 
 ## What it cannot do, and will not learn to
 
@@ -83,6 +92,11 @@ contract says to read that as "not cached", never "not cacheable".
 licence audit (`docs/data.md`) put Amazon ESCI at amber and every
 resolved-outcome corpus at red, so outcome grounding rests on verifiable
 synthetic data. That is a narrower claim than the build plan assumed.
+
+**The certification is single-seed.** The gates it passes, it passes on one
+draw. `scripts/seed_sweep.py` exists to stop that happening again, and a
+configuration should now be certified on the median and range across seeds
+rather than on one run. This model predates that rule.
 
 **The cost argument is unmeasured.** The $0.007/MTok figure the project's
 economics rest on is arithmetic over unsourced inputs. It is labelled an
@@ -130,4 +144,9 @@ trigon eval all -n 200          # the suites and gates, no weights needed
 
 Every committed report prints the command that produced it, is seeded end to
 end, and has been re-run from that command to confirm it reproduces every gate
-verdict to the digit.
+verdict to the digit. Reproducing a seeded run reproduces the draw, not the
+result — to ask whether the configuration works, sweep it:
+
+```bash
+python scripts/seed_sweep.py --seeds 0 1 2 3 -n 8000 --epochs 8
+```

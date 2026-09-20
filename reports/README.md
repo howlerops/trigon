@@ -3,6 +3,15 @@
 `docs/model-card.md` is the summary of what these runs add up to — what the
 reference model can do, what it cannot, and what it is not suitable for.
 
+> **Read every number here as one draw.** These are single-seed runs, and the
+> 2,500-case configuration turns out to decide its own outcome by seed: seed 0
+> never leaves chance while seeds 1, 2 and 3 beat this run's *final* loss by
+> epoch 2, on one commit with identical flags. That is not a caveat about
+> precision, it is the difference between certifying and not. `docs/decisions.md`
+> has the numbers, and `scripts/seed_sweep.py` is how a configuration should be
+> certified from now on. These runs are kept because the pipeline they exercise
+> is real; their headline figures are not evidence that the configuration works.
+
 Committed output from `trigon train` and the eval suites. These are results,
 not fixtures: nothing in the test suite reads them, and they are here so a
 reader can see what the gates actually said without running anything.
