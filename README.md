@@ -254,6 +254,8 @@ regenerating fails CI in the same commit.
 - [`docs/data.md`](docs/data.md) — five streams and the dataset licence audit
 - [`docs/evals.md`](docs/evals.md) — the suites, the gates, and the reference run
 - [`docs/roadmap.md`](docs/roadmap.md) — phases, staffing, cut order, risks
+- [`docs/model-card.md`](docs/model-card.md) — what the reference model can do,
+  what it cannot, and what it is not suitable for
 
 ## Calling it
 

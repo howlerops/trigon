@@ -1,5 +1,8 @@
 # Runs
 
+`docs/model-card.md` is the summary of what these runs add up to — what the
+reference model can do, what it cannot, and what it is not suitable for.
+
 Committed output from `trigon train` and the eval suites. These are results,
 not fixtures: nothing in the test suite reads them, and they are here so a
 reader can see what the gates actually said without running anything.
