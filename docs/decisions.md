@@ -608,21 +608,32 @@ trajectories agree to 1e-6), the tokenizer was ruled out, the option residual
 was ruled out.
 
 Then the same configuration was run under four seeds, on one commit, with every
-flag identical:
+flag identical. Chance is 1.1552 and the committed run's final loss was 1.0366:
 
-| Seed | Epoch 1 | Epoch 2 |
-| ---: | ---: | ---: |
-| 0 | 1.1523 | 1.1433 |
-| 1 | 1.0801 | 0.9916 |
-| 2 | 0.9876 | 0.8973 |
-| 3 | 1.0173 | 0.9608 |
+| Seed | 1 | 2 | 3 | 4 | 5 | 6 | |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| 0 | 1.1523 | 1.1433 | 1.1411 | 1.1409 | 1.1397 | 1.1401 | never escapes chance |
+| 1 | 1.0801 | 0.9916 | 1.0118 | 1.1017 | 1.1053 | 1.0853 | escapes, then **falls back** |
+| 2 | 0.9876 | 0.8973 | 0.8871 | 0.8806 | 0.8747 | **0.8706** | escapes and holds |
+| 3 | 1.0173 | 0.9608 | 0.9676 | 0.9638 | 0.9572 | 0.9553 | escapes and holds |
 
-Chance is 1.1552. **Seed 0 never leaves it; the other three are past the
-committed run's final loss of 1.0366 by epoch 2.** There is no regression.
-There is a configuration whose outcome is decided by the draw, and a
-certification that reported one draw as a result — the committed reference run
-happened to get a lucky seed under the old arithmetic and an unlucky one under
-the new, and the arithmetic changed by about 1e-6.
+There is no regression. There is a configuration whose outcome is decided by
+the draw, and a certification that reported one draw as a result — the
+committed reference run happened to get a lucky seed under the old arithmetic
+and an unlucky one under the new, and the arithmetic changed by about 1e-6.
+
+**The three behaviours are one behaviour.** Seed 0 never leaves the marginal;
+seed 1 leaves it and is pulled back; seeds 2 and 3 get away. The marginal
+solution is an attractor in this loss landscape, and a run's outcome is which
+side of it the draw lands on. That is the same failure as the dot-product
+head's, recorded two sections above, where training collapsed the option keys
+onto each other until the head could not express a preference — reached by a
+different route, into the same basin. Reporting each question's marginal
+distribution is not merely a degenerate solution the gates have to exclude; it
+is where gradient descent goes when nothing stops it.
+
+It also pays for the best-epoch selection added alongside this: seed 1 ships
+epoch 6 at 1.0853 without it, and epoch 2 at 0.9916 with it.
 
 **What this costs.** The reference run's headline — that a trained model
 cleared every gate — was one sample from a distribution nobody had measured.
