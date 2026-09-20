@@ -146,3 +146,43 @@ def test_score_always_reads_out_from_one_slot():
     ).question("q")
     assert compiled.readout_slots == 1
     assert compiled.cardinality == 10
+
+
+def test_request_inside_the_total_budget_can_still_fail_the_envelope():
+    """The failure mode a single flat context number hides: state plus the
+    longest single question is a separate, tighter limit."""
+    compiler = SchemaCompiler(
+        budget=Budget(
+            context_tokens=100_000,
+            single_question_envelope=400,
+            state_tokens=200,
+            schema_tokens=90_000,
+            readout_tokens=512,
+        )
+    )
+    big = ChoiceQuestion(
+        instructions="pick",
+        options=[{"name": f"option_number_{i}", "criteria": "a" * 40} for i in range(60)],
+    )
+    request = SystemOneRequest(state="a short state", questions={"q": big})
+    with pytest.raises(SchemaTooLarge, match="per-question"):
+        compiler.compile_request(request)
+
+
+def test_a_non_choice_question_over_budget_is_rejected_not_narrowed():
+    """A Score cannot be shortlisted, so an oversized one is a rejection."""
+    compiler = SchemaCompiler(
+        budget=Budget(
+            context_tokens=100_000,
+            single_question_envelope=20_000,
+            state_tokens=200,
+            schema_tokens=90_000,
+            readout_tokens=512,
+        )
+    )
+    verbose = ScoreQuestion(
+        instructions="rate",
+        levels=[{"name": f"level_{i}", "criteria": "x" * 8000} for i in range(16)],
+    )
+    with pytest.raises(SchemaTooLarge, match="per-question budget"):
+        compiler.compile_schema({"q": verbose})
