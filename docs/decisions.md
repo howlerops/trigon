@@ -590,6 +590,67 @@ evidence about the ranking there.
 
 The risk is retired as a blocker and stays open as a measurement.
 
+### A single-seed training run is not evidence
+
+The eval harness refuses to quote an ECE without simulating what a perfectly
+calibrated model would score on the same run, and refuses to call a gate a test
+if a perfect model fails it half the time. That discipline was applied to the
+*measurement*. It was never applied to the *training run*, and it should have
+been.
+
+**What happened.** After the tokenizer, batching and dot-product work landed,
+the reference configuration stopped reproducing its committed report: 2,500
+cases at six epochs closed 3% of the gap to Bayes where the committed run
+closed 20%. That looked exactly like a regression one of those changes had
+caused, and it was investigated as one — batching was ruled out (the batched
+forward is bit-identical to the unbatched one, and the two training
+trajectories agree to 1e-6), the tokenizer was ruled out, the option residual
+was ruled out.
+
+Then the same configuration was run under four seeds, on one commit, with every
+flag identical:
+
+| Seed | Epoch 1 | Epoch 2 |
+| ---: | ---: | ---: |
+| 0 | 1.1523 | 1.1433 |
+| 1 | 1.0801 | 0.9916 |
+| 2 | 0.9876 | 0.8973 |
+| 3 | 1.0173 | 0.9608 |
+
+Chance is 1.1552. **Seed 0 never leaves it; the other three are past the
+committed run's final loss of 1.0366 by epoch 2.** There is no regression.
+There is a configuration whose outcome is decided by the draw, and a
+certification that reported one draw as a result — the committed reference run
+happened to get a lucky seed under the old arithmetic and an unlucky one under
+the new, and the arithmetic changed by about 1e-6.
+
+**What this costs.** The reference run's headline — that a trained model
+cleared every gate — was one sample from a distribution nobody had measured.
+It was not wrong, and it is not evidence either. Every downstream number
+inherits that: the per-question breakdown, the dot-product comparison, the
+served-answers block. They are all real measurements of one draw.
+
+**What changes.** `scripts/seed_sweep.py` trains a configuration under several
+seeds and reports the median and the range rather than the best, and says so
+plainly when some seeds certify and others do not. A configuration is a
+candidate for certification when its spread is narrow, not when its best seed
+is good. Larger runs are the fix as well as the diagnosis: at 8,000 cases the
+model learns two questions of three and does it on every seed tried, where
+2,500 is on the knife edge.
+
+**The methodological error underneath it** is worth naming, because it is the
+one this repository exists to avoid and it still happened here. "A number is
+not evidence until the floor is under it" was implemented for ECE and stopped
+there. The same sentence applies to accuracy, to the loss curve, and to the
+gate verdict itself. Anything reported from a single stochastic run needs its
+spread reported with it.
+
+A second error is worth recording too: the first bisect of this was invalid.
+Runs of three epochs were compared against a reference of six, and the learning
+rate schedule is a function of total steps — so the two had different learning
+rates at the epoch being compared. Two rounds of conclusions were drawn from it
+before that was noticed.
+
 ### An index that is stable across requests should be built once
 
 `LexicalShortlister` rebuilt its whole BM25 corpus — tokenizing every option —

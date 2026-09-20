@@ -28,6 +28,14 @@ whether the two are separable. Never quote an ECE from a run below
 `MIN_CALIBRATION_SAMPLES`, and never widen `MAX_FLOOR_FRACTION_OF_GATE` to make
 `gate_is_testable` pass — if the gate is not a test, fix the run, not the gate.
 
+**That rule applies to the training run too, and for a long time it did not.**
+The reference configuration turned out to decide its own outcome by seed: one
+draw never leaves chance, three others beat the committed run's final loss by
+epoch 2, on one commit with identical flags. A single-seed run is one sample
+from a distribution nobody measured. `scripts/seed_sweep.py` measures the
+spread; certify a configuration on its median and range, never on its best
+draw, and prefer a narrow spread to a good maximum.
+
 **Calibration never certifies alone.** A model that reports each question's
 marginal distribution is calibrated by construction and useless, and it passes
 every ECE gate — the first trained reference model did exactly that at 46%
