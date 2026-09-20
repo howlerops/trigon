@@ -3,6 +3,7 @@
 from .conformal import ConformalPredictor, PredictionSet, fit_conformal
 from .metrics import (
     CalibrationReport,
+    NoiseFloor,
     ReliabilityBin,
     adaptive_calibration_error,
     brier,
@@ -11,6 +12,7 @@ from .metrics import (
     maximum_calibration_error,
     mean_set_size,
     negative_log_likelihood,
+    noise_floor,
     reliability_bins,
     report,
 )
@@ -19,6 +21,7 @@ from .temperature import TemperatureScaler, fit_temperature
 __all__ = [
     "CalibrationReport",
     "ConformalPredictor",
+    "NoiseFloor",
     "PredictionSet",
     "ReliabilityBin",
     "TemperatureScaler",
@@ -31,6 +34,7 @@ __all__ = [
     "maximum_calibration_error",
     "mean_set_size",
     "negative_log_likelihood",
+    "noise_floor",
     "reliability_bins",
     "report",
 ]

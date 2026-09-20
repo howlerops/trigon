@@ -206,8 +206,17 @@ def summarize(
     model: str,
     outcomes: Sequence[CaseOutcome],
     extra: dict[str, float] | None = None,
+    *,
+    simulate_floor: bool = True,
+    floor_trials: int = 200,
 ) -> SuiteResult:
-    """Collapse outcomes into the numbers a release report prints."""
+    """Collapse outcomes into the numbers a release report prints.
+
+    ``simulate_floor`` costs a few hundred resamples and is what makes a
+    published ECE evidence rather than a number; leave it on for anything that
+    will be quoted. Suites whose headline is not calibration (jaggedness) turn
+    it off, and CI turns the trial count down.
+    """
     if not outcomes:
         raise ValueError(f"suite {suite!r} produced no outcomes")
 
@@ -224,7 +233,13 @@ def summarize(
 
     latencies = sorted(o.latency_ms for o in outcomes)
     calibration = (
-        report([p for _, p, _ in scored], [y for _, _, y in scored], slice_name=suite)
+        report(
+            [p for _, p, _ in scored],
+            [y for _, _, y in scored],
+            slice_name=suite,
+            simulate_floor=simulate_floor,
+            trials=floor_trials,
+        )
         if scored
         else None
     )
@@ -232,7 +247,11 @@ def summarize(
     for primitive in {p for p, _, _ in scored}:
         rows = [(p, y) for prim, p, y in scored if prim == primitive]
         per_primitive[primitive] = report(
-            [p for p, _ in rows], [y for _, y in rows], slice_name=primitive
+            [p for p, _ in rows],
+            [y for _, y in rows],
+            slice_name=primitive,
+            # Per-primitive slices are diagnostics, not published gates.
+            simulate_floor=False,
         )
 
     return SuiteResult(

@@ -32,6 +32,9 @@ def run_jaggedness(
             engine.backend.model_version,
             outcomes,
             extra=extra,
+            # Jaggedness headlines are accuracy and the paired metrics, not a
+            # published ECE, so these runs do not pay for a floor simulation.
+            simulate_floor=False,
         )
         results.append(result)
     return results

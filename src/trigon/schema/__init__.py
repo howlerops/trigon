@@ -12,6 +12,7 @@ from .compiler import (
     SegmentKind,
     compile_request,
     compile_schema,
+    mask_shape_key,
     materialize_mask,
     render_state,
 )
@@ -32,6 +33,7 @@ __all__ = [
     "TokenEstimator",
     "compile_request",
     "compile_schema",
+    "mask_shape_key",
     "materialize_mask",
     "render_state",
 ]

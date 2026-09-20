@@ -85,12 +85,19 @@ Everything runs on a fresh clone with no weights and no GPU, because the
 lexical floor backend is a real baseline. A reproducible-evals story that needs
 a checkpoint before anyone can watch it run is not reproducible.
 
-The reference architecture needs the extra:
+The reference architecture and the training loop need the extra:
 
 ```bash
 pip install -e ".[train]"          # torch
 pytest tests/test_independence.py  # proves the architectural claims
+trigon train --out reports/run.md  # train, calibrate, and run the gates
 ```
+
+`trigon train` is the loop the rest of the repo exists to support, end to end on
+one machine: generate outcome-grounded data, fit the readout heads against
+proper scoring rules, measure calibration on a held-out split, fit a
+temperature, and put the result through the release gates. Its point is that
+the gates are passed — or failed — by a model rather than asserted about one.
 
 ## What is proved, not claimed
 
@@ -117,6 +124,7 @@ src/trigon/
   confidence.py     the two statistics, and why Score needs its own
   backends/         lexical floor, LLM baseline, torch reference model
   retrieval.py      large-cardinality prefilter and its recall gate
+  training/         proper scoring rules and the outcome-grounded training loop
   engine.py         the pipeline, in one place so nothing can drift
   server/           reference gateway; generates the OpenAPI spec
   evals/            three suites, one runner, release gates
@@ -146,10 +154,25 @@ multi-turn state. Also explicitly out: arithmetic, counting and date
 comparison. Keep math in code — the jaggedness suite measures those anyway, so
 the non-goal is a published number rather than a claim.
 
+## Calibration, and how not to fool yourself with it
+
+A calibration number is only evidence if a *calibrated* model could not have
+produced it by chance. Both ECE estimators are biased upward at small samples,
+and the bias is the same size as a typical gate: on 4-way predictions a
+perfectly calibrated model scores a mean ECE of about 0.12 at n=60 and about
+0.03 at n=1,000 — the latter being most of a 0.05 gate.
+
+So every report here prints the measured ECE beside a simulated floor, and the
+release gates check the measurement before they check the model: a run must
+carry at least 5,000 scored questions, and its own floor must sit at or below
+half the limit. A run that cannot separate a calibrated model from a
+miscalibrated one certifies neither.
+
 ## Status
 
-Phase 0 of a 16-week plan: contract, scaffolding, calibration layer and eval
-harness. No trained weights yet. See [`docs/roadmap.md`](docs/roadmap.md).
+Phase 0 of a 16-week plan: contract, scaffolding, calibration layer, eval
+harness, and a training loop that closes it. See
+[`docs/roadmap.md`](docs/roadmap.md).
 
 ## Licence
 

@@ -105,6 +105,31 @@ def render_markdown(
         out.append("")
 
     primary = next((r for r in results if r.calibration is not None), None)
+    if primary and primary.calibration is not None and primary.calibration.floor:
+        floor = primary.calibration.floor
+        cal = primary.calibration
+        out.append("## Is this number evidence?")
+        out.append("")
+        out.append(
+            f"On these {floor.n} predictions a perfectly calibrated model scores a mean "
+            f"ECE of {floor.mean:.4f} (95th percentile {floor.p95:.4f}), simulated over "
+            f"{floor.trials} resamples. The measured ECE is {cal.ece:.4f}."
+        )
+        out.append("")
+        if cal.distinguishable:
+            out.append(
+                "The measured error is **above** that floor, so the miscalibration is real "
+                "rather than sampling noise."
+            )
+        else:
+            out.append(
+                "The measured error is **within** that floor, so this model is "
+                "statistically indistinguishable from perfectly calibrated at this "
+                "sample size. That is the strongest claim the data supports — it is not "
+                "the same as proving the error is zero."
+            )
+        out.append("")
+
     if primary and primary.calibration is not None:
         out.append("## Reliability diagram")
         out.append("")

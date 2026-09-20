@@ -44,49 +44,72 @@ a research-only corpus.
 
 | Tier | Licences | May be used for |
 | --- | --- | --- |
-| **Green** | Apache-2.0, MIT, CC0, CC BY 4.0, ODC-BY | training, eval, redistribution |
-| **Amber** | CC BY-SA, NC clauses, "research use" | eval only — never a training mix, never redistributed |
+| **Green** | Apache-2.0, MIT, CC0, CC BY 4.0, CC BY 3.0, ODC-BY | training, eval, redistribution |
+| **Amber** | CC BY-SA, NC clauses, "research use", platform terms of use | eval only — never a training mix, never redistributed |
 | **Red** | competition-only, unclear provenance, no stated licence | local prototyping only; blocked from every shipped artifact |
 
 A dataset enters a training mix only by moving to green in this table.
 "Verify" is a blocker for training, not a footnote.
 
-| Dataset | Primitive | Why | Licence as stated in the plan | Tier |
+**Checked against primary sources on 2026-09-20.** Each row below records what
+the dataset's own card or repository states, not what the build plan assumed.
+Rows marked *unchecked* keep the plan's assumption and are still blockers.
+
+| Dataset | Primitive | Licence found | Tier | Evidence |
 | --- | --- | --- | --- | --- |
-| Banking77 | Choice (77) | high-cardinality intent routing | CC BY 4.0 | green |
-| CLINC150 | Choice (151) | out-of-scope option trains abstention | verify | red |
-| MASSIVE | Choice (60) | multilingual intents | CC BY 4.0 | green |
-| AG News, DBpedia-14 | Choice | easy topical baselines | verify | red |
-| BoolQ | Noul | naturalistic yes/no over passages | CC BY-SA 3.0 | amber |
-| Circa | Noul | indirect yes/no answers | CC BY 4.0 | green |
-| FEVER | Choice (3) | claim verification for guardrails | CC BY-SA, verify | amber |
-| SST-5; Amazon Reviews 2023 | Score | ordinal ratings at scale | research-use, verify | amber |
-| ASAP essay scoring | Score + rubric | human-rated rubric scoring | competition terms | red |
-| HelpSteer2/3 | Score | 0–4 Likert, 5 attributes, multi-annotator | CC BY 4.0 | green |
-| GoEmotions | Choice (27) + distributions | rater-level labels; the ambiguity cliff | Apache-2.0 | green |
-| ChaosNLI | annotator distributions | 100 annotations per item | verify | red |
-| Civil Comments | Noul/Score soft labels | toxicity as annotator fraction | CC0 | green |
-| measuring_hate_speech | Score distributions | continuous score, rater-level | verify | red |
-| deepset prompt-injection; WildGuardMix; ToxicChat | Noul guardrails | injection and moderation | Apache / ODC-BY, verify | amber |
-| UFET | Choice (~10k types) | cardinality stress test | verify | red |
-| Amazon ESCI | Choice (4) | search-relevance grading | Apache-2.0 | green |
-| WDC Products; Magellan | Noul | entity matching | public research | amber |
-| LMSYS Arena preferences | Choice (A/B/tie) | LLM-routing use case | verify | red |
-| Home Credit; IEEE-CIS fraud | Noul on structured state | real resolved outcomes on JSON state | competition-only | red |
-| Autocast | Noul/Choice | resolved forecasts, calibration-native | verify | red |
+| Banking77 | Choice (77) | CC BY 4.0 | **green** | plan; unchecked |
+| CLINC150 | Choice (151) | **CC BY 3.0** | **green** ⬆ | HF `clinc/clinc_oos` metadata |
+| MASSIVE | Choice (60) | CC BY 4.0 | **green** | plan; unchecked |
+| AG News | Choice (4) | **licence "unknown" on the dataset card** | **red** | HF `fancyzhx/ag_news` |
+| DBpedia-14 | Choice (14) | **CC BY-SA 3.0 + GFDL** | **amber** ⬆ | HF `fancyzhx/dbpedia_14` |
+| BoolQ | Noul | CC BY-SA 3.0 | **amber** | plan; share-alike |
+| Circa | Noul | CC BY 4.0 | **green** | plan; unchecked |
+| FEVER | Choice (3) | CC BY-SA 3.0 | **amber** | plan; share-alike |
+| SST-5 | Score | unstated | **red** | unchecked |
+| Amazon Reviews 2023 | Score | **Amazon Customer Reviews Terms of Use** (repo scripts MIT) | **amber** | McAuley Lab card; platform terms are not an open licence |
+| ASAP essay scoring | Score + rubric | Kaggle competition terms | **red** | unchecked; competition terms |
+| HelpSteer2/3 | Score | CC BY 4.0 | **green** | plan; unchecked |
+| GoEmotions | Choice (27) + distributions | Apache-2.0 | **green** | plan; unchecked |
+| ChaosNLI | annotator distributions | **no licence field found** | **red** | HF mirror carries no licence |
+| Civil Comments | Noul/Score soft labels | CC0 | **green** | plan; unchecked |
+| measuring_hate_speech | Score distributions | **CC BY 4.0** | **green** ⬆ | HF `ucberkeley-dlab/measuring-hate-speech` |
+| deepset prompt-injection; WildGuardMix; ToxicChat | Noul guardrails | not resolved | **amber** | cards not conclusive |
+| UFET | Choice (~10k types) | **no stated licence; distant-supervision half derives from LDC-licensed Gigaword** | **red** | UT Austin dataset page; `uwnlp/open_type` |
+| Amazon ESCI | Choice (4) | Apache-2.0 | **green** | plan; unchecked |
+| WDC Products; Magellan | Noul | "public research", terms unstated | **amber** | unchecked |
+| LMSYS Arena preferences | Choice (A/B/tie) | **custom LMSYS-Chat-1M Dataset License Agreement, gated access** | **red** | HF `lmsys/lmsys-chat-1m` |
+| Home Credit; IEEE-CIS fraud | Noul on structured state | Kaggle competition terms | **red** | unchecked; competition terms |
+| Autocast | Noul/Choice | **code MIT; dataset hosted "with permission from Metaculus for research purposes only"** | **red** | `andyzoujm/autocast` |
 
-Licences in this table are **as stated in the build plan** and are not
-independently verified. Verifying them against each dataset's current terms is
-a phase-0 task, and no red or amber entry reaches a training mix before it is
-done. Prefer permissive Hugging Face mirrors over competition pages, and record
-the licence text and retrieval date alongside each corpus.
+Net movement: CLINC150 and measuring_hate_speech clear to **green**, DBpedia-14
+resolves to **amber** and AG News separates out as **red** (the two were one row
+in the plan and do not share a licence).
 
-Two consequences worth stating up front. UFET is the cardinality stress test
-and it is red — the large-N story needs a green substitute or the recall gate
-gets measured on a corpus we cannot ship. Home Credit, IEEE-CIS and Autocast
-are the only real *resolved outcome* corpora on the list, and all three are
-red; if none clears, the outcome-calibration stream leans harder on verifiable
-synthetic data than the plan assumes, and the calibration claims have to say so.
+### The two consequences that change the plan
+
+**The cardinality stress test has no licensed corpus.** UFET was the plan's
+~10k-type set and it is unusable: no stated licence, and its distant-supervision
+half is derived from Gigaword, which is LDC-licensed. The largest green corpus
+in this table is CLINC150 at 151 classes — well below the 1,024-option trigger
+the retrieval stage exists for. There is therefore no public, redistributable
+corpus in the regime the feature is built for.
+
+The answer is not to ship without the gate. `trigon.evals.cardinality`
+generates confusable option sets at 256 to 10,000 options — every true option
+surrounded by near-neighbours sharing most of its words — and runs D1's
+falsifier against them. For a *recall* measurement a generated set is arguably
+better than a found one, because distractor similarity becomes a dial rather
+than whatever the corpus happened to contain. CLINC150 remains the real-data
+check at 151 classes.
+
+**Every resolved-outcome corpus is blocked.** Home Credit, IEEE-CIS and
+Autocast were the three sources of real, resolved outcomes on this list, and all
+three are red — Autocast decisively so, since Metaculus granted research-only
+hosting rather than a licence. Outcome-grounded calibration in v1 therefore
+rests on verifiable synthetic data and on the ground-truth labels of the green
+classification corpora, not on prediction-with-resolution data. That is a
+narrower claim than the build plan assumes, and the calibration report has to
+say so rather than implying coverage it does not have.
 
 ## Teacher labels
 

@@ -16,9 +16,11 @@ without this module knowing about Qdrant.
 
 from __future__ import annotations
 
+import hashlib
 import math
 from collections import Counter
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
 from .limits import RETRIEVAL_SHORTLIST_SIZE
@@ -45,48 +47,121 @@ class Shortlister(Protocol):
 class LexicalShortlister:
     """BM25 over option text, with the option set as the corpus.
 
-    The corpus is per-request and small enough that building the statistics
-    inline costs less than a round trip to an index would.
+    The corpus is the option set, and an option set is stable across every
+    request that carries it -- the same fact that makes a compiled schema a
+    cacheable KV prefix. So the tokenized documents and their statistics are
+    built once per option set and reused, keyed on the option text.
+
+    This is not a micro-optimisation. Rebuilding the index per call is
+    O(options) tokenization on every request, which at the 10k-option scale the
+    retrieval stage exists for costs far more than the model does, and it
+    scales with QPS rather than with the number of distinct schemas.
     """
 
-    def __init__(self, k1: float = 1.2, b: float = 0.75) -> None:
+    def __init__(self, k1: float = 1.2, b: float = 0.75, cache_size: int = 32) -> None:
         self.k1 = k1
         self.b = b
+        self.cache_size = cache_size
+        self._index: dict[str, _Corpus] = {}
 
-    def shortlist(
-        self, question: ChoiceQuestion, state: str, k: int = RETRIEVAL_SHORTLIST_SIZE
-    ) -> list[int]:
+    def _corpus(self, question: ChoiceQuestion) -> _Corpus:
+        key = _option_set_key(question)
+        cached = self._index.get(key)
+        if cached is not None:
+            return cached
         docs = [
             tokenize(o.name if o.criteria is None else f"{o.name} {o.criteria}")
             for o in question.options
         ]
-        if k >= len(docs):
-            return list(range(len(docs)))
-
-        n = len(docs)
-        avg_len = sum(len(d) for d in docs) / n if n else 0.0
         doc_freq: Counter[str] = Counter()
         for doc in docs:
             doc_freq.update(set(doc))
+        corpus = _Corpus(
+            docs=docs,
+            counts=[Counter(doc) for doc in docs],
+            doc_freq=doc_freq,
+            avg_len=(sum(len(d) for d in docs) / len(docs)) if docs else 0.0,
+        )
+        if len(self._index) >= self.cache_size:
+            self._index.clear()
+        self._index[key] = corpus
+        return corpus
 
+    def shortlist(
+        self, question: ChoiceQuestion, state: str, k: int = RETRIEVAL_SHORTLIST_SIZE
+    ) -> list[int]:
+        n = len(question.options)
+        if k >= n:
+            return list(range(n))
+
+        corpus = self._corpus(question)
         query = set(tokenize(state))
+        # Only documents containing a query term can score above zero, so the
+        # scan runs over the postings rather than over every option.
+        candidates: set[int] = set()
+        for term in query:
+            candidates.update(corpus.postings(term))
+
         scores = []
-        for i, doc in enumerate(docs):
-            counts = Counter(doc)
-            length = len(doc) or 1
+        for i in candidates:
+            counts = corpus.counts[i]
+            length = len(corpus.docs[i]) or 1
             score = 0.0
             for term in query:
                 tf = counts.get(term, 0)
                 if not tf:
                     continue
-                df = doc_freq[term]
+                df = corpus.doc_freq[term]
                 idf = math.log(1.0 + (n - df + 0.5) / (df + 0.5))
-                denom = tf + self.k1 * (1 - self.b + self.b * length / (avg_len or 1.0))
+                denom = tf + self.k1 * (1 - self.b + self.b * length / (corpus.avg_len or 1.0))
                 score += idf * (tf * (self.k1 + 1)) / denom
             scores.append((score, i))
 
         scores.sort(key=lambda t: (-t[0], t[1]))
-        return [i for _, i in scores[:k]]
+        keep = [i for _, i in scores[:k]]
+        if len(keep) < k:
+            # Pad deterministically, so the shortlist is always the size the
+            # caller budgeted for rather than silently narrower.
+            chosen = set(keep)
+            for i in range(n):
+                if len(keep) == k:
+                    break
+                if i not in chosen:
+                    keep.append(i)
+        return keep
+
+
+@dataclass
+class _Corpus:
+    """A tokenized option set and its BM25 statistics."""
+
+    docs: list[list[str]]
+    counts: list[Counter]
+    doc_freq: Counter
+    avg_len: float
+    _postings: dict[str, list[int]] | None = None
+
+    def postings(self, term: str) -> list[int]:
+        """Documents containing ``term``. Inverted index, built lazily once."""
+        if self._postings is None:
+            postings: dict[str, list[int]] = {}
+            for i, doc in enumerate(self.docs):
+                for token in set(doc):
+                    postings.setdefault(token, []).append(i)
+            self._postings = postings
+        return self._postings.get(term, [])
+
+
+def _option_set_key(question: ChoiceQuestion) -> str:
+    """A stable key for an option set: its text, hashed."""
+    digest = hashlib.blake2b(digest_size=16)
+    for option in question.options:
+        digest.update(option.name.encode("utf-8"))
+        digest.update(b"\x00")
+        if option.criteria:
+            digest.update(option.criteria.encode("utf-8"))
+        digest.update(b"\x01")
+    return digest.hexdigest()
 
 
 class VectorShortlister:

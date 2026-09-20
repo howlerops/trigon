@@ -116,23 +116,51 @@ def test_expectation_from_a_distribution_uses_its_mode():
 
 def test_gates_fail_an_uncalibrated_model_and_say_by_how_much():
     engine = Engine(LexicalBackend())
-    result, _ = run_calibration_suite(engine, synthetic_outcome_cases(n=60, noise=0.1))
-    gates = check_gates(result)
-    assert any(not g.passed for g in gates)
-    failing = next(g for g in gates if not g.passed)
-    assert failing.value > failing.limit
-    assert "FAIL" in str(failing)
+    result, _ = run_calibration_suite(
+        engine, synthetic_outcome_cases(n=2000, noise=0.1), floor_trials=20
+    )
+    gates = {g.name: g for g in check_gates(result)}
+    ece = gates["workhorse_ece"]
+    assert not ece.passed
+    assert ece.value > ece.limit
+    assert "FAIL" in str(ece)
+
+
+def test_a_run_too_small_to_test_cannot_certify_anything():
+    """The failure this prevents has happened in public: ECE reported at n=60
+    as evidence of calibration, when at that size it is estimator noise."""
+    engine = Engine(LexicalBackend())
+    result, _ = run_calibration_suite(
+        engine, synthetic_outcome_cases(n=60, noise=0.1), floor_trials=20
+    )
+    gates = {g.name: g for g in check_gates(result)}
+    assert not gates["sample_size"].passed
+    assert not gates["gate_is_testable"].passed
+    # The gate explains itself rather than just failing.
+    assert "perfectly calibrated" in gates["gate_is_testable"].note
+
+
+def test_the_floor_is_reported_alongside_the_number():
+    engine = Engine(LexicalBackend())
+    result, _ = run_calibration_suite(
+        engine, synthetic_outcome_cases(n=300, noise=0.2), floor_trials=30
+    )
+    floor = result.calibration.floor
+    assert floor is not None and floor.p95 >= floor.mean > 0
+    assert result.calibration.distinguishable is not None
 
 
 def test_gates_pass_a_perfectly_calibrated_stub():
     """A model that answers every Noul at the true base rate is calibrated by
     construction, so the gates must let it through -- including the equal-mass
     estimator, which needs tie-aware binning not to invent a gap here."""
-    cases = _noul_only(synthetic_outcome_cases(n=400, noise=0.5))
+    cases = _noul_only(synthetic_outcome_cases(n=6000, noise=0.5))
     base_rate = sum(1 for c in cases if c.expected["at_risk"].hard_label == 1) / len(cases)
-    result, _ = run_calibration_suite(Engine(FixedNoul(base_rate)), cases)
+    result, _ = run_calibration_suite(Engine(FixedNoul(base_rate)), cases, floor_trials=40)
     gates = check_gates(result)
+    # Every gate, including the two about the measurement itself.
     assert all(g.passed for g in gates), [str(g) for g in gates]
+    assert result.calibration.distinguishable is False
 
 
 def test_slice_reports_split_by_domain():
@@ -272,17 +300,20 @@ def test_workflow_scores_against_outcomes_and_reports_cost():
 
 def test_reports_render_to_markdown_and_json():
     engine = Engine(LexicalBackend())
-    result, slices = run_calibration_suite(engine, synthetic_outcome_cases(n=30))
+    result, slices = run_calibration_suite(engine, synthetic_outcome_cases(n=200), floor_trials=20)
     gates = check_gates(result)
     markdown = render_markdown([result], gates, slices)
     assert "Reliability diagram" in markdown
     assert "Release gates" in markdown
+    # The floor belongs in the published report, not only in the gate list.
+    assert "perfectly calibrated" in markdown
 
     import json
 
     payload = json.loads(render_json([result], gates, slices))
     assert payload["results"][0]["suite"] == "calibration"
-    assert payload["gates"][0]["name"].endswith("ece")
+    assert {g["name"] for g in payload["gates"]} >= {"sample_size", "gate_is_testable"}
+    assert payload["results"][0]["calibration"]["floor"]["p95"] > 0
 
 
 def test_summarize_refuses_an_empty_run():

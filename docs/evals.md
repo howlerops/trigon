@@ -12,26 +12,55 @@ trigon eval all -n 200 --out reports/run.md   # exits non-zero on a failed gate
 ECE, adaptive ECE, MCE, Brier, NLL and reliability diagrams, per primitive and
 per domain, plus conformal coverage checks.
 
-**Release gates**, from `trigon.limits.CALIBRATION_GATES`:
+**Release gates**, from `trigon.limits`:
 
-| Gate | Limit |
-| --- | ---: |
-| Workhorse ECE (and adaptive ECE) | ≤ 0.05 |
-| Premium ECE | ≤ 0.03 |
-| Quantized-vs-BF16 ECE delta | ≤ 0.01 |
+| Gate | Limit | What it checks |
+| --- | ---: | --- |
+| `sample_size` | ≥ 5,000 | the run is large enough for ECE to mean anything |
+| `gate_is_testable` | floor p95 ≤ ½ × limit | a calibrated model would clear the gate with room |
+| Workhorse ECE (and adaptive ECE) | ≤ 0.05 | the model |
+| Premium ECE | ≤ 0.03 | the model |
+| Quantized-vs-BF16 ECE delta | ≤ 0.01 | the serving path |
 
 The delta gate exists because probabilities degrade well before argmax does.
 An accuracy-only check would wave through a KV bit-width that quietly
 destroyed calibration — which is why quantization is gated on ECE and why
 temperature layers are re-fitted after any change to the serving path.
 
-**Two things about ECE that the numbers do not show.** Both estimators are
-biased upward at small n: bin accuracy carries sampling noise of order
-`sqrt(p(1-p)/m)`, and ECE averages the *absolute* gap, so noise accumulates
-rather than cancelling. A perfectly calibrated model scored on a few hundred
-examples reports a non-zero ECE. Gate at a fixed, stated sample size and
-compare like with like. And equal-mass bins must not split ties — see
-`docs/decisions.md`.
+### The gate on the measurement comes first
+
+Both ECE estimators are biased upward at small n: bin accuracy carries sampling
+noise of order `sqrt(p(1-p)/m)`, and ECE averages the *absolute* gap, so noise
+accumulates rather than cancelling. A perfectly calibrated model scored on a few
+hundred examples reports a large ECE.
+
+`metrics.noise_floor` measures exactly how large, by resampling labels from the
+model's own predicted distributions — which produces a model that is calibrated
+by construction — and reporting the ECE it still scores. On 4-way predictions:
+
+| n | Mean ECE of a **perfectly calibrated** model | 95th percentile |
+| ---: | ---: | ---: |
+| 60 | ~0.124 | ~0.189 |
+| 1,000 | ~0.030 | ~0.049 |
+| 4,000 | ~0.015 | ~0.021 |
+
+Read the middle row against the 0.05 workhorse gate: at n=1,000 a calibrated
+model's 95th percentile *is* the gate. The gate is not a test there. That is why
+`MIN_CALIBRATION_SAMPLES` is 5,000 and why `check_gates` refuses to certify a
+run whose own simulated floor sits above half its limit.
+
+Every published report prints the measured ECE beside the floor and states
+whether the two are separable. **"Indistinguishable from perfectly calibrated at
+this sample size"** is the strongest claim the data supports, and it is a
+different claim from "ECE is 0.03".
+
+This is the failure the whole section exists to prevent, and it has already
+happened in public: an independent re-analysis observed that published Jev ECE
+figures of 0.0505–0.0712 at n=60 are equally what serious miscalibration looks
+like at that sample size. Reproducible evals are the differentiator, so our own
+numbers have to survive the same scrutiny.
+
+And equal-mass bins must not split ties — see `docs/decisions.md`.
 
 Equal-width ECE is published because it is what everyone else publishes and it
 makes our number comparable. Adaptive (equal-mass) ECE is published because it
@@ -76,7 +105,32 @@ first draft of this suite caught three benchmarks it could ace by surface
 statistics: label-correlated length in literal reading, and keyword leakage in
 indirection and context rot. A benchmark the floor aces measures nothing.
 
-## 3. Workflow suite
+## 3. Cardinality recall gate
+
+Decision D1 puts the retrieval trigger at 1,024 options or 16,384 question
+tokens with a 256-option shortlist, and names its own falsifier: recall@256 must
+hold at **0.99**, because everything below the prefilter's recall is accuracy no
+model quality recovers.
+
+```bash
+python -c "from trigon.evals import run_cardinality_gate; [print(r) for r in run_cardinality_gate()]"
+```
+
+The option sets are generated, and that is a consequence of the licence audit
+rather than a convenience: UFET — the ~10k-type corpus the build plan named for
+this — has no stated licence and its distant-supervision half derives from
+LDC-licensed Gigaword, and the largest green corpus in `docs/data.md` is
+CLINC150 at 151 classes, below the trigger. No permissively-licensed corpus
+exists in the regime the feature is built for.
+
+The probe therefore builds confusable sets at 256 to 10,000 options, with every
+true option surrounded by near-neighbours sharing most of its words, and queries
+that paraphrase rather than quote. For a recall measurement that is arguably
+better than a found corpus: distractor similarity becomes a dial instead of
+whatever the data happened to contain. CLINC150 stays as the real-data check at
+151 classes.
+
+## 4. Workflow suite
 
 Fixed compute graphs over one state, with later steps depending on earlier
 answers — the shape real pipelines have.
@@ -96,6 +150,7 @@ that matters against a prompted baseline: the baseline pays per question, the
 model answers them all in one pass.
 
 ## Baselines
+
 
 Every suite runs against any `Engine`, so the comparison is apples to apples:
 

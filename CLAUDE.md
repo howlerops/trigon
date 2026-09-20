@@ -13,6 +13,17 @@ harness are the differentiator, not the architecture. Never trade a calibration
 property for an accuracy number without measuring both, and never relax a
 release gate to make a run pass.
 
+**A number is not evidence until the floor is under it.** Every published ECE
+carries a simulated noise floor (`metrics.noise_floor`) and a verdict on
+whether the two are separable. Never quote an ECE from a run below
+`MIN_CALIBRATION_SAMPLES`, and never widen `MAX_FLOOR_FRACTION_OF_GATE` to make
+`gate_is_testable` pass — if the gate is not a test, fix the run, not the gate.
+
+**Anything derived only from the schema is derived once.** The KV prefix, the
+attention mask and the BM25 option index are all cached on schema-shaped keys.
+When you add something in that class, cache it the same way and key it on what
+it actually depends on.
+
 **Claims are tested, not asserted.** The two architectural claims — per-question
 independence and schema-prefix cacheability — are asserted in
 `tests/test_independence.py` against the reference model, to exact equality. If
@@ -43,6 +54,7 @@ pip install -e ".[dev,server]"     # add "train" for the reference model
 pytest -q
 ruff check src tests scripts
 trigon eval all -n 200             # exits non-zero on a failed gate
+trigon train --out reports/run.md  # train, calibrate, gate (needs the train extra)
 python scripts/export_openapi.py   # after ANY change to the contract
 ```
 

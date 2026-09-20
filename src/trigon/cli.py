@@ -111,6 +111,103 @@ def cmd_eval(args: argparse.Namespace) -> int:
     return 0 if all(g.passed for g in gates) else 1
 
 
+def cmd_train(args: argparse.Namespace) -> int:
+    """Train the reference model, then measure and calibrate it.
+
+    This is the loop the whole repo exists to support, run end to end on one
+    machine with no weights to download: generate outcome-grounded data, fit
+    the readout heads against proper scoring rules, measure calibration on a
+    held-out split, fit a temperature, and put the result through the release
+    gates. Its value is that the gates are passed (or failed) by a model
+    rather than asserted about one.
+    """
+    import json as _json
+
+    from .backends.torch_readout import ReadoutConfig, TorchReadoutBackend
+    from .engine import Engine
+    from .evals import check_gates, render_markdown, run_calibration_suite, synthetic_outcome_cases
+    from .training import TrainingConfig
+    from .training import train as run_training
+
+    backend = TorchReadoutBackend(
+        ReadoutConfig(d_model=args.d_model, n_layers=args.layers), seed=args.seed
+    )
+    compiler = backend.make_compiler()
+
+    train_cases = synthetic_outcome_cases(n=args.n, seed=args.seed, noise=args.noise)
+    # A separate seed, so the held-out split is genuinely unseen rather than a
+    # reshuffle of the same generated records.
+    eval_cases = synthetic_outcome_cases(n=args.eval_n, seed=args.seed + 1000, noise=args.noise)
+
+    print(f"training on {len(train_cases)} cases, {args.epochs} epochs", file=sys.stderr)
+    report = run_training(
+        backend,
+        train_cases,
+        TrainingConfig(
+            epochs=args.epochs,
+            learning_rate=args.lr,
+            accumulate=args.accumulate,
+            seed=args.seed,
+            log_every=args.log_every,
+        ),
+        compiler=compiler,
+    )
+    engine = Engine(backend, compiler=compiler)
+    before, _ = run_calibration_suite(
+        engine, eval_cases, suite="calibration/uncalibrated", floor_trials=args.floor_trials
+    )
+
+    # Fit the temperature on the training split, never on the split the gates
+    # are read from -- fitting and reporting on the same data is how a
+    # calibration number stops meaning anything.
+    scaler = _fit_temperatures(engine, train_cases)
+    calibrated = Engine(backend, compiler=compiler, scaler=scaler)
+    after, slices = run_calibration_suite(
+        calibrated,
+        eval_cases,
+        suite="calibration/temperature-scaled",
+        floor_trials=args.floor_trials,
+    )
+    gates = check_gates(after)
+
+    print(render_markdown([before, after], gates, slices))
+    if args.out:
+        out = pathlib.Path(args.out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(render_markdown([before, after], gates, slices))
+        scaler.save(out.with_name("temperatures.json"))
+        out.with_name("training.json").write_text(_json.dumps(report.to_dict(), indent=2))
+        print(f"\nwrote {out}, temperatures.json and training.json", file=sys.stderr)
+    return 0 if all(g.passed for g in gates) else 1
+
+
+def _fit_temperatures(engine, cases):
+    """Fit one temperature per primitive on the training split."""
+    import math
+    import warnings
+
+    from .calibration.temperature import CalibrationWarning, TemperatureScaler
+    from .evals import run_cases
+
+    scaler = TemperatureScaler()
+    rows: dict[str, list[tuple[list[float], int]]] = {}
+    for outcome in run_cases(engine, cases):
+        for question in outcome.questions.values():
+            if question.expected is None or question.expected.hard_label is None:
+                continue
+            logits = [math.log(max(p, 1e-12)) for p in question.probabilities]
+            rows.setdefault(question.primitive, []).append((logits, question.expected.hard_label))
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", CalibrationWarning)
+        for primitive, data in sorted(rows.items()):
+            if primitive == "noul":
+                scaler.fit_binary([r[0][1] - r[0][0] for r in data], [y for _, y in data])
+            else:
+                scaler.fit(primitive, [x for x, _ in data], [y for _, y in data])
+    print(f"  temperatures: {scaler.primitive}", file=sys.stderr)
+    return scaler
+
+
 def cmd_fit(args: argparse.Namespace) -> int:
     """Fit temperatures on the synthetic outcome set and save them."""
     import math
@@ -191,6 +288,26 @@ def build_parser() -> argparse.ArgumentParser:
     fit.add_argument("--seed", type=int, default=1)
     fit.add_argument("--noise", type=float, default=0.1)
     fit.set_defaults(func=cmd_fit)
+
+    tr = sub.add_parser("train", help="train the reference model, calibrate it, and run the gates")
+    tr.add_argument("-n", type=int, default=3000, help="training cases")
+    tr.add_argument("--eval-n", type=int, default=6000, help="held-out cases for the gates")
+    tr.add_argument("--epochs", type=int, default=4)
+    tr.add_argument("--lr", type=float, default=1e-2)
+    tr.add_argument("--accumulate", type=int, default=16)
+    tr.add_argument(
+        "--noise",
+        type=float,
+        default=0.2,
+        help="irreducible label noise; 0 makes calibration untestable",
+    )
+    tr.add_argument("--d-model", type=int, default=192)
+    tr.add_argument("--layers", type=int, default=3)
+    tr.add_argument("--seed", type=int, default=0)
+    tr.add_argument("--floor-trials", type=int, default=100)
+    tr.add_argument("--log-every", type=int, default=25)
+    tr.add_argument("--out", default=None, help="write the report here")
+    tr.set_defaults(func=cmd_train)
     return parser
 
 

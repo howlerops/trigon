@@ -300,6 +300,13 @@ class SchemaCompiler:
         needs_retrieval = isinstance(question, ChoiceQuestion) and self.budget.needs_retrieval(
             len(labels), tokens
         )
+        if not needs_retrieval and tokens > self.budget.max_question_tokens:
+            # A non-Choice question cannot be narrowed, so an oversized one is
+            # a rejection rather than a retrieval case.
+            raise SchemaTooLarge(
+                f"question {qid!r} compiles to {tokens} tokens, over the "
+                f"{self.budget.max_question_tokens}-token per-question budget"
+            )
         return (
             CompiledQuestion(
                 question_id=qid,
@@ -339,6 +346,17 @@ class SchemaCompiler:
         state_segment = Segment(
             kind=SegmentKind.STATE, text=state_text, tokens=state_tokens, question_id=None
         )
+
+        # The contract we mirror bounds state plus the LONGEST SINGLE question,
+        # separately from the total. A request can sit well inside the total
+        # budget and still be inadmissible on this one.
+        longest = max(schema.questions, key=lambda q: q.schema_tokens)
+        if not self.budget.fits_envelope(state_tokens, longest.schema_tokens):
+            raise SchemaTooLarge(
+                f"state (~{state_tokens} tokens) plus the longest question "
+                f"{longest.question_id!r} (~{longest.schema_tokens} tokens) exceeds the "
+                f"{self.budget.single_question_envelope}-token per-question envelope"
+            )
 
         readouts: list[Segment] = []
         for cq in schema.questions:
@@ -404,13 +422,44 @@ class SchemaCompiler:
         )
 
 
+# Masks are quadratic in sequence length and identical across every request
+# with the same shape -- which, for a schema served at volume, is most of them.
+# Building one costs more than the forward pass does at spike sizes, so the
+# result is memoized on the shape rather than on the request.
+_MASK_CACHE: dict[object, list[list[bool]]] = {}
+_MASK_CACHE_LIMIT = 256
+
+
+def mask_shape_key(compiled: CompiledRequest) -> tuple:
+    """Everything the mask depends on, and nothing else.
+
+    Not the schema hash: two different schemas with the same segment shape and
+    the same visibility produce the same mask, and the same schema with a
+    different state length does not.
+    """
+    plan = compiled.attention
+    return (
+        tuple((seg.group, seg.tokens) for seg in compiled.segments),
+        plan.bidirectional,
+        tuple(sorted((g, tuple(sorted(v))) for g, v in plan.visibility.items())),
+    )
+
+
 def materialize_mask(compiled: CompiledRequest) -> list[list[bool]]:
     """Expand the group-level plan to a token-level boolean mask.
 
     ``mask[i][j]`` is True when token ``i`` may attend to token ``j``. Used by
     the torch backend and, more importantly, by the tests that prove the
     isolation rules hold at token granularity.
+
+    The returned mask is shared between callers with the same shape. Treat it
+    as read-only; copy it before mutating.
     """
+    key = mask_shape_key(compiled)
+    cached = _MASK_CACHE.get(key)
+    if cached is not None:
+        return cached
+
     owners: list[str] = []
     for seg in compiled.segments:
         owners.extend([seg.group] * seg.tokens)
@@ -418,13 +467,22 @@ def materialize_mask(compiled: CompiledRequest) -> list[list[bool]]:
     n = len(owners)
     plan = compiled.attention
     mask = [[False] * n for _ in range(n)]
+    # Group-level lookups are hoisted out of the inner loop: the visibility
+    # answer is the same for every token pair in a pair of groups.
+    groups = sorted(set(owners))
+    allowed = {(a, b): plan.can_attend(a, b) for a in groups for b in groups}
     for i, qg in enumerate(owners):
+        row = mask[i]
         for j, kg in enumerate(owners):
-            if not plan.can_attend(qg, kg):
+            if not allowed[(qg, kg)]:
                 continue
             # Within a group the causal fallback still applies when the model
             # was not converted to prefix-LM attention.
-            mask[i][j] = plan.bidirectional or j <= i
+            row[j] = plan.bidirectional or j <= i
+
+    if len(_MASK_CACHE) >= _MASK_CACHE_LIMIT:
+        _MASK_CACHE.clear()
+    _MASK_CACHE[key] = mask
     return mask
 
 

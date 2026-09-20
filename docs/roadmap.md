@@ -15,7 +15,8 @@ team that spent two years on it.
 
 ## Phase 0 status
 
-Phase 0's exit criteria are met by this repo.
+Phase 0's exit criteria are met by this repo, and three of its assumptions did
+not survive being checked.
 
 - **API spec** — `spec/openapi.json`, generated from the reference gateway,
   with `tests/test_openapi_drift.py` failing if the two ever disagree.
@@ -28,13 +29,42 @@ Phase 0's exit criteria are met by this repo.
   blocks red and amber entries from training mixes.
 - **Budgets and gates** — `trigon.limits`, single-sourced.
 
-Not phase 0, and not here: trained weights, the vLLM fork, the Rust gateway,
-the ANN stage, the SDKs.
+- **The loop is closed** — `trigon train` fits the reference model on
+  outcome-grounded data, calibrates it and runs the gates, so the gates are
+  exercised by a model rather than only defined.
 
-Two findings from phase 0 that change phase 1's work rather than confirming it:
-per-question independence needs group-local positions and a state block that
-does not attend to the schema. Both are in `docs/decisions.md`, and both would
-have been expensive to discover after a training run.
+Not phase 0, and not here: real weights on a real backbone, the vLLM fork, the
+Rust gateway, the ANN stage, the SDKs.
+
+### What phase 0 changed
+
+Five findings that alter phase 1's work rather than confirming it. All are
+written up in `docs/decisions.md`.
+
+**The context envelope was wrong.** The plan assumed a flat ~32k budget. The
+published contract is 64k per request *and* 32k for state plus the longest
+single question. Building to one flat number halved the total and missed the
+constraint that actually governs a high-cardinality Choice. `limits.py` is
+rewritten and `max_question_tokens` is now derived from the envelope rather
+than configured.
+
+**Per-question independence needs more than a block mask.** Sequence-global
+positions shift when a question is added. Positions are group-local, and state
+does not attend to the schema. Both would have been expensive to discover after
+a training run.
+
+**The release gate was not a test.** At n=1,000 a perfectly calibrated model's
+95th-percentile ECE is about 0.049 — the whole 0.05 gate. `check_gates` now
+gates the measurement before the model.
+
+**The cardinality stress test has no licensed corpus.** UFET is unusable (no
+licence; LDC-derived), and nothing permissive exists above 151 classes. The
+recall gate runs on generated confusable sets instead.
+
+**Every resolved-outcome corpus is blocked.** Home Credit, IEEE-CIS and
+Autocast are all red. Outcome calibration in v1 rests on verifiable synthetic
+data plus green classification labels — a narrower claim than the plan assumes,
+and one the calibration report has to state.
 
 ## Staffing
 

@@ -101,8 +101,44 @@ for the premium-tier spike.
 
 ## What is implemented here
 
-The post-hoc calibration layer, the metrics, the gates, the eval harness and
-the verifiable synthetic data stream all run today. The training loop itself is
-phase 2 and is not in this repo — what is here is the scaffolding it reports
-into, so that a training run's first output is a comparable number rather than
-a bespoke script.
+The post-hoc calibration layer, the metrics, the gates, the eval harness, the
+verifiable synthetic data stream — and an outcome-grounded training loop that
+closes the circuit:
+
+```bash
+trigon train --out reports/run.md
+```
+
+It generates labelled cases, fits the readout heads against proper scoring
+rules, measures calibration on a held-out split generated from a different
+seed, fits a temperature on the training split, and runs the release gates. The
+result is that the gates are passed or failed by a model rather than asserted
+about one, and every later change has a baseline to regress against.
+
+Three properties of that loop are load-bearing and easy to get wrong:
+
+**Training and serving share one forward pass.** `TorchReadoutBackend.logits`
+is the only implementation; `infer` is that function under `no_grad`. A trainer
+carrying its own copy is the standard way to end up with a model that scores
+well offline and is miscalibrated in production, and the divergence is
+invisible until someone measures ECE on the served path.
+`tests/test_training.py` asserts the two agree.
+
+**The temperature is fitted on the training split, never on the split the
+gates read.** Fitting and reporting on the same data is how a calibration
+number stops meaning anything.
+
+**The data carries irreducible noise.** `--noise 0.2` flips a fifth of the
+labels, which is what makes calibration testable at all: on a noiseless set a
+model can be right every time and any confidence below 1.0 reads as
+miscalibrated. With noise, the correct behaviour is a probability near `1 -
+noise`, and the suite can tell a calibrated model from a merely confident one.
+The Bayes-optimal loss is computable for this generator, so "how far from
+optimal" is a real number rather than a vibe.
+
+What is still phase 2: the teacher ensemble and the distillation half, the
+five real data streams, the auxiliary consistency losses, and a backbone worth
+the name. The reference model here is a spike — its job is to prove the
+pipeline, not to be the workhorse. Padded batching is the first thing to add
+when this moves to real weights; today it is one request per forward pass with
+gradient accumulation, which is CPU-friendly and honest about being small.

@@ -15,7 +15,11 @@ from dataclasses import dataclass
 
 from ..calibration.metrics import CalibrationReport, report
 from ..engine import Engine
-from ..limits import CALIBRATION_GATES
+from ..limits import (
+    CALIBRATION_GATES,
+    MAX_FLOOR_FRACTION_OF_GATE,
+    MIN_CALIBRATION_SAMPLES,
+)
 from .harness import Case, CaseOutcome, SuiteResult, run_cases, summarize
 
 __all__ = ["GateResult", "check_gates", "run_calibration_suite", "slice_reports"]
@@ -29,18 +33,25 @@ class GateResult:
     value: float
     limit: float
     passed: bool
+    #: Set when the gate is about the measurement rather than the model.
+    note: str = ""
 
     def __str__(self) -> str:
         verdict = "PASS" if self.passed else "FAIL"
-        return f"{verdict} {self.name}: {self.value:.4f} (limit {self.limit:.4f})"
+        base = f"{verdict} {self.name}: {self.value:.4f} (limit {self.limit:.4f})"
+        return f"{base} -- {self.note}" if self.note else base
 
 
 def run_calibration_suite(
-    engine: Engine, cases: Sequence[Case], *, suite: str = "calibration"
+    engine: Engine,
+    cases: Sequence[Case],
+    *,
+    suite: str = "calibration",
+    floor_trials: int = 200,
 ) -> tuple[SuiteResult, dict[str, CalibrationReport]]:
     """Run the suite and return the summary plus per-domain breakdowns."""
     outcomes = run_cases(engine, cases)
-    result = summarize(suite, engine.backend.model_version, outcomes)
+    result = summarize(suite, engine.backend.model_version, outcomes, floor_trials=floor_trials)
     return result, slice_reports(outcomes)
 
 
@@ -58,7 +69,12 @@ def slice_reports(outcomes: Sequence[CaseOutcome]) -> dict[str, CalibrationRepor
                 continue
             buckets.setdefault(domain, []).append((question.probabilities, truth))
     return {
-        domain: report([p for p, _ in rows], [y for _, y in rows], slice_name=domain)
+        domain: report(
+            [p for p, _ in rows],
+            [y for _, y in rows],
+            slice_name=domain,
+            simulate_floor=False,
+        )
         for domain, rows in sorted(buckets.items())
         if rows
     }
@@ -81,21 +97,41 @@ def check_gates(
         raise ValueError("calibration suite produced no scored questions")
 
     limit = CALIBRATION_GATES[f"{tier}_max_ece"]
-    gates.append(
-        GateResult(f"{tier}_ece", result.calibration.ece, limit, result.calibration.ece <= limit)
-    )
+    cal = result.calibration
+
+    # Gate the measurement before gating the model. A run that cannot tell a
+    # calibrated model from a miscalibrated one must not certify either.
     gates.append(
         GateResult(
-            f"{tier}_adaptive_ece",
-            result.calibration.adaptive_ece,
-            limit,
-            result.calibration.adaptive_ece <= limit,
+            "sample_size",
+            float(cal.n),
+            float(MIN_CALIBRATION_SAMPLES),
+            cal.n >= MIN_CALIBRATION_SAMPLES,
+            note="below this, ECE is dominated by estimator noise",
         )
+    )
+    if cal.floor is not None:
+        ceiling = limit * MAX_FLOOR_FRACTION_OF_GATE
+        gates.append(
+            GateResult(
+                "gate_is_testable",
+                cal.floor.p95,
+                ceiling,
+                cal.floor.p95 <= ceiling,
+                note=(
+                    f"a perfectly calibrated model scores ECE {cal.floor.mean:.4f} "
+                    f"on this run, p95 {cal.floor.p95:.4f}"
+                ),
+            )
+        )
+    gates.append(GateResult(f"{tier}_ece", cal.ece, limit, cal.ece <= limit))
+    gates.append(
+        GateResult(f"{tier}_adaptive_ece", cal.adaptive_ece, limit, cal.adaptive_ece <= limit)
     )
     if quantized is not None:
         if quantized.calibration is None:
             raise ValueError("quantized run produced no scored questions")
-        delta = abs(quantized.calibration.ece - result.calibration.ece)
+        delta = abs(quantized.calibration.ece - cal.ece)
         delta_limit = CALIBRATION_GATES["max_quantization_ece_delta"]
         gates.append(GateResult("quantization_ece_delta", delta, delta_limit, delta <= delta_limit))
     return gates

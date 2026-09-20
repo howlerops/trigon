@@ -24,6 +24,7 @@ visible in the number itself:
 
 from __future__ import annotations
 
+import random
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
 
@@ -39,6 +40,7 @@ __all__ = [
     "maximum_calibration_error",
     "mean_set_size",
     "negative_log_likelihood",
+    "noise_floor",
     "reliability_bins",
     "report",
 ]
@@ -63,6 +65,59 @@ class ReliabilityBin:
 
 
 @dataclass(frozen=True)
+class NoiseFloor:
+    """What a perfectly calibrated model would have scored on this data.
+
+    Simulated by drawing labels from the model's own predicted distributions:
+    a model whose labels come from its own probabilities is calibrated by
+    construction, so any ECE it still reports is estimator bias and sampling
+    noise, not miscalibration. Comparing the measured ECE against this is what
+    turns the number into evidence.
+    """
+
+    mean: float
+    p95: float
+    trials: int
+    n: int
+
+
+def noise_floor(
+    probs: Sequence[Sequence[float]],
+    n_bins: int = DEFAULT_BINS,
+    trials: int = 200,
+    seed: int = 0,
+    *,
+    equal_mass: bool = False,
+) -> NoiseFloor:
+    """The ECE a perfectly calibrated model would report on these predictions.
+
+    Labels are resampled from each prediction, so the simulated model is
+    calibrated by definition; the spread of its ECE is the floor beneath which
+    a measured ECE says nothing. This exists because the failure it prevents
+    has already happened in public: an independent re-analysis found published
+    ECE figures of 0.0505-0.0712 at n=60 being offered as evidence of good
+    calibration, when at that sample size the same figures are also what
+    serious miscalibration looks like.
+    """
+    if not probs:
+        raise ValueError("no predictions to simulate")
+    if trials < 2:
+        raise ValueError(f"need at least 2 trials, got {trials}")
+    rng = random.Random(seed)
+    indices = [list(range(len(row))) for row in probs]
+    scores = []
+    for _ in range(trials):
+        labels = [
+            rng.choices(index, weights=row)[0] for index, row in zip(indices, probs, strict=True)
+        ]
+        estimator = adaptive_calibration_error if equal_mass else expected_calibration_error
+        scores.append(estimator(probs, labels, n_bins))
+    scores.sort()
+    rank = max(0, min(len(scores) - 1, int(round(0.95 * (len(scores) - 1)))))
+    return NoiseFloor(mean=sum(scores) / len(scores), p95=scores[rank], trials=trials, n=len(probs))
+
+
+@dataclass(frozen=True)
 class CalibrationReport:
     """Everything the release gate looks at, for one slice of eval data."""
 
@@ -76,6 +131,23 @@ class CalibrationReport:
     mean_confidence: float
     bins: tuple[ReliabilityBin, ...] = field(default=())
     slice_name: str = "all"
+    #: What a perfectly calibrated model would have scored here. ``None`` when
+    #: the report was built without simulating it.
+    floor: NoiseFloor | None = None
+
+    @property
+    def distinguishable(self) -> bool | None:
+        """Whether the measured ECE is separable from a calibrated model's.
+
+        ``False`` is not a failure -- it is the strongest claim available: this
+        model is statistically indistinguishable from perfectly calibrated at
+        this sample size. ``True`` means the miscalibration is real. ``None``
+        means no floor was simulated, and the ECE should not be published as
+        evidence either way.
+        """
+        if self.floor is None:
+            return None
+        return self.ece > self.floor.p95
 
     @property
     def overconfidence(self) -> float:
@@ -87,6 +159,7 @@ class CalibrationReport:
         out = asdict(self)
         out["bins"] = [asdict(b) for b in self.bins]
         out["overconfidence"] = self.overconfidence
+        out["distinguishable"] = self.distinguishable
         return out
 
 
@@ -227,8 +300,16 @@ def report(
     labels: Sequence[int],
     n_bins: int = DEFAULT_BINS,
     slice_name: str = "all",
+    *,
+    simulate_floor: bool = True,
+    trials: int = 200,
 ) -> CalibrationReport:
-    """Every gate metric for one slice, plus the reliability diagram points."""
+    """Every gate metric for one slice, plus the reliability diagram points.
+
+    The noise floor is simulated by default. It costs a few hundred resamples
+    and it is the difference between publishing a number and publishing
+    evidence, so opting out is deliberate rather than the default.
+    """
     _check(probs, labels)
     bins = reliability_bins(probs, labels, n_bins)
     correct, confidence = 0, 0.0
@@ -248,6 +329,7 @@ def report(
         mean_confidence=confidence / n,
         bins=tuple(bins),
         slice_name=slice_name,
+        floor=noise_floor(probs, n_bins, trials) if simulate_floor else None,
     )
 
 

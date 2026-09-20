@@ -53,8 +53,31 @@ def test_recall_at_k_rejects_mismatched_inputs():
 def test_retrieval_trigger_fires_on_count_and_on_tokens():
     budget = DEFAULT_BUDGET
     assert budget.needs_retrieval(budget.retrieval_option_trigger + 1, 100)
-    assert budget.needs_retrieval(10, budget.retrieval_token_trigger + 1)
+    assert budget.needs_retrieval(10, budget.max_question_tokens + 1)
     assert not budget.needs_retrieval(10, 100)
+
+
+def test_max_question_tokens_is_derived_from_the_envelope():
+    """Not configured: whatever the per-question envelope leaves once state has
+    taken its budget, so it cannot drift from the contract it mirrors."""
+    budget = DEFAULT_BUDGET
+    assert budget.max_question_tokens == (budget.single_question_envelope - budget.state_tokens)
+
+
+def test_envelope_rejects_a_request_that_fits_the_total_budget():
+    """The failure this catches: a request comfortably inside the 64k total
+    that is still inadmissible on state-plus-longest-question."""
+    from trigon.limits import Budget
+
+    budget = Budget(
+        context_tokens=1000,
+        single_question_envelope=100,
+        state_tokens=60,
+        schema_tokens=800,
+        readout_tokens=64,
+    )
+    assert budget.fits_envelope(60, 40)
+    assert not budget.fits_envelope(60, 41)
 
 
 def test_budget_rejects_an_over_subscribed_context():

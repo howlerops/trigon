@@ -57,6 +57,7 @@ from ..schema import (
     OptionScoring,
     SchemaCompiler,
     SegmentKind,
+    mask_shape_key,
     materialize_mask,
 )
 from ..schema.tokens import CallableEstimator
@@ -186,6 +187,9 @@ class TorchReadoutBackend:
         self.model = model or PrefillOnlyModel(self.config)
         self.model.eval()
         self._version = version
+        # Mask tensors are shape-keyed like the masks themselves: at spike
+        # sizes building one costs more than the forward pass.
+        self._mask_cache: dict[object, torch.Tensor] = {}
 
     @property
     def model_version(self) -> str:
@@ -202,11 +206,24 @@ class TorchReadoutBackend:
 
     # -- inference -------------------------------------------------------
 
-    @torch.no_grad()
-    def infer(self, compiled: CompiledRequest, request: SystemOneRequest) -> BackendOutput:
-        started = time.perf_counter()
+    def logits(
+        self, compiled: CompiledRequest, request: SystemOneRequest
+    ) -> tuple[dict[str, torch.Tensor], int]:
+        """Differentiable per-question logits, and the sequence length.
+
+        Training and serving share this one path. A trainer carrying its own
+        copy of the forward pass is the standard way to end up with a model
+        that scores well offline and is miscalibrated in production, and the
+        divergence is invisible until someone measures ECE on the served path.
+        """
         embeddings, spans = self._embed(compiled)
-        mask = torch.tensor(materialize_mask(compiled), dtype=torch.bool)
+        key = mask_shape_key(compiled)
+        mask = self._mask_cache.get(key)
+        if mask is None:
+            mask = torch.tensor(materialize_mask(compiled), dtype=torch.bool)
+            if len(self._mask_cache) >= 256:
+                self._mask_cache.clear()
+            self._mask_cache[key] = mask
         if mask.shape[0] != embeddings.shape[1]:
             raise ValueError(
                 f"mask is {mask.shape[0]} tokens but the sequence is "
@@ -215,32 +232,47 @@ class TorchReadoutBackend:
             )
         hidden = self.model(embeddings, mask, spans.positions(), spans.segment_types())[0]
 
-        outputs: dict[str, QuestionOutput] = {}
+        out: dict[str, torch.Tensor] = {}
         for compiled_q in compiled.schema.questions:
             qid = compiled_q.question_id
             readouts = hidden[spans.readout[qid]]
             if compiled_q.kind == "noul":
-                logits = (float(self.model.noul_head(readouts[0]).squeeze(-1)),)
+                out[qid] = self.model.noul_head(readouts[0]).reshape(1)
             elif (
                 compiled_q.kind == "choice"
                 and compiled_q.option_scoring is OptionScoring.READOUT_PER_OPTION
             ):
-                logits = tuple(
-                    float(x) for x in self.model.choice_head(readouts).squeeze(-1).tolist()
-                )
+                out[qid] = self.model.choice_head(readouts).squeeze(-1)
             else:
                 members = torch.stack([hidden[idx].mean(dim=0) for idx in spans.members[qid]])
                 query = self.model.match_query(readouts[0])
                 keys = self.model.match_key(members)
-                scale = math.sqrt(self.config.d_model)
-                logits = tuple(float(x) for x in (keys @ query / scale).tolist())
-            outputs[qid] = QuestionOutput(question_id=qid, kind=compiled_q.kind, logits=logits)
+                out[qid] = keys @ query / math.sqrt(self.config.d_model)
+        return out, int(embeddings.shape[1])
 
+    @torch.no_grad()
+    def infer(self, compiled: CompiledRequest, request: SystemOneRequest) -> BackendOutput:
+        started = time.perf_counter()
+        was_training = self.model.training
+        self.model.eval()
+        try:
+            raw, length = self.logits(compiled, request)
+        finally:
+            self.model.train(was_training)
+
+        outputs = {
+            q.question_id: QuestionOutput(
+                question_id=q.question_id,
+                kind=q.kind,
+                logits=tuple(float(x) for x in raw[q.question_id].tolist()),
+            )
+            for q in compiled.schema.questions
+        }
         return BackendOutput(
             outputs=outputs,
             model_version=self._version,
             model_ms=(time.perf_counter() - started) * 1000.0,
-            diagnostics={"sequence_tokens": int(embeddings.shape[1])},
+            diagnostics={"sequence_tokens": length},
         )
 
     # -- sequence construction -------------------------------------------

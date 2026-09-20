@@ -51,8 +51,42 @@ jobs:
       - name: Jaggedness suite
         run: trigon eval jaggedness -n 50 --out reports/jaggedness.md
       - name: Calibration suite
+        # The lexical floor fails the ECE gate by design, and a 300-case run
+        # fails the sample-size gate too. Both are the gates working; this job
+        # publishes the numbers rather than blocking on them.
         run: trigon eval calibration -n 300 --out reports/calibration.md || true
+      - name: Cardinality recall gate
+        # Decision D1's falsifier. Capped below the full sweep because the
+        # 10k-option pass takes minutes; the nightly job runs the whole range.
+        run: |
+          python - <<'PY'
+          from trigon.evals import run_cardinality_gate
+          results = run_cardinality_gate(option_counts=(256, 1024), n_queries=100,
+                                         on_result=print)
+          raise SystemExit(0 if all(r.passed for r in results) else 1)
+          PY
       - uses: actions/upload-artifact@v4
         with:
           name: eval-reports
+          path: reports/
+
+  reference-run:
+    # The closed loop: train the reference model, calibrate it, run the gates.
+    # Minutes rather than seconds, so it is not on the pull-request path.
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -e ".[dev,server,train]"
+      - name: Train, calibrate, gate
+        run: trigon train -n 2500 --eval-n 6000 --epochs 6 --out reports/reference-run.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: reference-run
           path: reports/
