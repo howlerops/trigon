@@ -13,7 +13,7 @@ calibration breadth with a team that spent two years on it.
 | **0 — Contract + scaffolding** | 1–2 | API spec, adapter, GPU pools, eval methodology frozen, backbone selection, licence audit | spec reviewed; jaggedness suite runs against an LLM baseline |
 | 1 — Architecture spike | 2–5 | schema compiler, prefix-LM conversion, block masks, categorical readouts, distillation-only fine-tune | single-pass readout ≥ prompted structured-output baseline on 3 public suites; multi-question batching shows no per-question degradation |
 | 2 — Data + calibration | 4–11 | all five streams; distill → mixed → anneal; auxiliary losses; conformal fitting | ECE ≤ 0.05 held-out; injection suite beats the LLM baseline; negation coherence beats documented behaviour |
-| 3 — Inference stack (parallel) | 6–13 | vLLM fork prefill path, KV-cache quantization, ANN stage, Rust gateway, load tests | ≤150 ms p50 at target QPS on L4; quantized-vs-BF16 ECE delta ≤ 0.01 |
+| 3 — Inference stack (parallel) | 6–13 | vLLM fork prefill path, KV-cache quantization, ANN stage, load tests | ≤150 ms p50 at target QPS on L4; quantized-vs-BF16 ECE delta ≤ 0.01 |
 | 4 — Evals + release | 12–16 | full three-suite run, docs, cookbooks, SDKs, weights + harness published | reproducible Pareto plots; drop-in adapter demo |
 
 ## Phase 0 status
@@ -40,11 +40,12 @@ not survive being checked.
   committed.
 
 Not phase 0, and not here: real weights on a real backbone, the vLLM fork, the
-Rust gateway, the ANN stage, the SDKs.
+ANN stage. (The SDKs landed early; the Rust gateway was measured and dropped —
+see `docs/decisions.md`.)
 
 ### What phase 0 changed
 
-Eight findings that alter phase 1's work rather than confirming it. All are
+Nine findings that alter phase 1's work rather than confirming it. All are
 written up in `docs/decisions.md`.
 
 **The context envelope was wrong.** The plan assumed a flat ~32k budget. The
@@ -92,6 +93,14 @@ recall gate runs on generated confusable sets instead.
 Autocast are all red. Outcome calibration in v1 rests on verifiable synthetic
 data plus green classification labels — a narrower claim than the plan assumes,
 and one the calibration report has to state.
+
+**The Rust gateway does not survive measurement.** The plan budgets phase-3
+time to rewrite the gateway in Rust. Measured, the gateway's own work is 3.61 ms
+of a 150 ms p50 budget — 2.4% — and at 277 requests per second per core its CPU
+is a rounding error beside the GPU. A rewrite buys three milliseconds and costs
+a second implementation of the contract. Phase 3 keeps the load tests and drops
+the rewrite; the one function that would benefit, the tokenizer at ceiling-size
+states, arrives as a dependency in phase 1 rather than as a rewrite.
 
 **The trainable pool has no e-commerce domain.** Amazon ESCI's repository
 licenses "the project" Apache-2.0 and says nothing about the data, which the

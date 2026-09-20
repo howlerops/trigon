@@ -662,6 +662,77 @@ rate schedule is a function of total steps — so the two had different learning
 rates at the epoch being compared. Two rounds of conclusions were drawn from it
 before that was noticed.
 
+### Python for the gateway, Rust for one function, Go for nothing
+
+The build plan specifies a Rust production gateway and phase 3 budgets time to
+write it. Measured, that is optimising the wrong thing.
+
+**Where a request's time actually goes.** Through the real gateway over HTTP,
+lexical backend, single process. Reproduce with `python scripts/gateway_cost.py`,
+which prints these numbers and says plainly if the conclusion has stopped
+holding:
+
+| | |
+| --- | ---: |
+| Whole request, end to end | **3.61 ms** (277 req/s per core) |
+| …of which the model | 0.16 ms |
+| Compiling a 1,000-option schema | 1.9 ms |
+| Serialising a 206 KiB response (10,000 options) | 1.4 ms |
+| Tokenizing a state at the 65,536-token ceiling | **26 ms** |
+| p50 latency target | 150 ms |
+
+The gateway's own work is **2.4% of the p50 budget**. A gateway that cost
+literally nothing would move p50 by 3.6 ms. Rewriting it in Rust buys, at
+best, three milliseconds of a hundred and fifty — and costs a second
+implementation of the contract, which is the failure mode this repository
+spends the most effort preventing. `spec/openapi.json`, the drift test and the
+generated SDKs all exist because one definition of the contract is worth more
+than any constant factor.
+
+It is also worth naming what "Python" means here: `pydantic-core` is Rust and
+the JSON encoder is C, so validation and serialisation — normally the
+expensive parts of a gateway — are already native. The Python is a thin
+orchestration layer over them.
+
+**The cost argument does not rescue Rust either.** At 277 req/s per core, a
+core-hour serves about a million requests. Gateway CPU is a rounding error
+beside the GPU the model runs on, whatever the model costs. The gateway is not
+on the critical path for latency or for spend.
+
+**Rust for exactly one function, when it is measured to matter.** Tokenizing a
+maximum-size state is 26 ms, 17% of the p50 budget, and it is the one piece
+that is pure CPU with a stable interface. That interface already exists —
+`CallableEstimator` and a backend's `.estimator` — so a native tokenizer drops
+in without a second contract implementation. It also arrives free: phase 1
+swaps in the backbone's own tokenizer, and that will be HuggingFace
+`tokenizers`, which is Rust. **So the Rust we need is a dependency, not a
+rewrite.** Until a request actually carries a ceiling-size state, 26 ms is a
+number about a case nobody has sent.
+
+**Go: no, and it is the clearest of the three.** It does not win on latency,
+because nothing does at 2.4%. It has no ML ecosystem, so the calibration math,
+the metrics and the eval harness could not live there — and those must stay
+importable by training code, which is the actual constraint on this choice.
+Its one real advantage is concurrency ergonomics, and that solves a problem
+this architecture does not have: the gateway is prefill-only and stateless, so
+it scales by process count and the GIL never binds. Choosing Go would trade
+the ecosystem that the product's differentiator is written in for a
+concurrency model the design does not need.
+
+**What would change our mind.** Three measurements, none of which we have:
+
+1. p99 under real load showing GC or GIL pauses rather than model queueing.
+   The gateway's contribution to p99 is unmeasured — 3.61 ms is a median on an
+   idle box, and tail behaviour under contention is a different question.
+2. A traffic mix where ceiling-size states are common rather than theoretical,
+   which would make the 26 ms tokenizer the headline instead of a footnote.
+3. Gateway CPU appearing in the bill at all, which at a million requests per
+   core-hour would take a traffic scale this project does not have.
+
+If (1) or (2) lands, the response is still not a rewrite: it is moving that
+function behind the seam that already exists, which is how the tokenizer is
+already structured.
+
 ### An index that is stable across requests should be built once
 
 `LexicalShortlister` rebuilt its whole BM25 corpus — tokenizing every option —

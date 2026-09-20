@@ -1,11 +1,10 @@
 """The gateway. Validates, compiles, routes, calibrates, answers.
 
-The production gateway in the build plan is Rust; this is the reference
-implementation that pins the contract and generates the OpenAPI spec both SDKs
-are built from. Keeping one executable definition of the contract is what makes
-"drop-in compatible" checkable instead of aspirational --
-``tests/test_openapi_drift.py`` fails when the checked-in spec and this app
-disagree.
+This is the gateway, not a reference for one: the build plan's Rust rewrite
+does not survive measurement (docs/decisions.md). Keeping one executable
+definition of the contract is what makes "drop-in compatible" checkable
+instead of aspirational -- ``tests/test_openapi_drift.py`` fails when the
+checked-in spec and this app disagree, and both SDKs are generated from it.
 """
 
 from __future__ import annotations

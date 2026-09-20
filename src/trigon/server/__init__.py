@@ -1,7 +1,12 @@
-"""Reference gateway. The production gateway is Rust; this one pins the
-contract and generates the OpenAPI spec. The Python and TypeScript SDKs are a
-phase-4 deliverable (docs/roadmap.md) and will be generated from that spec --
-which is why it is checked in and drift-tested now, before anything reads it."""
+"""The gateway. Pins the contract and generates the OpenAPI spec the SDKs are
+generated from.
+
+The build plan called for rewriting this in Rust for production. Measured, the
+gateway's own work is 2.4% of the p50 latency budget and a rounding error
+against GPU cost, so a rewrite buys three milliseconds of a hundred and fifty
+and costs a second implementation of the contract. See docs/decisions.md,
+"Python for the gateway, Rust for one function, Go for nothing" -- including
+the three measurements that would change that."""
 
 from .config import ServerConfig
 from .routing import RoutingPolicy, TieredRouter
