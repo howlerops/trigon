@@ -145,14 +145,36 @@ four seeds:
 
 Choice and Noul sit near 1.0 on every seed. Score ranges over a factor of
 sixteen, and on three seeds of four it is below 0.5 — a temperature below 1
-*sharpens*, so the fit is making a head more confident. `size`, the Score
+*sharpens*, so the fit is making that head more confident. `size`, the Score
 question, is the one the model never learns: 0.2447 accuracy against a 0.2558
-marginal on seed 1. Sharpening a head that carries no signal is how you
-manufacture confident wrong answers, which is precisely what ECE measures.
+marginal on seed 1.
 
-`temperature.py` already warns when a fit pins at the ceiling (20.0, flattening
-to uniform). It has a floor warning too, at 0.05 — and 0.20 does not trip it.
-Whether the floor is in the wrong place, or the Score head needs a different
-treatment, is the open question. The per-primitive calibration table added
-alongside this sweep is the instrument for answering it; the pooled number
-could only say that something was wrong.
+**The obvious story about that does not survive being tested.** The obvious
+story is that sharpening a head which carries no signal manufactures confident
+wrong answers, which is what ECE measures. Run as a controlled experiment — a
+4-level head, a non-uniform label marginal, signal dialled from zero upward,
+temperature fitted on one split and ECE measured on another — it does not
+reproduce:
+
+| Signal | Fitted T | ECE at T=1 | ECE at fitted T | |
+| ---: | ---: | ---: | ---: | --- |
+| 0.0 | 1.177 | 0.0492 | 0.0260 | helped |
+| 0.1 | 0.962 | 0.0123 | 0.0113 | helped |
+| 0.3 | 0.713 | 0.0934 | 0.0646 | helped |
+| 0.6 | 0.528 | 0.2003 | 0.0913 | helped |
+| 1.0 | 0.392 | 0.2457 | 0.0710 | helped |
+| 2.0 | 0.139 | 0.2457 | 0.0033 | helped |
+
+At *zero* signal the fit flattens (T = 1.177) rather than sharpening. A
+sharpening temperature appears only once there is real signal, and wherever it
+appears it improves ECE out of sample — because a T below 1 is the correct
+response to an *underconfident* head, not a pathology. So "T = 0.20 is a
+degenerate fit" is not the explanation, and `temperature.py`'s floor warning
+sitting at 0.05 rather than somewhere higher is not obviously a bug.
+
+What remains true is narrower and still worth acting on: **Score's fitted
+temperature is the one that varies wildly between seeds while the other two
+do not**, and temperature scaling raises ECE on two seeds. Whether those two
+facts are the same fact is not yet established. The per-primitive calibration
+table added alongside this sweep is the instrument for deciding it; the pooled
+number could only say that something was wrong.
