@@ -407,14 +407,30 @@ def _scaled(logits: list[float], temperature: float) -> list[float]:
     return [x / total for x in exponentiated]
 
 
-#: How sure the check has to be that a temperature hurts before declining it.
-#: A paired bootstrap at this level: the fit is kept unless it raises ECE in
-#: at least this share of resamples of the check split.
-DECLINE_CONFIDENCE = 0.95
+#: How sure the check has to be that a temperature *helps* before applying it.
+#: A paired bootstrap at this level: the fit is discarded unless it lowers ECE
+#: in at least this share of resamples of the check split.
+#:
+#: The burden of proof sits on accepting, and that direction is a measurement
+#: rather than a preference -- `scripts/decline_rule.py` scores three rules
+#: against heads whose true calibration is known. See `docs/decisions.md`,
+#: "A temperature is a proposal, not a result".
+ACCEPT_CONFIDENCE = 0.95
 
 
 def _harm_is_real(unscaled, rescaled, labels, *, resamples: int = 200, seed: int = 4919) -> bool:
     """Does this temperature raise ECE by more than sampling noise?
+
+    **Not used by the pipeline.** Retained as the rejected alternative that
+    `scripts/decline_rule.py` scores against, so the comparison that rejected
+    it stays runnable. `_help_is_real` is the rule that ships.
+
+    The reasoning below is preserved because it was wrong in an instructive
+    way: it argues from two real data points for putting the burden of proof
+    on *declining*, and seven constructed heads with known calibration say the
+    opposite. This rule declines 6 times in 40 on an already-calibrated head
+    where the shipped one declines 40 times in 40, and its worst-case ECE on
+    that shape is 0.0460 against 0.0188.
 
     A paired bootstrap over the check split. The two ECEs are computed on the
     *same* points, so the quantity with a meaningful spread is their
@@ -455,16 +471,44 @@ def _harm_is_real(unscaled, rescaled, labels, *, resamples: int = 200, seed: int
         a = calibration_report([unscaled[i] for i in picks], pick_labels, simulate_floor=False).ece
         b = calibration_report([rescaled[i] for i in picks], pick_labels, simulate_floor=False).ece
         worse += b > a
-    return worse >= DECLINE_CONFIDENCE * resamples
+    return worse >= ACCEPT_CONFIDENCE * resamples
 
 
 def _help_is_real(unscaled, rescaled, labels, *, resamples: int = 200, seed: int = 4919) -> bool:
     """Does this temperature *lower* ECE by more than sampling noise?
 
-    The mirror of :func:`_harm_is_real`, and the one that is used. Which way
-    the burden of proof points is an empirical question, not a matter of
-    taste, and `scripts/decline_rule.py` answers it against heads whose true
-    calibration is known.
+    The rule that ships: a fit is applied only where it demonstrably helps,
+    and anything short of that serves unscaled.
+
+    Which way the burden of proof points is an empirical question, and
+    `scripts/decline_rule.py` answers it against heads whose true calibration
+    is known. Worst-case ECE on a third draw none of the rules ever saw,
+    40 trials per shape:
+
+    ====================== ======= ========= ======== ============
+    head                   bare    bootstrap strict   never scale
+    ====================== ======= ========= ======== ============
+    already calibrated     0.0290  0.0460    0.0188   0.0188
+    slightly overconfident 0.0460  0.0382    0.0460   0.0460
+    clearly overconfident  0.0528  0.0528    0.0528   0.2145
+    clearly underconfident 0.0463  0.0463    0.0463   0.2173
+    spread, calibrated     0.0343  0.0466    0.0208   0.0208
+    spread, tilted         0.0708  0.0708    0.0624   0.0624
+    spread, tilted hard    0.1246  0.1246    0.1218   0.1218
+    ====================== ======= ========= ======== ============
+
+    This rule matches or beats every alternative on six of seven shapes. What
+    it is doing is visible in the decline counts rather than the ECEs: it
+    declines 40 of 40 on every shape a temperature cannot fix, and 0 of 40 on
+    the two where scaling is the difference between 0.05 and 0.21. It behaves
+    like "never scale" where scaling is useless and like "always scale" where
+    it is essential, which is the rule one would write by hand knowing the
+    answers in advance.
+
+    It loses on one shape -- a head overconfident by three points, where
+    scaling helps a little and this refuses it, 0.0460 against the bootstrap's
+    0.0382. That is the price of the direction, paid where the stake is
+    smallest.
     """
     import random
 
@@ -485,7 +529,7 @@ def _help_is_real(unscaled, rescaled, labels, *, resamples: int = 200, seed: int
         b = calibration_report([rescaled[i] for i in picks], pick_labels, simulate_floor=False).ece
         better += b < a
         counted += 1
-    return counted > 0 and better >= DECLINE_CONFIDENCE * counted
+    return counted > 0 and better >= ACCEPT_CONFIDENCE * counted
 
 
 def _fit_temperatures(engine, cases):
@@ -558,7 +602,7 @@ def _fit_temperatures(engine, cases):
             rescaled = [_scaled(x, value) for x, _ in check_rows]
             before = calibration_report(unscaled, labels, simulate_floor=False).ece
             after = calibration_report(rescaled, labels, simulate_floor=False).ece
-            if _harm_is_real(unscaled, rescaled, labels):
+            if not _help_is_real(unscaled, rescaled, labels):
                 declined[primitive] = (value, before, after)
                 # Remove the count too: `fitted_on` is what a reader checks to
                 # see whether a primitive was calibrated at all, and leaving it

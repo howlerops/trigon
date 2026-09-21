@@ -661,12 +661,52 @@ which one it is looking at.
 So the decision is a **paired bootstrap** over the check split: the two ECEs
 are computed on the same points, so the quantity with meaningful spread is
 their difference, and resampling the points together preserves that pairing.
-The fit is declined only if it is worse in at least 95% of resamples.
 
-The asymmetry is deliberate and follows from the measured costs. A false
-decline loses a temperature that would have helped a little (0.0128 → 0.0219).
-A false accept serves a head through a scalar that makes it much worse (0.0251
-→ 0.0928). So the burden of proof sits on declining, and a tie keeps the fit.
+**Which way the burden of proof points is a measurement, and I got it wrong
+first.** The reasoning was: a false decline loses a temperature that would
+have helped a little (0.0128 → 0.0219), a false accept serves a head through a
+scalar that makes it much worse (0.0251 → 0.0928), so the burden belongs on
+declining. Two real data points, and they do not generalise.
+
+`scripts/decline_rule.py` settles it. It constructs heads whose true
+calibration is known — so, unlike a seed sweep, it can say whether a given
+decision was *right* — and scores each rule on a third draw neither the fit
+nor the check ever saw. Worst-case ECE, 40 trials per shape:
+
+| Head | `bare` | burden on declining | **burden on accepting** | never scale |
+| --- | ---: | ---: | ---: | ---: |
+| already calibrated | 0.0290 | 0.0460 | **0.0188** | 0.0188 |
+| slightly overconfident | 0.0460 | **0.0382** | 0.0460 | 0.0460 |
+| clearly overconfident | 0.0528 | 0.0528 | **0.0528** | 0.2145 |
+| clearly underconfident | 0.0463 | 0.0463 | **0.0463** | 0.2173 |
+| spread, calibrated | 0.0343 | 0.0466 | **0.0208** | 0.0208 |
+| spread, tilted | 0.0708 | 0.0708 | **0.0624** | 0.0624 |
+| spread, tilted hard | 0.1246 | 0.1246 | **0.1218** | 0.1218 |
+
+**Burden on accepting wins on six of seven shapes**, and the decline counts
+say why more clearly than the ECEs do: it declines 40 of 40 on every shape a
+temperature cannot fix, and 0 of 40 on the two where scaling is the difference
+between 0.05 and 0.21. It behaves like "never scale" where scaling is useless
+and like "always scale" where it is essential — the rule one would write by
+hand knowing the answers in advance.
+
+It loses on one shape, a head overconfident by three points where scaling
+helps a little and this refuses it. That is the price of the direction, paid
+where the stake is smallest.
+
+So: **a fit is applied only where it demonstrably lowers ECE**, and anything
+short of that serves unscaled. The rejected rule stays in the tree as the
+alternative `scripts/decline_rule.py` scores against, so the comparison that
+rejected it remains runnable.
+
+**Two notes on how this was arrived at**, because both are the kind of mistake
+that repeats. The first version of the study used heads of constant
+confidence, which omitted the regime the decision exists for — a head
+overconfident where it is confident and underconfident where it is not, which
+no single temperature can fix — and reported that the rules were
+interchangeable. And the study had no "never scale" column until late; without
+it, two rules can be compared without anyone noticing that neither beats doing
+nothing.
 
 **This is the honest-defaults rule one level up.** A degenerate fit — pinned at
 the ceiling or the floor — already warns rather than returning a quiet number.
