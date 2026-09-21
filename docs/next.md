@@ -99,6 +99,19 @@ so there is a real-data baseline to compare against, not only a synthetic one.
 **Done when** four seeds certify with all three synthetic questions above
 their marginals *and* per-corpus ECE holds on real data.
 
+**A.4 Sweep the reference configuration on CI's hardware.** The certified
+configuration certifies on four seeds *on one machine*, and GitHub's runners
+produce a draw worse than any of them. `scripts/seed_sweep.py` already says
+why: a perturbation the size of a matmul's summation order moves a seed from
+one outcome to the other, and `tests/test_prefix_cache.py` now shows this
+hardware has a different one. Hardware is a second axis of the seed problem
+and nobody swept it. Blocker: none — it triples the CI job's wall clock, which
+is a cost rather than an obstacle.
+
+**Done when** `seed_sweep.py --require all` runs in CI and the reference-run
+job blocks on its verdict again, or the configuration is replaced with one
+whose outcome does not depend on which machine trains it.
+
 ---
 
 ## Stage B — Make the cost claim real

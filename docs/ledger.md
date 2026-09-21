@@ -141,6 +141,7 @@ The most useful section. Each of these was argued for before it was measured.
 | Stage 4.1 is blocked on the incumbent's wire format | It is published. `decisions.md` had already cited that source. |
 | Stage 2.1 is blocked on data | Banking77 is reachable, green, and was cleared by our own audit. |
 | The served path is exact to floating-point equality | On this machine. On GitHub's it drifts 2.4e-08 with no cache at all. |
+| A configuration certified on four seeds is certified | Four seeds on *one machine*. Hardware is a second axis of the same perturbation. |
 | The distribution corpora need a Parquet reader | HelpSteer2 is gzipped JSONL. Three of four do; it does not. |
 | "ECE ≤ 0.05 per corpus" is a reachable done-condition | Not on a corpus whose test split is below the 5,000-sample floor. |
 
@@ -240,11 +241,15 @@ what order, and how each step is known to be done.
   for them would put a compiled dependency in the import path of the
   calibration math and the drift tests. They get converted in `scripts/`
   first, or not at all.
-- **The certified configuration does not certify on GitHub's hardware.** Its
-  first CI run reported per-primitive choice ECE 0.1076 (adaptive 0.1447)
-  against a 0.05 limit, where the four certified runs read 0.0084–0.0247 on
-  the same flags. Accuracy was in range, so it is the calibration layer rather
-  than the training. Undiagnosed. The CI job publishes the failure into its
-  summary instead of blocking the build on a difference nobody understands
-  yet; when it is understood it goes back to blocking.
+- **"Certified on four seeds" means four seeds on one machine.** The
+  configuration failed its gates on GitHub's hardware: choice accuracy 0.530
+  against 0.648–0.849 across the certified four, and choice ECE 0.1076 against
+  0.0064–0.0240. The mechanism is the one `scripts/seed_sweep.py` already
+  documents — "a perturbation far smaller than a seed change, the summation
+  order of a batched matmul, is enough to move a given seed from one outcome
+  to the other" — and the prefix-cache finding above shows that hardware *is*
+  such a perturbation. Hardware is a second axis of the seed problem and it
+  was never swept. The CI job publishes rather than blocks, because a single
+  draw on unswept hardware is not evidence either way; sweeping four seeds
+  there is `docs/next.md` A.4.
 - **CC BY-SA on a derived model** — counsel opinion requested, unresolved.

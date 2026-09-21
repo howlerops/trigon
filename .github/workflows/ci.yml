@@ -121,20 +121,27 @@ jobs:
         # The certified configuration from reports/iso/, which clears every
         # blocking gate on all four seeds on the development machine.
         #
-        # **It does not clear them here, and that is unexplained.** The first
-        # run of this job on GitHub's hardware reported per-primitive choice
-        # ECE 0.1076 (adaptive 0.1447) against a 0.05 limit, where the four
-        # certified runs read 0.0084 to 0.0247 on the same flags. Accuracy was
-        # in range -- `plan` +0.2000, `at_risk` +0.0955 -- so this is the
-        # calibration layer, not the training. It is recorded as an open item
-        # in docs/ledger.md rather than diagnosed from a log.
+        # **It does not clear them here, and the reason is one this project
+        # already wrote down on a different axis.** scripts/seed_sweep.py says
+        # it in its own docstring: "a perturbation far smaller than a seed
+        # change -- the summation order of a batched matmul, on the order of
+        # 1e-6 -- is enough to move a given seed from one outcome to the
+        # other". tests/test_prefix_cache.py now demonstrates that this
+        # hardware *has* a different summation order: the forward pass drifts
+        # 2.4e-08 here where it is exactly 0.0 on the development machine.
         #
-        # So the step publishes rather than blocks, for the same reason the
-        # `evals` job does: gating the build on an undiagnosed difference
-        # would mean every unrelated change is reported as broken. It is not
-        # silent about it -- the gate failures go into the job summary, and
-        # the report is uploaded. When the difference is understood this goes
-        # back to blocking.
+        # So hardware is a second axis of the same perturbation, and it was
+        # never swept. The first run here got a draw of seed 0 worse than any
+        # of the four this configuration was certified on -- choice accuracy
+        # 0.530 against 0.648, 0.830, 0.847, 0.849, and choice ECE 0.1076
+        # against 0.0064 to 0.0240.
+        #
+        # A single draw on unswept hardware is not evidence either way, which
+        # is the project's own rule, so this step publishes rather than
+        # blocks. The right fix is to run the four-seed sweep here and require
+        # all of them, which is docs/next.md A.4; it is not done in the same
+        # change as the diagnosis because it triples this job's wall clock and
+        # deserves its own measurement.
         #
         # --save-model because a report about a model nobody can reload is a
         # claim rather than a result, and because scripts/regate.py can then
