@@ -39,8 +39,16 @@ machine-readable form — one set per report, named after it, so parallel runs
 cannot overwrite each other's. (They did once: the dot-product arm lost its
 sidecars to a fixed filename before the fix landed in `trigon.cli`. Both are
 back.) `conformal/accounts.json` is a fitted conformal profile for the
-certified model — target 90% coverage, 0.9227 achieved on a held-out split,
-mean set 2.49 of 4 options.
+certified configuration in `iso/` — target 90% coverage, **0.9027** achieved on
+a held-out split, mean set **0.97 of 4 options**, and it clears the
+`conformal_coverage` gate. Below 1.0 because some sets are empty, which is the
+wrapper saying no option clears the threshold at this coverage rather than
+naming one anyway. Refit with:
+
+```bash
+trigon fit --backend torch --weights reports/iso/iso-seed2.pt -n 1500 \
+  --out temperatures.json --conformal-out reports/conformal/accounts.json
+```
 
 Each report prints the exact command that produced it, and names the build it
 measured: the version carries a hash of the weights, so the three runs are

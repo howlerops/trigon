@@ -220,9 +220,16 @@ trigon fit --backend torch --weights model.pt --conformal-out profiles/mine.json
 
 It gives a distribution-free coverage guarantee that holds whether or not the
 underlying model is well calibrated. The shipped profile targets 90% and
-achieves 0.9227 on held-out data with a mean set of 2.49 of 4 options — a
-singleton where the model is confident, a wider set where it genuinely cannot
-separate the options.
+achieves **0.9027** on held-out data with a mean set of **0.97 of 4 options**,
+fitted against the certified configuration in `reports/iso/`.
+
+A mean below 1.0 means some sets are **empty**, and that is the wrapper
+working rather than failing: an empty set says no option clears the threshold
+at this coverage, which is the honest answer when the model is unsure and the
+alternative is naming one anyway. The contract allows it and
+`tests/test_end_to_end.py` asserts the served path handles it. The previous
+profile, fitted against a model that answered 45.6% of questions correctly,
+averaged 2.49 options; a tighter set is what a better model buys.
 
 **The command checks its own promise and fails if it is not kept.** Coverage
 is measured on a third split, and `trigon fit` exits non-zero when it falls

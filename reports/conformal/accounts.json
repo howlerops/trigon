@@ -2,5 +2,5 @@
   "alpha": 0.1,
   "calibration_n": 1500,
   "method": "lac",
-  "threshold": 0.692139363631096
+  "threshold": 0.16092360207390466
 }
