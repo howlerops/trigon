@@ -1,0 +1,29 @@
+training on 8000 cases, 8 epochs
+  epoch 1 step 25/3600 loss 1.1590
+  epoch 1 step 50/3600 loss 1.1396
+  epoch 1 step 75/3600 loss 1.0775
+  epoch 1 step 100/3600 loss 1.0377
+  epoch 1 step 125/3600 loss 1.0182
+  epoch 1 step 150/3600 loss 1.0039
+  epoch 1 step 175/3600 loss 0.9879
+  epoch 1 step 200/3600 loss 0.9715
+  epoch 1 step 225/3600 loss 0.9667
+  epoch 1 step 250/3600 loss 0.9606
+  epoch 1 step 275/3600 loss 0.9571
+  epoch 1 step 300/3600 loss 0.9561
+  epoch 1 step 325/3600 loss 0.9522
+  epoch 1 step 350/3600 loss 0.9504
+  epoch 1 step 375/3600 loss 0.9502
+  epoch 1 step 400/3600 loss 0.9472
+  epoch 1 step 425/3600 loss 0.9456
+  epoch 1 step 450/3600 loss 0.9443
+  epoch 1/8: loss 0.9443 val 0.9490 (137s, 52.5 cases/s)
+  epoch 2 step 475/3600 loss 0.9308
+  epoch 2 step 500/3600 loss 0.9123
+  epoch 2 step 525/3600 loss 0.9056
+  epoch 2 step 550/3600 loss 0.9456
+  epoch 2 step 575/3600 loss 0.9773
+  epoch 2 step 600/3600 loss 0.9970
+  epoch 2 step 625/3600 loss 1.0153
+  epoch 2 step 650/3600 loss 1.0255
+  epoch 2 step 675/3600 loss 1.0351

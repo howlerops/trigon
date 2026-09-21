@@ -52,14 +52,35 @@ def test_eval_writes_both_report_formats(tmp_path, capsys):
     assert len(payload["results"]) == 9
 
 
-def test_fit_saves_temperatures(tmp_path, capsys):
+def test_fit_stores_only_the_calibrators_it_kept(tmp_path, capsys):
+    """The file records what is applied, not what was attempted.
+
+    This asserted all three primitives were always present, which encoded the
+    old behaviour: fit a temperature per primitive and apply it regardless.
+    `trigon fit` now runs the same selection as `trigon train` -- fit both
+    candidates, score them on data neither was fitted on, apply whichever
+    demonstrably helps -- so a primitive whose fit buys nothing is absent, and
+    `fitted_on` does not claim a calibration that is not being served.
+    """
     out = tmp_path / "t.json"
     with pytest.warns(Warning):
-        # The lexical floor's logits carry little signal, so the fit warns --
-        # which is the behaviour under test as much as the file is.
+        # The lexical floor's logits carry little signal, so at least one fit
+        # pins at a bound and warns. That is the honest-defaults rule and it
+        # is under test as much as the file is: the selection suppressed this
+        # warning for one commit and silently applied a T=20 fit.
         main(["fit", "--out", str(out), "-n", "60"])
-    capsys.readouterr()
-    assert set(json.loads(out.read_text())["primitive"]) == {"choice", "noul", "score"}
+    printed = capsys.readouterr()
+
+    stored = json.loads(out.read_text())
+    assert set(stored["primitive"]) <= {"choice", "noul", "score"}
+    assert set(stored["primitive"]) == set(stored["fitted_on"])
+
+    # Every primitive is accounted for in the output, kept or not, so a reader
+    # can tell "not calibrated" from "not considered".
+    for primitive in ("choice", "noul", "score"):
+        assert f"{primitive}:" in printed.err
+        if primitive not in stored["primitive"]:
+            assert f"{primitive}: none" in printed.err
 
 
 def test_spec_prints_the_contract(capsys):

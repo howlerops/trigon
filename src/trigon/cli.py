@@ -609,8 +609,15 @@ def _fit_calibration(engine, cases):
             rows.setdefault(question.primitive, []).append((logits, question.expected.hard_label))
 
     chosen: dict[str, str] = {}
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", CalibrationWarning)
+    # Recorded rather than ignored. A fit pinned at a bound carries
+    # information the verdict line does not -- that the head's logits may
+    # carry no signal and the "improvement" is a flattening toward uniform --
+    # and `CLAUDE.md` requires a degenerate fit to warn rather than return a
+    # quiet number. Suppressing it here silently applied a T=20 fit on the
+    # lexical floor. They are re-raised after the loop so the message names
+    # the primitive and says whether the fit was kept.
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always", CalibrationWarning)
         for primitive, data in sorted(rows.items()):
             cut = max(1, len(data) // 2)
             fit_rows, check_rows = data[:cut], data[cut:]
@@ -674,7 +681,51 @@ def _fit_calibration(engine, cases):
 
     for primitive, verdict in sorted(chosen.items()):
         print(f"  {primitive}: {verdict}", file=sys.stderr)
+    for entry in caught:
+        if issubclass(entry.category, CalibrationWarning):
+            applied = [p for p, v in chosen.items() if not v.startswith("none")]
+            warnings.warn(
+                f"{entry.message} (primitives calibrated: {', '.join(sorted(applied)) or 'none'})",
+                CalibrationWarning,
+                stacklevel=2,
+            )
     return scaler, isotonic
+
+
+def _fit_domain_temperatures(engine, cases, domain: str):
+    """Per-domain temperatures, the one path the calibrator selection skips.
+
+    `TemperatureScaler` carries a per-domain override and `IsotonicCalibrator`
+    has no dimension for one, so a domain fit cannot choose between them. It
+    fits temperatures unconditionally, which is what this command did for
+    every fit before the selection existed.
+    """
+    import math
+
+    from .calibration.isotonic import IsotonicCalibrator
+    from .calibration.temperature import TemperatureScaler
+    from .evals import run_cases
+
+    scaler = TemperatureScaler()
+    rows: dict[str, list[tuple[list[float], int]]] = {}
+    for outcome in run_cases(engine, cases):
+        for question in outcome.questions.values():
+            if question.expected is None or question.expected.hard_label is None:
+                continue
+            # Recover logits from probabilities: temperature scaling is
+            # invariant to an additive constant, so log p is sufficient.
+            logits = [math.log(max(p, 1e-12)) for p in question.probabilities]
+            rows.setdefault(question.primitive, []).append((logits, question.expected.hard_label))
+
+    for primitive, data in sorted(rows.items()):
+        if primitive == "noul":
+            value = scaler.fit_binary(
+                [r[0][1] - r[0][0] for r in data], [y for _, y in data], domain
+            )
+        else:
+            value = scaler.fit(primitive, [x for x, _ in data], [y for _, y in data], domain)
+        print(f"  {primitive}: T={value:.4f} on {len(data)} examples", file=sys.stderr)
+    return scaler, IsotonicCalibrator()
 
 
 def cmd_fit(args: argparse.Namespace) -> int:
@@ -686,11 +737,9 @@ def cmd_fit(args: argparse.Namespace) -> int:
     on a few hundred of their own labels. A mitigation that exists only in a
     design document is not a mitigation, so it ships as a command.
     """
-    import math
 
     from .calibration.conformal import ConformalMethod, fit_conformal
-    from .calibration.temperature import TemperatureScaler
-    from .evals import run_cases, synthetic_outcome_cases
+    from .evals import synthetic_outcome_cases
     from .limits import CONFORMAL_COVERAGE_SIGMAS, conformal_coverage_floor
 
     engine = _engine(args.backend, args.domain, weights=args.weights)
@@ -701,35 +750,40 @@ def cmd_fit(args: argparse.Namespace) -> int:
     # temperature was fitted on the split the model trained on". With a
     # `--weights` checkpoint in play this command is the user-facing half of
     # that same defect.
-    outcomes = run_cases(
-        engine,
-        synthetic_outcome_cases(
-            n=args.n, seed=args.seed + SPLIT_SEED_OFFSETS["calibration"], noise=args.noise
-        ),
+    cases = synthetic_outcome_cases(
+        n=args.n, seed=args.seed + SPLIT_SEED_OFFSETS["calibration"], noise=args.noise
     )
-    scaler = TemperatureScaler()
-    by_primitive: dict[str, list[tuple[list[float], int]]] = {}
-    for outcome in outcomes:
-        for question in outcome.questions.values():
-            if question.expected is None or question.expected.hard_label is None:
-                continue
-            # Recover logits from probabilities: temperature scaling is
-            # invariant to an additive constant, so log p is sufficient.
-            logits = [math.log(max(p, 1e-12)) for p in question.probabilities]
-            by_primitive.setdefault(question.primitive, []).append(
-                (logits, question.expected.hard_label)
-            )
 
-    for primitive, rows in sorted(by_primitive.items()):
-        if primitive == "noul":
-            value = scaler.fit_binary(
-                [row[0][1] - row[0][0] for row in rows], [y for _, y in rows], args.domain
-            )
-        else:
-            value = scaler.fit(primitive, [x for x, _ in rows], [y for _, y in rows], args.domain)
-        print(f"{primitive}: T={value:.4f} on {len(rows)} examples", file=sys.stderr)
+    # The same selection `trigon train` runs, rather than a second opinion
+    # about how to calibrate. This command exists so a calibration layer can
+    # be refitted without retraining -- minutes rather than twenty of them --
+    # and a refit that used a different rule from the training run would be
+    # producing a differently calibrated deployment under the same weights.
+    if args.domain:
+        # Per-domain temperatures are a `TemperatureScaler` feature that the
+        # isotonic map has no dimension for. Rather than silently drop the
+        # domain or silently drop the selection, fit only temperatures and
+        # say so.
+        print(
+            f"  fitting temperatures only: --domain {args.domain!r} has no isotonic "
+            "equivalent, so the calibrator selection is skipped",
+            file=sys.stderr,
+        )
+        scaler, isotonic = _fit_domain_temperatures(engine, cases, args.domain)
+    else:
+        scaler, isotonic = _fit_calibration(engine, cases)
 
     scaler.save(args.out)
+    if isotonic.knots:
+        # Beside the temperatures, under the name `_engine` looks for, so
+        # `trigon ask --temperatures` and `trigon serve` pick it up without a
+        # second flag. A calibrator written where nothing reads it is the same
+        # as not having fitted one.
+        sibling = pathlib.Path(str(args.out).replace("-temperatures.json", "-isotonic.json"))
+        if sibling == pathlib.Path(args.out):
+            sibling = pathlib.Path(args.out).with_suffix(".isotonic.json")
+        isotonic.save(sibling)
+        print(f"  isotonic map written to {sibling}", file=sys.stderr)
     print(json.dumps(scaler.to_dict(), indent=2, sort_keys=True))
 
     if args.conformal_out:
