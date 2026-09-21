@@ -52,21 +52,35 @@ The KV prefix is the same class of thing and **is** cached now, behind a flag.
 block's outputs, keyed on `schema_hash`; `Usage.cached_schema_tokens` reports a
 hit rather than always 0.
 
-**It is off by default on the gateway, and that is a trade rather than
-caution.** The saving requires attending with only the non-schema positions as
-queries, which changes the GEMM shape, so float32 rounds differently and
-per-question independence goes from exact to 4.6e-08 on the served path. That
-is far below anything a caller could act on and it is still the difference
-between a guarantee and a tolerance, so an operator opts in rather than
-discovering it. Never enable it during training: a prefix belongs to the
-weights that produced it, weights move every step, and nothing raises because
-the shapes all match.
+**It is off by default on the gateway, and the reason is that nobody has
+timed it.** An optimisation whose wall-clock saving has never been measured
+should not be on by default; `docs/next.md` B.3 is that measurement.
+
+The reason it *used* to give was that the cache turns exact independence into
+a 4.6e-08 tolerance. That is not the difference between the two paths. On
+GitHub's runners the cached path is exact and the uncached one drifts
+2.4e-08 — the ordering is backwards there — because what actually decides it
+is whether a given sequence length lands on a kernel that reduces in the same
+order. Neither path leaks; neither is bit-reproducible across shapes.
+
+Never enable it during training: a prefix belongs to the weights that produced
+it, weights move every step, and nothing raises because the shapes all match.
 
 **Claims are tested, not asserted.** The two architectural claims — per-question
 independence and schema-prefix cacheability — are asserted in
-`tests/test_independence.py` against the reference model, to exact equality. If
-you change the layout, the mask or the position scheme, those tests are the
-specification.
+`tests/test_independence.py` against the reference model. If you change the
+layout, the mask or the position scheme, those tests are the specification.
+
+**Exact where the shapes match, a float32 bound where they do not.** Comparing
+one question's answer with and without twenty others compares two different
+sequence lengths, a different length can select a different GEMM kernel, and a
+different reduction order rounds differently: those tests read exactly 0.0
+here and 1.4e-08 on GitHub's runners. The mask is what guarantees
+independence, and that is exact and provable from the layout; the arithmetic's
+reproduction of it across shapes is not portable. Comparisons at a fixed
+shape — the schema prefix against a different state, the dot-product head's
+option keys — stay exact, because there the same kernel reduces the same way
+anywhere.
 
 **One source of truth per fact.** Budgets live in `src/trigon/limits.py`. The
 pipeline's order of operations lives in `src/trigon/engine.py`. The contract

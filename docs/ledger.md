@@ -45,7 +45,8 @@ twenty-two runs** — the investigation is closed and the evidence is in
   design.
 - Schema compiler: layout, block mask, group-local positions, cache keys,
   budgets. Per-question independence and schema-prefix cacheability asserted to
-  floating-point equality in `tests/test_independence.py`.
+  floating-point equality in `tests/test_independence.py` where the shapes
+  match, and to a float32 bound where the comparison spans sequence lengths.
 - `/v1/systemone` gateway, `spec/openapi.json` generated from it, drift-tested.
 - Generated Python and TypeScript SDKs, both dependency-free, both exercised
   against a live gateway in CI.
@@ -110,9 +111,9 @@ twenty-two runs** — the investigation is closed and the evidence is in
 | Retrieval recall at the shortlist | 1.0000 at 2,048 across every difficulty probed |
 | Quantization ECE delta (int8) | 0.0002 |
 | Conformal coverage | 0.9027 against a 0.90 target, clears its floor |
-| Per-question independence (direct engine path) | Exact, to floating-point equality, at 20 extra questions |
-| Per-question independence (served path, GitHub's CPUs) | 2.4e-08 — exactness is not portable |
-| Per-question independence *with the KV cache on* | 4.6e-08 — a tolerance, not a guarantee |
+| Per-question independence, comparisons at a fixed shape | Exact, to floating-point equality |
+| Per-question independence, across sequence lengths | 0.0 here, 1.4e-08 on GitHub's CPUs — not portable |
+| The KV cache's cost in exactness | None that is portable: on GitHub's CPUs the *cached* path is the exact one |
 | Schema share of a typical request | 77%; the cache skips 53 of 69 positions |
 | Compat path vs native path | Identical answers through one process, asserted per primitive |
 | `size`, across 7 interventions and 22 runs | Below its own marginal on every seed; median −0.0095 |
@@ -190,13 +191,19 @@ Errors that flattered the project, found by re-measuring rather than by review:
   sent our body shape to a service that speaks theirs. The artifact the plan
   calls its most persuasive one answered 422 on every request.
 - **"Exact, to floating-point equality" was published on one machine's
-  evidence.** The served path drifts 2.4e-08 on GitHub's runners with the KV
-  cache *off* — sequence length selects a different GEMM kernel and the
-  reduction order changes. The structural claim is untouched; the numerical
-  restatement of it was stronger than the evidence, and it also weakens the
-  stated reason the cache is off by default, which was that the cache turns an
-  exact answer into an approximate one. On that hardware it was already
-  approximate.
+  evidence, and I said it twice.** `test_independence.py` and
+  `test_prefix_cache.py` both asserted exact equality across different
+  sequence lengths; both read exactly 0.0 here and 1.4e-08 / 2.4e-08 on
+  GitHub's runners, because a different length selects a different GEMM
+  kernel. The structural claim is untouched — the mask has no path from one
+  question to another — but the numerical restatement was stronger than the
+  evidence. Exactness is now asserted only where the shapes match.
+- **The reason the KV cache is off by default was wrong.** It was "the cache
+  turns a guarantee into a tolerance". On GitHub's runners the *cached* path
+  is the exact one and the uncached path drifts, so the ordering is backwards
+  there and the difference was never between the two paths at all. The cache
+  stays off for a reason that survives measurement: its wall-clock saving has
+  never been timed.
 - **The first real-corpus evaluation set was a single intent.** Banking77's
   test split is ordered by label and the loader sliced `[:eval_n]`; the
   marginal predictor scored 1.0000 and `accuracy_over_baseline` read −1.0000.
@@ -224,11 +231,11 @@ what order, and how each step is known to be done.
   every finding here. Stage 1.3 is the experiment that settles it.
 - **$/MTok is unmeasured.** The whole cost argument beyond ~2× rests on it.
   Needs the L4 burn-in.
-- **The KV cache is off by default.** Not caution: turning it on changes the
-  GEMM shape, and per-question independence goes from exact to 4.6e-08. A claim
-  asserted to exact equality should not quietly become a tolerance to save
-  compute, so an operator opts in. Wall-clock saving is still unmeasured — the
+- **The KV cache is off by default because nobody has timed it.** The
   benchmark ran under four concurrent training jobs and is not publishable.
+  Until there is a number, an optimisation does not get to be the default —
+  and the exactness argument that used to justify it did not survive a second
+  machine.
 - **Semantic compatibility is unmet.** The wire, envelope and status codes now
   line up (`docs/compat.md`); the model answers one question of three well. An
   adapter cannot fix that, and calibration makes a wrong answer credible.

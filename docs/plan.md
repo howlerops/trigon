@@ -102,9 +102,11 @@ schema is 77% of the sequence it skips 53 of 69 positions.
 
 It is **off by default**, which was not the plan. The saving requires querying
 with only the non-schema positions, which changes the GEMM shape, so float32
-rounds differently: per-question independence goes from exact to 4.6e-08 on the
-served path. A claim asserted to exact equality should not silently become a
-tolerance to save compute, so an operator opts in. Wall-clock is unmeasured —
+rounds differently. That was written up as the cache turning exact
+independence into a 4.6e-08 tolerance, and **that turned out not to be the
+difference between the two paths**: on GitHub's runners the cached path is
+exact and the uncached one drifts 2.4e-08. It is off by default because its
+wall-clock saving has never been measured, which is `docs/next.md` B.3. Wall-clock is unmeasured —
 the benchmark ran under four concurrent training jobs and is not publishable.
 
 **3.2 The model server.** The gateway is 1.5% of the p50 budget and saturates

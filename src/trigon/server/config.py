@@ -28,16 +28,20 @@ class ServerConfig:
     # weights are fixed for a process's lifetime, which is what makes a prefix
     # safe to reuse at all.
     #
-    # **Off by default, and that is a deliberate trade rather than caution.**
-    # The saving requires attending with only the non-schema positions as
-    # queries, which changes the GEMM shape, so float32 rounds differently.
-    # Per-question independence -- one of the two claims this product rests on,
-    # asserted to exact equality in `tests/test_independence.py` -- degrades
-    # from exact to 4.6e-08 measured on the served path. That is far below
-    # anything a caller could act on, and it is still the difference between a
-    # guarantee and a tolerance. An operator who wants the compute back opts
-    # in; nobody gets a weaker promise than the one they read about by
-    # accident.
+    # **Off by default, because nobody has timed it.** The layout makes the
+    # schema prefix cacheable and this implements it; what has never been
+    # measured is what it saves in wall clock (docs/next.md B.3). An
+    # optimisation with no number under it does not get to be the default.
+    #
+    # The reason this comment used to give was that the cache turns exact
+    # per-question independence into a 4.6e-08 tolerance. That is not the
+    # difference between the two paths. On GitHub's runners the cached path is
+    # exact and the uncached one drifts 2.4e-08 -- backwards from here --
+    # because what decides it is whether a sequence length lands on a kernel
+    # that reduces in the same order, not whether the cache is on. Neither
+    # path lets one question reach another; that is the mask, and it holds
+    # exactly. See tests/test_prefix_cache.py, which has been wrong about
+    # this twice.
     cache_prefixes: bool = False
     # Paths to fitted artifacts. Absent means "serve uncalibrated and say so".
     temperature_path: str | None = None

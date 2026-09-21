@@ -206,30 +206,31 @@ def test_the_cache_is_bounded():
     assert len(backend._prefix_cache) <= 64
 
 
-def test_the_cache_adds_error_on_top_of_whatever_the_hardware_already_does():
-    """The trade, measured, on the path a caller actually uses.
+def test_neither_path_lets_a_question_reach_another_and_neither_is_exact():
+    """The trade, measured, on the path a caller actually uses — and the
+    measurement that removed the reason the cache is off by default.
 
-    Adding questions must not move the answers to the others. That is a
-    property of the block mask: there is no path from one question's tokens to
-    another's, and `tests/test_independence.py` asserts the consequence to
-    exact equality on the direct engine path.
+    This test has now been wrong twice in the same direction, which is worth
+    stating before the assertions.
 
-    **Exact equality on the *served* path is not portable, and this test used
-    to claim it was.** It asserted `spread(False) == 0.0`, which holds on every
-    sequence length tried on the development machine — 1 to 40 extra questions,
-    all exactly zero — and fails on GitHub's runners at 2.4e-08. Same code,
-    same mask, different CPU: sequence length changes which GEMM kernel torch
-    selects, and a different reduction order rounds differently. The structural
-    claim is untouched. The numerical restatement of it was stronger than the
-    evidence, and CI is where that showed up, because CI was the second machine
-    this had ever run on.
+    It first asserted `spread(False) == 0.0`: that without the cache, adding
+    questions moves the others by exactly nothing. True here at every length
+    tried, 1 to 40 extra questions. On GitHub's runners it is 2.4e-08.
 
-    So what is asserted here is what is true anywhere: the cache's error is
-    *additional*, both are far below anything a caller could act on, and the
-    honest reason to default the cache off is that it adds error on every
-    machine while its wall-clock saving is still unmeasured — not that it
-    turns an exact answer into an approximate one, which on some hardware it
-    does not.
+    It was then rewritten to assert that the cache's drift is *larger* —
+    keeping the story that the cache trades exactness for compute. On
+    GitHub's runners the cache's drift is **0.0** and the uncached path's is
+    not. The ordering is not stable either; it is whichever shape happens to
+    land on a kernel that reduces in the same order.
+
+    So the honest statement is the one below and nothing more: neither path
+    lets a question reach another, and neither is exactly reproducible across
+    shapes. `docs/decisions.md` used to justify defaulting the cache off on
+    the grounds that it "turns a guarantee into a tolerance". That was never
+    the difference between the two paths, and on some hardware it is backwards.
+    The cache is still off by default for a reason that survives measurement:
+    **its wall-clock saving has never been measured** (`docs/next.md` B.3),
+    and an optimisation nobody has timed should not be on by default.
     """
     from fastapi.testclient import TestClient
 
@@ -257,15 +258,11 @@ def test_the_cache_adds_error_on_top_of_whatever_the_hardware_already_does():
         )
 
     without, with_cache = spread(False), spread(True)
-    # float32 has ~1.2e-07 of relative precision, so anything at or below that
-    # scale is the arithmetic rather than a leak. A real failure of the mask
-    # would move a probability by a visible amount, not by an ulp.
-    assert without < 1e-6, f"without the cache the drift is {without:.3e}, far above rounding"
-    assert 0.0 < with_cache < 1e-6, f"with the cache the drift is {with_cache:.3e}"
-    assert with_cache > without, (
-        "the cache is supposed to cost accuracy, not save it; if it ever stops "
-        "costing any, the reason it is off by default has gone away"
-    )
+    # float32 carries ~1.2e-07 of relative precision, so anything at or below
+    # this scale is the arithmetic. A question actually reading another
+    # question's tokens would move a probability by a visible fraction.
+    assert without < 1e-6, f"without the cache the drift is {without:.3e}, not rounding"
+    assert with_cache < 1e-6, f"with the cache the drift is {with_cache:.3e}, not rounding"
 
 
 def test_the_gateway_defaults_the_cache_off():

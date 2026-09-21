@@ -1,8 +1,7 @@
 """The architectural claims, proved on the reference model.
 
 These are the two properties the product rests on, and both are properties of
-the layout rather than of training -- so they can be asserted exactly, on an
-untrained model, to floating-point equality:
+the layout rather than of training, so they hold on an untrained model:
 
 1. adding, removing or reordering questions does not move any other question's
    answer (no context rot from batching, and Noul independence);
@@ -11,6 +10,21 @@ untrained model, to floating-point equality:
 
 If either of these ever fails, the serving story and the "added questions are
 free" claim both fail with it.
+
+**Exact equality is asserted where the tensors have the same shape, and a
+float32 bound where they do not, and that distinction was learned the hard
+way.** Every one of these asserted exact equality and passed on the machine
+they were written on. The first time CI ran them on different hardware,
+`test_twenty_extra_questions_still_move_nothing` failed by 1.4e-08 -- because
+adding questions lengthens the sequence, a different sequence length selects a
+different GEMM kernel, and a different reduction order rounds differently.
+
+The mask is what guarantees independence: there is no path from one question's
+tokens to another's, and that is exact and provable from the layout. What is
+*not* portable is the arithmetic's reproduction of it across shapes. A real
+leak would move a probability by orders of magnitude more than an ulp, so the
+bound below is still a regression test with teeth -- it is simply a claim the
+evidence supports on more than one machine.
 """
 
 from __future__ import annotations
@@ -55,6 +69,34 @@ def _answers(engine: Engine, questions: dict) -> dict:
     return {k: v.model_dump() for k, v in response.answers.items()}
 
 
+# float32 carries ~1.2e-07 of relative precision. Anything at or below this is
+# the arithmetic; a question actually reading another question's tokens would
+# move an answer by a visible fraction, not by an ulp.
+ROUNDING = 1e-6
+
+
+def _same(before: dict, after: dict, qid: str) -> None:
+    """Two answers for one question, across sequences of different lengths."""
+    assert before.keys() == after.keys(), f"{qid}: the answer's shape changed"
+    for field, value in before.items():
+        other = after[field]
+        if isinstance(value, dict):
+            assert value.keys() == other.keys(), f"{qid}.{field}: labels changed"
+            for label, probability in value.items():
+                assert abs(probability - other[label]) < ROUNDING, (
+                    f"{qid}.{field}[{label}] moved by "
+                    f"{abs(probability - other[label]):.3e}, which is not rounding"
+                )
+        elif isinstance(value, float):
+            assert abs(value - other) < ROUNDING, (
+                f"{qid}.{field} moved by {abs(value - other):.3e}, which is not rounding"
+            )
+        else:
+            # Labels, selected options, primitive names: these are decisions,
+            # and a decision that moves is a failure at any magnitude.
+            assert value == other, f"{qid}.{field} changed from {value!r} to {other!r}"
+
+
 def test_adding_a_question_moves_nothing_else(engine):
     before = _answers(engine, BASE)
     after = _answers(
@@ -68,20 +110,21 @@ def test_adding_a_question_moves_nothing_else(engine):
         },
     )
     for qid in BASE:
-        assert before[qid] == after[qid], f"{qid} moved when an unrelated question was added"
+        _same(before[qid], after[qid], qid)
 
 
 def test_removing_every_other_question_moves_nothing(engine):
     before = _answers(engine, BASE)
     for qid in BASE:
         alone = _answers(engine, {qid: BASE[qid]})
-        assert before[qid] == alone[qid], f"{qid} moved when asked on its own"
+        _same(before[qid], alone[qid], qid)
 
 
 def test_question_map_order_does_not_matter(engine):
     before = _answers(engine, BASE)
     reordered = _answers(engine, dict(reversed(list(BASE.items()))))
-    assert before == reordered
+    for qid in BASE:
+        _same(before[qid], reordered[qid], qid)
 
 
 def test_twenty_extra_questions_still_move_nothing(engine):
@@ -91,11 +134,17 @@ def test_twenty_extra_questions_still_move_nothing(engine):
         f"filler_{i}": NoulQuestion(instructions=f"Is fact number {i} present?") for i in range(20)
     }
     after = _answers(engine, {"urgent": BASE["urgent"], **crowd})
-    assert before["urgent"] == after["urgent"]
+    _same(before["urgent"], after["urgent"], "urgent")
 
 
 def test_schema_states_do_not_depend_on_state(engine):
-    """The cacheability claim, checked on hidden states rather than answers."""
+    """The cacheability claim, checked on hidden states rather than answers.
+
+    Exact, and it stays exact: both sides compile to the same shape, so the
+    same kernel reduces in the same order on any hardware. The only thing that
+    differs is the *values* in the state tokens, and the claim is precisely
+    that those do not reach the schema half.
+    """
     backend = engine.backend
     compiler = engine.compiler
 

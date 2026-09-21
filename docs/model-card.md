@@ -91,7 +91,8 @@ calibrated rather than as a statement about all three. `docs/evals.md`,
 "Pooled ECE cancels".
 
 **Answer many questions at once without any of them affecting the others.**
-Exactly, to floating-point equality, including at twenty extra questions
+To floating-point equality where the comparison is at a fixed shape, and to
+within 1.4e-08 across sequence lengths — including at twenty extra questions
 (`tests/test_independence.py`). This is a property of the layout, not of
 training, so it holds for any model in this architecture.
 
