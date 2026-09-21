@@ -246,9 +246,14 @@ how many of your own labels you need.
 
 `docs/ledger.md` is the running record — what is built, what is measured, what
 was believed and turned out to be wrong, and what is still open.
-`docs/plan.md` is how the open items close: five obligations a drop-in
-replacement has to meet, of which one is close to met, and the ordering
-argument for why the model comes before the serving stack.
+`docs/plan.md` is the plan that got here: five obligations a drop-in
+replacement has to meet, three of which are now met, and the ordering argument
+for why the model comes before the serving stack. `docs/next.md` is what is
+left, written after that plan rather than before it — including the two items
+it recorded as blocked that were not blocked by what they said.
+
+`docs/compat.md` is the drop-in claim in detail: what the adapter translates,
+where it is lossy and why, and what wire compatibility does *not* buy.
 
 The shortest honest summary: the calibration layer is ahead of the model, the
 economic case rests on one unmeasured number, and a well-calibrated wrong

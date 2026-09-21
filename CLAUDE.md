@@ -162,6 +162,9 @@ python scripts/seed_sweep.py --seeds 0 1 2 3 -n 8000 --epochs 8  # certify on th
 python scripts/regate.py reports/run.pt --out reports/          # recalibrate, no retrain
 trigon ask request.json --backend torch --weights reports/run.pt # one request
 trigon serve --backend torch --weights reports/run.pt            # behind the API
+trigon serve --compat --weights reports/run.pt   # the incumbent's shapes at the root
+python scripts/train_corpus.py banking77 --out reports/banking77/run.md  # real data
+python scripts/migrate.py traffic.jsonl --incumbent https://api.example.com
 python scripts/export_openapi.py   # after ANY change to the contract
 ```
 
@@ -179,6 +182,30 @@ The vocabulary is the one that does not regenerate casually: it changes the
 embedding table, so every existing checkpoint is trained against the old one.
 Checkpoints record `{kind, vocab_size}` and are rebuilt with the tokenizer they
 were trained on, which is why the certified run still loads.
+
+## When adding a corpus
+
+**The licence tier is enforced in code, not in a document.**
+`trigon.evals.corpora` refuses the uses a tier forbids — amber evals and never
+trains, red ships in nothing — and `load()` takes `purpose` with no default,
+because a default is the argument a caller least often thinks about and an
+amber corpus in a training mix is not a mistake you can find later by reading
+the weights. A test pins the committed tiers against `docs/data.md`.
+
+Add a `CorpusSpec` with the attribution its licence requires. It is printed
+into every report: a credit that lives only in a docs table is not attached to
+the number it belongs to. Nothing is committed — corpora are fetched to an
+ignored cache, because a checked-in copy of someone else's data is a second
+source of truth that goes stale silently.
+
+**Shuffle every split you slice.** Several of these corpora are ordered by
+label. Taking `evaluation[:n]` off Banking77's test split produced an
+evaluation set of one intent, a marginal predictor of 1.0000 and an
+`accuracy_over_baseline` of −1.0000, and no gate can catch that — the model
+really did lose to that baseline.
+
+Loaders stay plain-file and stdlib. The `corpora` module imports without
+`torch` for the same reason the compiler and the calibration math do.
 
 ## When adding a tokenizer
 
