@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import pathlib
 import statistics
 import subprocess
@@ -35,20 +36,32 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "src"))
 
+from trigon.server.compat import compat_answer_to_native, to_compat_request  # noqa: E402
+from trigon.types import SystemOneRequest  # noqa: E402
+
 
 def _selected(answer: dict) -> str | None:
     """The decision an answer carries, whatever primitive it came from.
 
-    Choice says `selected`, Score says `level`, Noul says a probability that
-    has to be thresholded. Comparing them needs one notion of "what did it
-    decide", and this is it.
+    Choice says `selected`, a Noul says a probability that has to be
+    thresholded, and a Score says neither -- it reports a `score` and a
+    distribution over levels, so its decision is the modal level.
+
+    **This read `answer["level"]` for a Score, and no answer this contract
+    produces has a `level` key.** So every Score comparison returned None on
+    both sides, None equalled None, and the harness printed 100% agreement on
+    a question it had never compared. A vacuous agreement number is worse than
+    a missing one: it is the number a reader would act on. The argmax below is
+    what the comparison was always supposed to be, and it is derived from
+    `probabilities`, which every non-Noul answer carries.
     """
-    if "selected" in answer:
+    if "selected" in answer and answer["selected"] is not None:
         return str(answer["selected"])
-    if "level" in answer:
-        return str(answer["level"])
     if "probability" in answer:
         return "yes" if float(answer["probability"]) >= 0.5 else "no"
+    probabilities = answer.get("probabilities")
+    if probabilities:
+        return str(max(probabilities, key=lambda k: probabilities[k]))
     return None
 
 
@@ -66,15 +79,18 @@ def _confidence(answer: dict) -> float | None:
     return None
 
 
-def _call_http(url: str, body: dict, timeout: float) -> dict:
+def _call_http(url: str, body: dict, timeout: float, key: str | None = None) -> dict:
     import urllib.request
 
+    headers = {"Content-Type": "application/json"}
+    if key:
+        headers["Authorization"] = f"Bearer {key}"
     request = urllib.request.Request(
         url.rstrip("/") + "/v1/systemone",
         data=json.dumps(body).encode(),
-        headers={"Content-Type": "application/json"},
+        headers=headers,
     )
-    with urllib.request.urlopen(request, timeout=timeout) as response:
+    with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310
         return json.loads(response.read())
 
 
@@ -95,6 +111,23 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("requests", help="JSONL of /v1/systemone request bodies")
     parser.add_argument("--incumbent", default=None, help="base URL of what you run today")
+    parser.add_argument(
+        "--incumbent-wire",
+        choices=("compat", "native"),
+        default=None,
+        help=(
+            "which request shape the incumbent speaks. Defaults to 'compat' for "
+            "--incumbent and 'native' for --incumbent-cmd: a URL is somebody else's "
+            "service and speaks their contract, while a command is a wrapper you "
+            "wrote and ours is the shape you have the documentation for. Set it "
+            "explicitly when that guess is wrong"
+        ),
+    )
+    parser.add_argument(
+        "--incumbent-key",
+        default=None,
+        help="bearer token for the incumbent; also read from TRIGON_INCUMBENT_KEY",
+    )
     parser.add_argument("--incumbent-cmd", default=None, help="command; request on stdin")
     parser.add_argument("--challenger", default=None, help="base URL; default is in-process")
     parser.add_argument("--weights", default=None, help="checkpoint for the in-process challenger")
@@ -149,10 +182,36 @@ def main() -> int:
             response.raise_for_status()
             return response.json()
 
+    # The incumbent speaks their wire, not ours. This is the whole reason the
+    # compatibility adapter is imported here: the first version of this script
+    # sent our body shape to their `/v1/systemone`, which their contract
+    # answers with a 422 on every request -- so the artifact written to be
+    # pointed at the incumbent could not reach it.
+    key = args.incumbent_key or os.environ.get("TRIGON_INCUMBENT_KEY")
+    # A URL is somebody else's service, so it speaks their contract; a command
+    # is a wrapper the caller wrote, so it speaks the one they have docs for.
+    # Neither default is right for both, which is why this is resolved per
+    # transport rather than picked once.
+    wire = args.incumbent_wire or ("compat" if args.incumbent else "native")
+
     def incumbent(body: dict) -> dict:
-        if args.incumbent:
-            return _call_http(args.incumbent, body, args.timeout)
-        return _call_cmd(args.incumbent_cmd, body, args.timeout)
+        if wire == "native":
+            if args.incumbent:
+                return _call_http(args.incumbent, body, args.timeout, key)
+            return _call_cmd(args.incumbent_cmd, body, args.timeout)
+        native = SystemOneRequest.model_validate(body)
+        outbound = to_compat_request(native)
+        raw = (
+            _call_http(args.incumbent, outbound, args.timeout, key)
+            if args.incumbent
+            else _call_cmd(args.incumbent_cmd, outbound, args.timeout)
+        )
+        return {
+            "answers": {
+                qid: compat_answer_to_native(answer, native.questions.get(qid))
+                for qid, answer in (raw.get("answers") or {}).items()
+            }
+        }
 
     agree: dict[str, int] = {}
     total: dict[str, int] = {}

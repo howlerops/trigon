@@ -26,12 +26,24 @@ _spec.loader.exec_module(migrate)
 def test_every_primitive_reduces_to_one_decision():
     """Choice, Score and Noul say different things; comparing needs one notion.
 
-    A Choice names a `selected` option, a Score names a `level`, and a Noul
-    carries only a probability. Without a single reduction there is nothing to
-    diff, and the wrong reduction silently compares a label against a number.
+    A Choice names a `selected` option, a Noul carries only a probability, and
+    a Score carries **neither** -- it reports a `score` and a distribution over
+    levels, so its decision is the modal level.
+
+    This test used to assert `_selected({"level": "gold"}) == "gold"`, matching
+    the implementation. No answer in this contract has a `level` key, so both
+    sides of every Score comparison were None, None equalled None, and the
+    harness reported 100% agreement on a question it had never compared. The
+    test agreed with the code and both were wrong about the contract, which is
+    why it is now written against `trigon.types` rather than against memory.
     """
+    from trigon.types import ScoreAnswer
+
+    assert "level" not in ScoreAnswer.model_fields
     assert migrate._selected({"selected": "billing", "confidence": 0.8}) == "billing"
-    assert migrate._selected({"level": "gold", "score": 2.0}) == "gold"
+    assert migrate._selected({"score": 2.0, "probabilities": {"silver": 0.3, "gold": 0.7}}) == (
+        "gold"
+    )
     assert migrate._selected({"probability": 0.81}) == "yes"
     assert migrate._selected({"probability": 0.19}) == "no"
     # Exactly even odds resolves to yes, and does so deterministically: a

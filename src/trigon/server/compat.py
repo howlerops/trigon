@@ -61,7 +61,14 @@ from .app import create_router
 from .config import ServerConfig
 from .routing import TieredRouter
 
-__all__ = ["build_compat_app", "compat_router", "to_native", "from_native"]
+__all__ = [
+    "build_compat_app",
+    "compat_router",
+    "to_native",
+    "from_native",
+    "to_compat_request",
+    "compat_answer_to_native",
+]
 
 # Their contract validates the body itself rather than a schema library, so a
 # malformed request comes back 422 with a message. Ours does the same through
@@ -387,3 +394,98 @@ def build_compat_app(
         return {"status": "ok", "version": __version__, "compat": True}
 
     return app
+
+
+# -- the other direction: talking *to* their service -------------------------
+#
+# `scripts/migrate.py` compares this gateway against whatever a caller runs
+# today, and the whole point of it is to be pointed at the incumbent. It sent
+# our body shape to their endpoint, which their contract answers with a 422 --
+# so the most persuasive artifact in the plan could not reach the system it
+# was written to be compared against. These two functions are what fixed that.
+
+
+def to_compat_request(request: SystemOneRequest, model: str = "jev-latest") -> dict[str, Any]:
+    """Our request -> theirs, for calling their service.
+
+    Lossy in one place and the loss is repaired downstream: our Score levels
+    carry names, theirs are numbered by array position, so a Score declared
+    over `bronze/silver/gold` goes out as a three-element array and comes back
+    keyed `"0"/"1"/"2"`. `compat_answer_to_native` puts the names back, which
+    is why these two are documented together and should be used together.
+    """
+    questions: dict[str, Any] = {}
+    for qid, question in request.questions.items():
+        if isinstance(question, NoulQuestion):
+            questions[qid] = {"type": "noul", "instructions": question.instructions}
+        elif isinstance(question, ChoiceQuestion):
+            questions[qid] = {
+                "type": "choice",
+                "instructions": question.instructions,
+                # Their criteria values are descriptions. An option declared
+                # without one sends its own name rather than an empty string:
+                # an empty description is a weaker prompt than no description,
+                # and it would make the comparison unfair to their side.
+                "criteria": {
+                    option.name: option.criteria or option.name for option in question.options
+                },
+            }
+        elif isinstance(question, ScoreQuestion):
+            questions[qid] = {
+                "type": "score",
+                "instructions": question.instructions,
+                "criteria": [level.criteria or level.name for level in question.levels],
+            }
+        else:  # pragma: no cover - the union is closed
+            raise ValueError(f"no compat mapping for {type(question).__name__}")
+    state = request.state
+    return {
+        "state": state if isinstance(state, str) else json.loads(json.dumps(state, default=str)),
+        "model": model,
+        "questions": questions,
+    }
+
+
+def compat_answer_to_native(answer: dict[str, Any], question: Any) -> dict[str, Any]:
+    """One of their answers -> our field names, with Score level names restored.
+
+    Without the restoration a Score comparison is between two different label
+    vocabularies -- their `"0"/"1"/"2"` against our `bronze/silver/gold` -- and
+    every case reads as a disagreement. That is the failure mode this function
+    exists for: it does not crash, it just reports 0% agreement on a question
+    the two systems may agree about completely.
+    """
+    kind = answer.get("type")
+    if kind == "noul":
+        return {"type": "noul", "probability": float(answer["noul"])}
+    if kind == "choice":
+        return {
+            "type": "choice",
+            "selected": answer.get("choice"),
+            "probabilities": dict(answer.get("probabilities") or {}),
+            "confidence": answer.get("confidence"),
+        }
+    if kind == "score":
+        names = (
+            [level.name for level in question.levels]
+            if isinstance(question, ScoreQuestion)
+            else None
+        )
+        probabilities = dict(answer.get("probabilities") or {})
+        if names:
+            probabilities = {
+                names[int(index)]: value
+                for index, value in probabilities.items()
+                if str(index).isdigit() and int(index) < len(names)
+            }
+        selected = (
+            max(probabilities, key=lambda k: probabilities[k]) if probabilities else None
+        )
+        return {
+            "type": "score",
+            "score": answer.get("score"),
+            "selected": selected,
+            "probabilities": probabilities,
+            "confidence": answer.get("confidence"),
+        }
+    raise ValueError(f"unknown answer type {kind!r}")

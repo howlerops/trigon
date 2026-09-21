@@ -325,3 +325,96 @@ def test_anything_their_envelope_accepts_ours_accepts_too():
     }
     with TestClient(build_compat_app(ServerConfig(backend="lexical"))) as http:
         assert http.post("/v1/systemone", json=payload).status_code == 200
+
+
+# -- the other direction: calling their service -----------------------------
+
+
+def test_our_request_translates_out_to_their_shape():
+    """`scripts/migrate.py` points at the incumbent, so it must speak theirs."""
+    from trigon.server.compat import to_compat_request
+
+    native = to_native(SCORE_REQUEST)
+    out = to_compat_request(native)
+    assert out["model"] == "jev-latest"
+    assert out["questions"]["bug_severity"]["type"] == "score"
+    assert out["questions"]["bug_severity"]["criteria"] == SCORE_REQUEST["questions"][
+        "bug_severity"
+    ]["criteria"]
+
+
+def test_an_option_without_a_description_sends_its_name_not_an_empty_string():
+    """An empty description is a weaker prompt than no description, and it
+    would make a migration comparison unfair to the incumbent."""
+    from trigon.server.compat import to_compat_request
+    from trigon.types import ChoiceQuestion, SystemOneRequest
+
+    request = SystemOneRequest(
+        state="x",
+        questions={
+            "q": ChoiceQuestion(
+                instructions="Pick.", options=[{"name": "alpha"}, {"name": "beta"}]
+            )
+        },
+    )
+    assert to_compat_request(request)["questions"]["q"]["criteria"] == {
+        "alpha": "alpha",
+        "beta": "beta",
+    }
+
+
+def test_their_score_answer_comes_back_under_our_level_names():
+    """Their levels are numbered; ours are named. Without this restoration a
+    Score comparison is between two different label vocabularies and every
+    case reads as a disagreement on a question they may agree about."""
+    from trigon.server.compat import compat_answer_to_native
+    from trigon.types import ScoreQuestion
+
+    question = ScoreQuestion(
+        instructions="How big?",
+        levels=[{"name": n, "value": float(i)} for i, n in enumerate(["bronze", "silver", "gold"])],
+    )
+    theirs = {
+        "type": "score",
+        "score": 1.4,
+        "confidence": 0.35,
+        "legend": {"0": "small", "1": "medium", "2": "large"},
+        "probabilities": {"0": 0.1, "1": 0.4, "2": 0.5},
+    }
+    ours = compat_answer_to_native(theirs, question)
+    assert set(ours["probabilities"]) == {"bronze", "silver", "gold"}
+    assert ours["selected"] == "gold"
+    assert ours["probabilities"]["silver"] == pytest.approx(0.4)
+
+
+def test_a_noul_comes_back_as_a_probability_with_no_confidence():
+    from trigon.server.compat import compat_answer_to_native
+
+    ours = compat_answer_to_native({"type": "noul", "noul": 0.93}, None)
+    assert ours == {"type": "noul", "probability": 0.93}
+
+
+def test_the_migration_harness_compares_a_score_instead_of_two_nones():
+    """The regression that made this whole direction worth testing.
+
+    `_selected` looked for a `level` key, which no answer in this contract
+    carries, so both sides returned None, None equalled None, and the harness
+    printed 100% agreement on a question it had never compared. A vacuous
+    agreement number is worse than a missing one -- it is the one a reader
+    acts on.
+    """
+    import importlib.util
+    import pathlib
+
+    path = pathlib.Path(__file__).resolve().parent.parent / "scripts" / "migrate.py"
+    spec = importlib.util.spec_from_file_location("migrate", path)
+    migrate = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migrate)
+
+    score_answer = {"type": "score", "score": 1.4, "probabilities": {"low": 0.1, "high": 0.9}}
+    assert migrate._selected(score_answer) == "high"
+    assert migrate._selected({"type": "choice", "selected": "returns"}) == "returns"
+    assert migrate._selected({"type": "noul", "probability": 0.93}) == "yes"
+    assert migrate._selected({"type": "noul", "probability": 0.07}) == "no"
+    # And the empty case still reads as "no decision" rather than as a label.
+    assert migrate._selected({"type": "score"}) is None
