@@ -458,6 +458,36 @@ def _harm_is_real(unscaled, rescaled, labels, *, resamples: int = 200, seed: int
     return worse >= DECLINE_CONFIDENCE * resamples
 
 
+def _help_is_real(unscaled, rescaled, labels, *, resamples: int = 200, seed: int = 4919) -> bool:
+    """Does this temperature *lower* ECE by more than sampling noise?
+
+    The mirror of :func:`_harm_is_real`, and the one that is used. Which way
+    the burden of proof points is an empirical question, not a matter of
+    taste, and `scripts/decline_rule.py` answers it against heads whose true
+    calibration is known.
+    """
+    import random
+
+    from .calibration.metrics import report as calibration_report
+
+    rng = random.Random(seed)
+    n = len(labels)
+    if n < 2:
+        return False
+    better = 0
+    counted = 0
+    for _ in range(resamples):
+        picks = [rng.randrange(n) for _ in range(n)]
+        pick_labels = [labels[i] for i in picks]
+        if len(set(pick_labels)) < 2:
+            continue
+        a = calibration_report([unscaled[i] for i in picks], pick_labels, simulate_floor=False).ece
+        b = calibration_report([rescaled[i] for i in picks], pick_labels, simulate_floor=False).ece
+        better += b < a
+        counted += 1
+    return counted > 0 and better >= DECLINE_CONFIDENCE * counted
+
+
 def _fit_temperatures(engine, cases):
     """Fit one temperature per primitive, and keep it only if it helps.
 
