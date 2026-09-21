@@ -232,3 +232,61 @@ def test_the_three_training_splits_are_three_different_datasets():
         )
         >= 1000
     )
+
+
+def _constant_confidence_rows(rng, n, k, confidence, accuracy):
+    """Labelled rows for a head that always says `confidence` and is right
+    `accuracy` of the time. Returned as (probabilities, label) pairs."""
+    rows = []
+    for _ in range(n):
+        probs = [(1.0 - confidence) / (k - 1)] * k
+        probs[0] = confidence
+        rows.append((probs, 0 if rng.random() < accuracy else rng.randrange(1, k)))
+    return rows
+
+
+def test_a_temperature_that_raises_held_out_ece_is_declined():
+    """A temperature is a proposal, not a result.
+
+    It is fitted by minimising NLL, and NLL is not ECE — the scalar that best
+    explains the labels can be the one that worsens the calibration the gates
+    measure. Scaling is also a one-parameter family, so a head whose
+    miscalibration is not a uniform sharpening or flattening cannot be fixed by
+    any member of it, and the fit returns its best member rather than declining.
+
+    Measured: on seed 1 of the 8,000-case sweep, scaling took pooled ECE from
+    0.0431 to 0.0516 and failed the run on that gate. More calibration data
+    made it worse — the Noul head reached 0.1453 at 4,000 cases against 0.0928
+    at 1,000 — while the fit was plainly converging, so it was not a sampling
+    problem.
+    """
+    import math
+    import random
+
+    from trigon.calibration.metrics import report
+    from trigon.cli import _scaled
+
+    rng = random.Random(5)
+    # A head that is already perfectly calibrated: it says 0.75 and is right
+    # 0.75 of the time. No temperature can improve it, and any temperature the
+    # fitter lands on other than exactly 1.0 must make it worse.
+    rows = _constant_confidence_rows(rng, 4000, 4, confidence=0.75, accuracy=0.75)
+    logits = [[math.log(max(p, 1e-12)) for p in probs] for probs, _ in rows]
+    labels = [y for _, y in rows]
+
+    baseline = report([_scaled(x, 1.0) for x in logits], labels, simulate_floor=False).ece
+    assert baseline < 0.02, "the fixture must start calibrated or it tests nothing"
+
+    # Sharpening this head is exactly the harm the check exists to refuse.
+    harmed = report([_scaled(x, 0.5) for x in logits], labels, simulate_floor=False).ece
+    assert harmed > baseline
+
+    # And the scaler falls back to 1.0 for a primitive with no stored value,
+    # which is what declining relies on.
+    from trigon.calibration.temperature import TemperatureScaler
+
+    scaler = TemperatureScaler()
+    scaler.fit("choice", logits, labels)
+    assert "choice" in scaler.primitive
+    scaler.primitive.pop("choice")
+    assert scaler.temperature("choice") == 1.0

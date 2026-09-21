@@ -397,11 +397,49 @@ def _training_section(report, args) -> str:
     return "\n".join(lines)
 
 
+def _scaled(logits: list[float], temperature: float) -> list[float]:
+    """Softmax of ``logits / temperature``, without importing a tensor library."""
+    import math
+
+    top = max(x / temperature for x in logits)
+    exponentiated = [math.exp(x / temperature - top) for x in logits]
+    total = sum(exponentiated)
+    return [x / total for x in exponentiated]
+
+
 def _fit_temperatures(engine, cases):
-    """Fit one temperature per primitive on the training split."""
+    """Fit one temperature per primitive, and keep it only if it helps.
+
+    **A temperature is a proposal, not a result.** It is fitted by minimising
+    NLL, and NLL is not ECE: the scalar that best explains the labels can be
+    the scalar that worsens the calibration the gates measure. Temperature
+    scaling is also a one-parameter family, so a head whose miscalibration is
+    not a uniform sharpening or flattening cannot be fixed by any member of
+    it -- and the fit will still return its best member rather than decline.
+
+    That is not hypothetical. On seed 1 of the 8,000-case sweep, scaling took
+    pooled ECE from 0.0431 to 0.0516 and the run failed on that gate. Giving
+    the fit more data made it worse, not better: at 4,000 calibration cases
+    the Noul head's ECE reached 0.1453 against 0.0928 at 1,000, while the fit
+    itself was plainly converging -- the Score head's temperature climbed
+    0.09 -> 0.20 -> 0.41 -> 0.90 and its ECE fell monotonically. A
+    better-estimated temperature made that head worse, which is what "NLL is
+    not ECE" looks like from the outside.
+
+    So each primitive's fit is checked on a slice of the calibration split it
+    was not fitted on, and a temperature that does not improve ECE there is
+    declined -- the primitive serves unscaled, and says so. This is the
+    project's honest-defaults rule applied one level up: a degenerate fit
+    already warns instead of returning a quiet number, and a fit that is
+    well-formed but harmful should not be applied silently either.
+
+    The check is held out because a temperature always improves the split it
+    was fitted on; scoring it there would accept every fit by construction.
+    """
     import math
     import warnings
 
+    from .calibration.metrics import report as calibration_report
     from .calibration.temperature import CalibrationWarning, TemperatureScaler
     from .evals import run_cases
 
@@ -413,14 +451,56 @@ def _fit_temperatures(engine, cases):
                 continue
             logits = [math.log(max(p, 1e-12)) for p in question.probabilities]
             rows.setdefault(question.primitive, []).append((logits, question.expected.hard_label))
+
+    declined: dict[str, tuple[float, float, float]] = {}
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", CalibrationWarning)
         for primitive, data in sorted(rows.items()):
+            cut = max(1, len(data) // 2)
+            fit_rows, check_rows = data[:cut], data[cut:]
+            if not check_rows:
+                # Too little data to check on. Decline rather than apply an
+                # unverified scalar: the failure mode being prevented is
+                # exactly a temperature nobody checked.
+                declined[primitive] = (float("nan"), float("nan"), float("nan"))
+                continue
+
             if primitive == "noul":
-                scaler.fit_binary([r[0][1] - r[0][0] for r in data], [y for _, y in data])
+                value = scaler.fit_binary(
+                    [r[0][1] - r[0][0] for r in fit_rows], [y for _, y in fit_rows]
+                )
             else:
-                scaler.fit(primitive, [x for x, _ in data], [y for _, y in data])
+                value = scaler.fit(primitive, [x for x, _ in fit_rows], [y for _, y in fit_rows])
+
+            labels = [y for _, y in check_rows]
+            before = calibration_report(
+                [_scaled(x, 1.0) for x, _ in check_rows], labels, simulate_floor=False
+            ).ece
+            after = calibration_report(
+                [_scaled(x, value) for x, _ in check_rows], labels, simulate_floor=False
+            ).ece
+            if after >= before:
+                declined[primitive] = (value, before, after)
+                # Remove the count too: `fitted_on` is what a reader checks to
+                # see whether a primitive was calibrated at all, and leaving it
+                # behind would claim a fit that is not being applied.
+                scaler.primitive.pop(primitive, None)
+                scaler.fitted_on.pop(primitive, None)
+
     print(f"  temperatures: {scaler.primitive}", file=sys.stderr)
+    for primitive, (value, before, after) in sorted(declined.items()):
+        if math.isnan(value):
+            print(
+                f"  {primitive}: declined -- too few calibration answers to check the fit "
+                f"on data it was not fitted on; serving unscaled",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                f"  {primitive}: declined T={value:.4f} -- it raises held-out ECE from "
+                f"{before:.4f} to {after:.4f}; serving unscaled",
+                file=sys.stderr,
+            )
     return scaler
 
 

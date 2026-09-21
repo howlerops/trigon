@@ -590,6 +590,68 @@ evidence about the ranking there.
 
 The risk is retired as a blocker and stays open as a measurement.
 
+### A temperature is a proposal, not a result
+
+**Decision.** Each primitive's fitted temperature is checked on a slice of the
+calibration split it was not fitted on, and a temperature that does not lower
+ECE there is **declined**: that primitive serves unscaled, and the run says so.
+
+**Why a well-formed fit can still be wrong.** Two reasons, and they compound.
+
+The temperature is fitted by minimising NLL, and NLL is not ECE. The scalar
+that best explains the labels is not necessarily the scalar that best aligns
+confidence with accuracy, which is what the gates measure.
+
+And temperature scaling is a *one-parameter* family. It can sharpen or flatten
+a distribution uniformly and do nothing else. A head whose miscalibration is
+not a uniform sharpening — overconfident in some bins, underconfident in
+others — cannot be fixed by any member of that family, and the fitter will
+still return its best member rather than decline. Applying it then makes
+things worse, and nothing in the pipeline noticed.
+
+**The measurement that forced this.** Seed 1 of the 8,000-case sweep failed
+`workhorse_ece` at 0.0516 having been 0.0431 *before* scaling. The obvious
+suspicion was that 1,000 calibration cases was too few — a default chosen by
+argument ("enough to fit three scalars") and never by experiment. So it was
+varied:
+
+| `--calibration-n` | Pooled ECE | `choice` | `noul` | `score` | `score`'s T |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 250 | 0.0638 | 0.0797 | 0.0959 | 0.0362 | 0.093 |
+| 1,000 | 0.0516 | 0.0885 | 0.0928 | 0.0193 | 0.201 |
+| 4,000 | 0.0736 | 0.0847 | **0.1453** | 0.0121 | 0.410 |
+| 12,000 | 0.0675 | 0.0845 | **0.1309** | 0.0084 | 0.902 |
+
+**More data made it worse, and the fit was working correctly the whole time.**
+Read the `score` column: its ECE falls monotonically, 0.0362 → 0.0084, and its
+temperature climbs steadily toward 1.0 as the estimate converges. That is a fit
+behaving exactly as it should. Over the same range the `noul` head's ECE rises
+from 0.0959 to 0.1453. A better-estimated temperature made that head worse,
+which is what "NLL is not ECE" looks like from the outside, and it is not a
+sampling problem that more labels can fix.
+
+Note also the trap in the pooled column: 1,000 cases gives the best pooled ECE
+of the four, and it gets there through cancellation — two heads at 0.0885 and
+0.0928 erring in opposite directions. Tuning `--calibration-n` on the pooled
+number would have selected the setting with the most cancellation.
+
+**Why the check is held out.** A temperature always improves the split it was
+fitted on, so scoring it there would accept every fit by construction. Half the
+calibration split fits, half checks.
+
+**This is the honest-defaults rule one level up.** A degenerate fit — pinned at
+the ceiling or the floor — already warns rather than returning a quiet number.
+A fit that is perfectly well-formed and simply harmful should not be applied
+silently either. The declined case is printed with both ECEs, so the run says
+what it refused and why.
+
+**What would change our mind.** A calibrator that is not one-parameter —
+vector or Dirichlet scaling, or isotonic regression per primitive — would fix
+the heads this declines to touch rather than leaving them unscaled. That is
+the right answer and it is phase-2 work; declining is the honest interim,
+because serving a head unscaled is a known quantity and serving it through a
+harmful temperature is not.
+
 ### The temperature was fitted on the split the model trained on
 
 **Decision.** `trigon train` builds three splits, not two: training,
