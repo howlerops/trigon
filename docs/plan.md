@@ -19,7 +19,7 @@ five obligations, and only the first is close to met:
 
 | Obligation | State |
 | --- | --- |
-| **Wire compatibility** — same request and response shapes | Contract is a superset; a compatibility layer is unwritten |
+| **Wire compatibility** — same request and response shapes | Built: `docs/compat.md`, both paths asserted identical ✓ |
 | **Semantic compatibility** — the same input yields a usable answer | Model answers one question of three well |
 | **Envelope compatibility** — accepts anything they accept | `COMPAT_BUDGET` reproduces their limits exactly ✓ |
 | **Operational compatibility** — latency and availability they can deploy on | Gateway measured; no model server, no KV cache |
@@ -125,17 +125,24 @@ measured at 0.0002 for weight-only int8.
 
 ## Stage 4 — Make it actually drop-in
 
-**4.1 The compatibility adapter.** The contract is a superset, which means a
-translation layer is small and mechanical: accept their request shape, map it
-onto ours, map our response back. `COMPAT_BUDGET` already reproduces their
-limits exactly, so rejection behaviour matches without special-casing.
+**4.1 The compatibility adapter.** ✅ **Built.** `trigon serve --compat` puts
+their path at the root; the native gateway mounts the same router under
+`/compat`, and `tests/test_compat.py` asserts the two front doors return the
+same numbers through one process.
 
-**4.2 A migration harness.** Point it at both endpoints with the same traffic,
-and report per-question agreement, calibration on each, and where they diverge.
-A caller will not switch on a promise; they will switch on a diff over their
-own traffic. **This is the most persuasive artifact in the whole plan and it is
-about two hundred lines**, because both sides are already speaking a typed
-contract.
+It was parked as "needs their real wire format". It did not: the format is
+published, and `docs/decisions.md` had already cited that source for the
+envelope. Three translations are lossy and `docs/compat.md` names each — a
+Noul's boundary criteria folded into its instructions, structured rubrics
+serialised rather than summarised, and our 413 sent as their 422.
+
+**4.2 A migration harness.** ✅ **Built.** `scripts/migrate.py` takes both
+endpoints and the same traffic and reports per-question agreement, calibration
+on each, and where they diverge. It was estimated at two hundred lines and cost
+about that, because both sides speak a typed contract.
+
+What it cannot do yet is the thing it is for: the divergence it would report
+against real traffic is a *model* gap, not a wire gap, and Stage 1 owns that.
 
 **4.3 Publish weights and the harness.** Apache-2.0, no field-of-use
 restriction, with the eval harness that produced every number.

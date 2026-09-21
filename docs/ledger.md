@@ -14,10 +14,10 @@ narrative sections are a discipline, not a test.
 
 | | |
 | --- | ---: |
-| Commits | 94 |
-| Tests | 385 |
-| Python files (`src`, `tests`, `scripts`) | 84 |
-| Lines in `src/` | 9,235 |
+| Commits | 101 |
+| Tests | 430 |
+| Python files (`src`, `tests`, `scripts`) | 89 |
+| Lines in `src/` | 9,730 |
 | Release gates | 8 |
 | Green-tier corpora in the licence audit | 9 |
 | Committed use cases | 3 |
@@ -48,6 +48,13 @@ over 500 values) is **not learned on any reproducible configuration** — see
 - Generated Python and TypeScript SDKs, both dependency-free, both exercised
   against a live gateway in CI.
 - CLI: `ask`, `serve`, `spec`, `eval`, `fit`, `train`.
+- **Compatibility adapter** — the incumbent's published request and response
+  shapes, served at their path (`trigon serve --compat`) and mounted under
+  `/compat` on the native gateway. Both front doors are asserted to return the
+  same numbers. Where it is lossy it says so: `docs/compat.md`.
+- **Schema KV prefix cache** — per-layer pre-attention normed states plus the
+  schema block's outputs, keyed on `schema_hash`. Off by default; see
+  *Corrected in our own favour*.
 
 ### Calibration
 - Temperature scaling and isotonic calibration, **selected per primitive** on a
@@ -66,6 +73,9 @@ over 500 values) is **not learned on any reproducible configuration** — see
   rules against heads whose true calibration is known, which a seed sweep
   cannot do.
 - `scripts/load_test.py`, `scripts/gateway_cost.py`, `scripts/price.py`.
+- `scripts/migrate.py` — point it at both endpoints with the same traffic and
+  read per-question agreement, calibration on each, and where they diverge. A
+  caller switches on a diff over their own traffic, not on a promise.
 
 ### Reference model
 - Prefill-only transformer, byte-level BPE trained on the project's own data,
@@ -85,6 +95,9 @@ over 500 values) is **not learned on any reproducible configuration** — see
 | Quantization ECE delta (int8) | 0.0002 |
 | Conformal coverage | 0.9027 against a 0.90 target, clears its floor |
 | Per-question independence | Exact, to floating-point equality, at 20 extra questions |
+| Per-question independence *with the KV cache on* | 4.6e-08 — a tolerance, not a guarantee |
+| Schema share of a typical request | 77%; the cache skips 53 of 69 positions |
+| Compat path vs native path | Identical answers through one process, asserted per primitive |
 
 ---
 
@@ -122,6 +135,26 @@ Errors that flattered the project, found by re-measuring rather than by review:
   at 0.0885 and 0.0928 in opposite directions pool to 0.0516.
 - **The seed sweep reported 0 of 4 certified when 3 of 4 had passed**, by
   filtering on a flag the report format never emitted.
+- **The tokenizer was trained on `docs/*.md`.** The vocabulary moved 5,635 →
+  4,712 → 6,392 → 4,776 across commits, driven by *documentation edits*. It
+  destroyed the one positive `size` result by changing the thing that result
+  was measured against.
+- **The first KV cache recomputed the block it was caching.** It stored each
+  layer's keys and replayed the schema positions to recover their outputs,
+  which saved nothing. Caching the outputs too is what made it a cache.
+- **The KV cache's training guard was tested through `infer`**, which forces
+  eval mode — so the test asserted a condition it could never reach. It passed
+  for the whole time the guard was untested.
+- **A Noul's isotonic map was fitted on `max(p)` and applied to `P(yes)`.** ECE
+  0.3313 against 0.0251 uncalibrated. The held-out check *approved* it, because
+  the check applied it the same wrong way: a selection rule that reproduces the
+  bug it is meant to catch is not a check.
+- **The isotonic fit did not pool tied x-values before merging**, so
+  `confidence(0.1)` returned 0.0 on a head whose observed rate at 0.1 was 0.26.
+- **Calibrator selection scored on plain ECE while the gates read both
+  estimators.** On one Noul head the two read 0.0251 and 0.1625 over the same
+  answers, so selection was optimising the blinder one and declining the
+  calibrator the gate was about to fail.
 
 ---
 
@@ -136,7 +169,14 @@ what order, and how each step is known to be done.
   a noisy one. Four seeds are running on a prose-independent vocabulary.
 - **$/MTok is unmeasured.** The whole cost argument beyond ~2× rests on it.
   Needs the L4 burn-in.
-- **No KV cache.** The layout permits it; phase 3 builds it.
+- **The KV cache is off by default.** Not caution: turning it on changes the
+  GEMM shape, and per-question independence goes from exact to 4.6e-08. A claim
+  asserted to exact equality should not quietly become a tolerance to save
+  compute, so an operator opts in. Wall-clock saving is still unmeasured — the
+  benchmark ran under four concurrent training jobs and is not publishable.
+- **Semantic compatibility is unmet.** The wire, envelope and status codes now
+  line up (`docs/compat.md`); the model answers one question of three well. An
+  adapter cannot fix that, and calibration makes a wrong answer credible.
 - **Four of five data streams unbuilt.** Outcome grounding rests on synthetic
   data alone.
 - **CC BY-SA on a derived model** — counsel opinion requested, unresolved.
