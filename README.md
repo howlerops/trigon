@@ -160,8 +160,17 @@ is the worse of the two failures.
 - **the schema half of the sequence encodes identically regardless of state**,
   which is what makes it a cacheable cross-request KV prefix.
 
-Both are properties of the layout, so they hold for an untrained model exactly
-as they will for a trained one. Getting them took more than a block mask: see
+`tests/test_end_to_end.py` runs the whole path in one pass — train, calibrate,
+fit a conformal profile, save, serve through the gateway, call with the
+generated SDK — and asserts the guarantees on the *served* path: a Noul answer
+has no confidence field, a one-option Choice is a 422, an oversized state is a
+413, and adding eight questions moves neither original answer through
+compilation, calibration and serialisation. It exists because two components in
+this repository were green in every unit test and could not run at all end to
+end.
+
+Both independence claims are properties of the layout, so they hold for an
+untrained model exactly as they will for a trained one. Getting them took more than a block mask: see
 `docs/decisions.md` on group-local positions and on why state does not attend
 to the schema.
 
