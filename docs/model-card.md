@@ -37,6 +37,17 @@ mean something.** It reaches ECE 0.0111 against a 0.05 gate, with the measured
 error above its own simulated noise floor — so the calibration is a measurement
 rather than sampling luck.
 
+**That figure is pooled, and pooled ECE can flatter.** ECE averages the signed
+confidence gap within each bin before taking the absolute value, so an
+underconfident head and an overconfident one cancel: constructed, heads at
+0.0574 and 0.0279 erring in opposite directions pool to 0.0148, below both.
+A later run made this concrete — pooled 0.0516 over parts of 0.0885 and 0.0928.
+This model's 0.0111 was measured before the per-primitive breakdown existed,
+so **its per-head calibration is unknown**, and until it is re-run and
+published here, read 0.0111 as an upper bound on how well the best head is
+calibrated rather than as a statement about all three. `docs/evals.md`,
+"Pooled ECE cancels".
+
 **Answer many questions at once without any of them affecting the others.**
 Exactly, to floating-point equality, including at twenty extra questions
 (`tests/test_independence.py`). This is a property of the layout, not of

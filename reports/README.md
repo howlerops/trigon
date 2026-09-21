@@ -45,7 +45,11 @@ The headline is not the model's quality — it is a spike, and its accuracy says
 so. It is that the loop closes and the gates bite, twice over:
 
 - `reference-run.md` passed every calibration gate at **45.6%** accuracy, which
-  is what added `accuracy_over_baseline` in the first place.
+  is what added `accuracy_over_baseline` in the first place. Its ECE is pooled
+  across the three primitives, and pooled ECE cancels heads that err in
+  opposite directions (`docs/evals.md`), so its per-head calibration is not
+  established by that number — the per-primitive breakdown did not exist when
+  this run was made.
 - `reference-run-dotproduct.md` scored **38.9%** — below the 39.2% marginal
   predictor, so literally worse than ignoring the input — and still passed
   every ECE gate, adaptive included. It fails on exactly one line.
