@@ -46,6 +46,7 @@ from trigon.evals import (  # noqa: E402
     run_calibration_suite,
 )
 from trigon.evals.corpora import corpus, load  # noqa: E402
+from trigon.limits import MIN_CALIBRATION_SAMPLES  # noqa: E402
 from trigon.schema import OptionScoring  # noqa: E402
 
 
@@ -56,7 +57,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--save-model", default=None)
     parser.add_argument("-n", type=int, default=4000, help="training cases (0 = all)")
     parser.add_argument("--calibration-n", type=int, default=1000)
-    parser.add_argument("--eval-n", type=int, default=1000)
+    parser.add_argument(
+        "--eval-n",
+        type=int,
+        default=0,
+        help=(
+            "evaluation cases; 0 (the default) means as many as "
+            "MIN_CALIBRATION_SAMPLES requires, supplementing from unseen train "
+            "rows when the corpus's own test split is smaller than the floor"
+        ),
+    )
     parser.add_argument("--epochs", type=int, default=4)
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--accumulate", type=int, default=8)
@@ -70,7 +80,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def splits(spec, args) -> tuple[list, list, list]:
+def splits(spec, args) -> tuple[list, list, list, int]:
     """Train and calibration out of the train split, evaluation out of test.
 
     The calibration split is carved from train rather than from test for the
@@ -78,6 +88,23 @@ def splits(spec, args) -> tuple[list, list, list]:
     gates read reports its own fit, not the model's calibration. Shuffled with
     a seeded RNG so the carve is reproducible and so it is not the corpus's own
     ordering, which on several of these is grouped by label.
+
+    **The evaluation split is topped up from train when the corpus's own test
+    split is below `MIN_CALIBRATION_SAMPLES`, and this is the interesting
+    part.** Banking77's test split is 3,080 rows and the floor is 5,000, so
+    the first run of this script failed `sample_size` and `gate_is_testable`
+    on every seed: a perfectly calibrated model scores ECE 0.0221 on 1,500
+    cases, which is most of the 0.05 gate, so the gate was not a test. That is
+    not a threshold to widen -- `CLAUDE.md` is explicit that the run gets
+    fixed rather than the gate -- and it is a real defect in the plan's Stage 2
+    done-condition, which asks for per-corpus ECE without noticing that a
+    corpus can be too small to carry one.
+
+    The top-up rows are disjoint from both training and calibration and were
+    never seen by either, so they are held-out data by the only definition
+    that matters. They come from the train *distribution* rather than the
+    test one, which is a real difference and is why the report states how many
+    of each it used instead of printing one number.
     """
     train = load(spec.name, "train", purpose="train")
     evaluation = load(spec.name, "test", purpose="eval")
@@ -94,10 +121,30 @@ def splits(spec, args) -> tuple[list, list, list]:
     calibration_n = min(args.calibration_n, len(train) // 4)
     calibration = train[:calibration_n]
     remaining = train[calibration_n:]
-    training = remaining if args.n == 0 else remaining[: args.n]
+
     if args.eval_n:
         evaluation = evaluation[: args.eval_n]
-    return training, calibration, evaluation
+        topped_up = 0
+    else:
+        # As many as the floor requires, taken from rows nothing else will see
+        # -- but never more than half the pool, because the top-up must not
+        # eat the training set. The first version capped it at `len(remaining)
+        # - 1` and, on a corpus with a 4,000-row train split, reached the floor
+        # by leaving **one** training case. Every count in the report was
+        # correct and the report was worthless.
+        #
+        # When half the pool is not enough to reach the floor, the floor is
+        # not reached and `sample_size` fails. That is the right answer: a
+        # corpus too small to supply both a trainable set and a floor-sized
+        # evaluation is a corpus this gate cannot certify, and cannibalising
+        # training to make the gate pass is the same move as widening it.
+        wanted = max(0, MIN_CALIBRATION_SAMPLES - len(evaluation))
+        topped_up = min(wanted, len(remaining) // 2)
+        evaluation = evaluation + remaining[:topped_up]
+        remaining = remaining[topped_up:]
+
+    training = remaining if args.n == 0 else remaining[: args.n]
+    return training, calibration, evaluation, topped_up
 
 
 def baseline_accuracy(train: list, evaluation: list) -> dict[str, float]:
@@ -128,7 +175,7 @@ def baseline_accuracy(train: list, evaluation: list) -> dict[str, float]:
     return out
 
 
-def header(spec, args, train, calibration, evaluation, marginal: dict[str, float]) -> str:
+def header(spec, args, train, calibration, evaluation, marginal, topped_up: int) -> str:
     questions = train[0].request.questions
     first = next(iter(questions.values()))
     labels = getattr(first, "options", None) or getattr(first, "levels", [])
@@ -148,7 +195,9 @@ def header(spec, args, train, calibration, evaluation, marginal: dict[str, float
             "| --- | ---: |",
             f"| Training cases | {len(train):,} |",
             f"| Calibration cases (held out of train) | {len(calibration):,} |",
-            f"| Evaluation cases (the corpus's own test split) | {len(evaluation):,} |",
+            f"| Evaluation cases | {len(evaluation):,} |",
+            f"| — from the corpus's own test split | {len(evaluation) - topped_up:,} |",
+            f"| — held out of train to reach the floor | {topped_up:,} |",
             f"| Questions per request | {len(questions)} |",
             f"| Labels per question | {len(labels)} |",
             "",
@@ -165,6 +214,19 @@ def header(spec, args, train, calibration, evaluation, marginal: dict[str, float
             f"--d-model {args.d_model} --layers {args.layers} --seed {args.seed}",
             "```",
             "",
+            *(
+                [
+                    f"`MIN_CALIBRATION_SAMPLES` is {MIN_CALIBRATION_SAMPLES:,} and this",
+                    "corpus's test split is smaller, so the evaluation set is topped up",
+                    "from rows held out of train that neither training nor calibration",
+                    "saw. They are held-out data by the only definition that matters and",
+                    "they come from the train distribution, which is why the split is",
+                    "reported above rather than summed into one number.",
+                    "",
+                ]
+                if topped_up
+                else []
+            ),
             "**One seed is one sample from a distribution nobody measured.**",
             "See `CLAUDE.md`: certify on the median and the spread, never on a",
             "single draw. This report is a measurement, not a certification.",
@@ -184,7 +246,7 @@ def main(argv: list[str] | None = None) -> int:
         config=ReadoutConfig(d_model=args.d_model, n_layers=args.layers), seed=args.seed
     )
     compiler = backend.make_compiler(option_scoring=OptionScoring(args.option_scoring))
-    train, calibration, evaluation = splits(spec, args)
+    train, calibration, evaluation, topped_up = splits(spec, args)
     marginal = baseline_accuracy(train, evaluation)
     summary = " ".join(f"{qid}={value:.4f}" for qid, value in sorted(marginal.items()))
     print(
@@ -215,9 +277,9 @@ def main(argv: list[str] | None = None) -> int:
         calibrated, evaluation, suite=f"{spec.name}/calibrated", floor_trials=args.floor_trials
     )
     gates = check_gates(after, slices=slices)
-    markdown = header(spec, args, train, calibration, evaluation, marginal) + render_markdown(
-        [before, after], gates, slices
-    )
+    markdown = header(
+        spec, args, train, calibration, evaluation, marginal, topped_up
+    ) + render_markdown([before, after], gates, slices)
     print(markdown)
 
     if args.out:
