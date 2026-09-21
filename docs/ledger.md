@@ -115,6 +115,7 @@ twenty-two runs** — the investigation is closed and the evidence is in
 | Schema share of a typical request | 77%; the cache skips 53 of 69 positions |
 | Compat path vs native path | Identical answers through one process, asserted per primitive |
 | `size`, across 7 interventions and 22 runs | Below its own marginal on every seed; median −0.0095 |
+| Banking77 accuracy (pilot, 2 seeds) | 0.4640 / 0.4193 against a 1.8% marginal — **it transfers** |
 
 ---
 
@@ -139,6 +140,7 @@ The most useful section. Each of these was argued for before it was measured.
 | Stage 4.1 is blocked on the incumbent's wire format | It is published. `decisions.md` had already cited that source. |
 | Stage 2.1 is blocked on data | Banking77 is reachable, green, and was cleared by our own audit. |
 | The distribution corpora need a Parquet reader | HelpSteer2 is gzipped JSONL. Three of four do; it does not. |
+| "ECE ≤ 0.05 per corpus" is a reachable done-condition | Not on a corpus whose test split is below the 5,000-sample floor. |
 
 ---
 
@@ -188,6 +190,12 @@ Errors that flattered the project, found by re-measuring rather than by review:
   test split is ordered by label and the loader sliced `[:eval_n]`; the
   marginal predictor scored 1.0000 and `accuracy_over_baseline` read −1.0000.
   No gate can catch that — the model really did lose to that baseline.
+- **The fix for the evaluation floor reached it by leaving one training
+  case.** Topping the evaluation set up from train was capped at
+  `len(remaining) - 1`, so a small corpus met `sample_size` by handing almost
+  everything to evaluation. Every count in the report was correct and the
+  report was worthless. Capped at half the pool now, and when half is not
+  enough the gate fails instead.
 
 ---
 

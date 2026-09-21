@@ -48,13 +48,25 @@ This is now the only thing standing between the project and a usable product.
 Wire, envelope, calibration machinery, gates and migration tooling are all
 built; the model answers one synthetic question of three.
 
-**A.1 Certify Banking77 on a seed spread.** Two seeds are measured. Four is
-what this repo's own rule requires, and the rule exists because every
-configuration tried here decides its own outcome by seed. Blocker: none
-(checked — it runs on CPU in about an hour per seed).
+**A.1 Certify Banking77 on a seed spread.** A two-seed pilot is measured and
+`accuracy_over_baseline` passes enormously: +0.4460 and +0.4027 against a
+marginal predictor of 1.8%. Its ECE is **not** quotable — the pilot evaluated
+on 1,500 rows, `sample_size` and `gate_is_testable` both failed, and a
+perfectly calibrated model scores 0.0221 there against a measured 0.0324.
+Blocker: none (checked — it runs on CPU in about 90 minutes per seed at the
+corrected sizes).
+
+**The done-condition below had to be repaired before it could be met.** Stage
+2 of the last plan asks for "ECE ≤ 0.05 per corpus" and Banking77's test split
+is 3,080 rows against a `MIN_CALIBRATION_SAMPLES` of 5,000, so the condition
+was unreachable on this corpus as written. The evaluation set is topped up
+from rows held out of train, capped at half the pool so the top-up cannot eat
+the training set; when half is not enough, the floor is not reached and the
+gate fails, which is the correct answer rather than a problem to route around.
 
 **Done when** ECE ≤ 0.05 and `accuracy_over_baseline` ≥ 0.05 hold on the
-median of four seeds, against a marginal predictor of ~1.3%.
+median of four seeds, on an evaluation set at or above the sample-size floor,
+with the report stating how much of it came from each split.
 
 **A.2 Add the annotator-distribution corpora.** Blocker: **checked, and it
 was half real.** HelpSteer2 is gzipped JSONL, needs nothing beyond stdlib, and
