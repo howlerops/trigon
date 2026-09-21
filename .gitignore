@@ -21,12 +21,18 @@ artifacts/
 # .md and .json reports beside them; a progress log is not evidence.
 reports/sweeps/*.log
 
-# Training output for the iso-8k sweep. The checkpoints are weights (already
-# ignored above) and the reports written by the training run reflect the
-# calibration rule that ran at the time. `scripts/regate.py` writes the
-# `-regated.md` reports beside them from the current rule, and those are the
-# committed evidence.
-reports/iso/*.log
+# Progress logs. They exist so a twenty-minute run can be followed with
+# `tail -f`, and a log is not evidence. Reports are committed: the sweeps under
+# reports/sweeps/ are the data behind that directory's tables.
+reports/**/*.log
+
+# reports/iso/ is the one exception, and for a specific reason rather than a
+# policy: those weights were trained before two defects in the calibration
+# layer were found, so the reports their training runs wrote describe a rule
+# that no longer exists. `scripts/regate.py` writes `-regated.md` reports from
+# the current rule against the same weights, and those are committed instead.
+# Publishing two reports about one set of weights that disagree about its
+# calibration is worse than publishing one.
 reports/iso/iso-seed?.md
 reports/iso/iso-seed?.json
 reports/iso/iso-seed?-training.json
