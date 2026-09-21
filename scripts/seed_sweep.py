@@ -44,12 +44,59 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 
+#: What ``--require`` accepts, and what each one means for the exit code.
+#:
+#: ``none`` reports and always exits 0 -- the exploratory mode, and the
+#: default, because a sweep used to choose a configuration should not stop at
+#: the first one that disappoints.
+#:
+#: ``all`` is the one to gate on. A configuration certifies only if every seed
+#: certifies, which is the rule ``docs/decisions.md`` argues for: a
+#: configuration that passes on some draws and fails on others has not been
+#: shown to work, and a single run of it reports a coin flip as a result.
+#:
+#: ``median`` is deliberately absent. The median seed certifying means half the
+#: draws do not, and a release gate that half of runs fail is the same broken
+#: instrument as an ECE gate below its noise floor.
+REQUIREMENTS = ("none", "all")
+
+
+def verdict(rows: list[dict], require: str) -> tuple[int, str]:
+    """The sweep's exit code and the line that explains it.
+
+    Separate from the run loop so the rule can be tested without training
+    anything -- the rule is the part that decides whether CI goes red, and it
+    would otherwise be reachable only by a twenty-minute job.
+    """
+    certified = [r for r in rows if r["certified"]]
+    if require == "none":
+        return 0, ""
+    if not rows:
+        return 1, "**No seeds ran.** An empty sweep certifies nothing."
+    if len(certified) == len(rows):
+        return 0, f"**Certified on all {len(rows)} seeds.**"
+    blocked = sorted({name for r in rows for name in r["blocked"]})
+    return 1, (
+        f"**Not certified: {len(certified)} of {len(rows)} seeds passed.** "
+        f"Blocked on {', '.join(f'`{name}`' for name in blocked)}. "
+        "A configuration that certifies on some draws and not others has not "
+        "been shown to work; widen the data or the training budget until the "
+        "outcome stops depending on the seed."
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--seeds", type=int, nargs="+", default=[0, 1, 2, 3])
     parser.add_argument("--out-dir", default="reports/sweeps")
     parser.add_argument("--name", default="sweep")
     parser.add_argument("--keep-reports", action="store_true")
+    parser.add_argument(
+        "--require",
+        choices=REQUIREMENTS,
+        default="none",
+        help="'all' exits non-zero unless every seed certifies; see REQUIREMENTS",
+    )
     parser.add_argument(
         "--jobs",
         type=int,
@@ -150,7 +197,10 @@ def main() -> int:
             "as a result. Widen the data or the training budget until the outcome "
             "stops depending on the draw."
         )
-    return 0
+    code, line = verdict(rows, known.require)
+    if line:
+        print(f"\n{line}")
+    return code
 
 
 if __name__ == "__main__":
