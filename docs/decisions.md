@@ -651,11 +651,45 @@ beats a larger one spent on five hundred numbers.
 of a vocabulary change. Checkpoints record `{kind, vocab_size}` and refuse to
 load under a different one rather than reading every id as a different word.
 
-**What would change our mind.** A measurement showing the extra 17% of prefill
-costs more than the question is worth — which would be a strange trade, since
-the question is currently unanswerable. Or a domain where numbers are
-incidental and the vocabulary is better spent elsewhere; the pre-tokenizer is
-one regex and one `pre_tokenizers` argument, and they have to change together.
+### …and splitting them did not help
+
+**The measurement, which does not support the change.** Same configuration,
+same seeds, same data; only the tokenizer differs. Lift over each question's
+own marginal predictor:
+
+| Question | | Seed 0 | Seed 1 | Seed 2 | Seed 3 |
+| --- | --- | ---: | ---: | ---: | ---: |
+| `size` | whole numbers | −0.0062 | −0.0112 | −0.0023 | −0.0230 |
+| `size` | **one digit per token** | −0.0055 | −0.0112 | −0.0022 | −0.0128 |
+| `at_risk` | whole numbers | +0.0955 | +0.0000 | +0.0913 | +0.0940 |
+| `at_risk` | **one digit per token** | **+0.0000** | +0.0000 | +0.0918 | +0.0940 |
+| `plan` | whole numbers | +0.3950 | +0.5888 | +0.5947 | +0.5712 |
+| `plan` | **one digit per token** | +0.5952 | +0.3885 | **−0.0025** | +0.5712 |
+
+**`size` did not move at all**, and the change cost accuracy elsewhere:
+`at_risk` lost seed 0 and `plan` collapsed to chance on seed 2. Two seeds of
+four now fail a blocking gate where the previous tokenizer certified on all
+four.
+
+So the diagnosis above is at best incomplete. What it establishes remains true
+and is worth keeping: whole-number tokens really did make 127 and 128 unrelated
+embedding rows, and `open_tickets` really is learned where `seats` is not. What
+it does **not** establish is that the tokenization was the *binding* constraint.
+Making the number legible did not make the question answerable.
+
+The remaining hypothesis is that the number is now visible and the model still
+cannot use it: reading a threshold off a digit sequence means recovering the
+digit count as magnitude and comparing across a variable-length span, which is
+more than two layers of a 128-wide model may be able to do. That is a claim
+about capacity rather than representation, and it is being measured at 256×4
+and 128×4 before this change is kept or reverted. A tokenizer change that costs
+17% of prefill and two certified seeds has to buy something.
+
+**What would change our mind about keeping it.** It ships only if a
+configuration exists where `size` clears its marginal *and* nothing else
+regresses. Absent that, the cost is real and the benefit is zero, and the
+honest move is to revert to whole-number tokens and record that the question
+needs something this architecture does not have.
 
 ### Neither calibrator wins, so the run picks per primitive
 

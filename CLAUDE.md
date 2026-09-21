@@ -132,6 +132,14 @@ were trained on, which is why the certified run still loads.
 
 ## When adding a tokenizer
 
+**Measure what it buys before believing it.** Digits were split one per token
+on a well-evidenced diagnosis — whole-number BPE merges made 127 and 128
+unrelated embedding rows, and the corpus contains a control showing a threshold
+over 13 values is learned where one over 500 is not. It did not work: the
+question it was for did not move, and two seeds that had certified stopped.
+A tokenizer change alters every embedding the model has, so it can regress
+questions that have nothing to do with the one it was aimed at.
+
 Encoding is pure Python and stays that way. The gateway budgets schemas on CPU
 nodes with no weights, and the compiler, the calibration math and the drift
 test all import without `torch` — a tokenizer needing a Rust extension to count
