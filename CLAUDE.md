@@ -93,6 +93,46 @@ estimators disagree — on one Noul head they read 0.0251 and 0.1625 over the
 same answers — and the run is gated on both, so optimising the blinder one
 declines the calibrator the gate is about to fail you for.
 
+## Keeping the ledger
+
+`docs/ledger.md` is the running record: what has been built, what has been
+measured, what was believed and turned out to be wrong, and what is still open.
+**Update it at every milestone**, in the same commit as the work.
+
+A milestone is any of these, and nothing smaller:
+
+- a capability that did not exist now works end to end;
+- a claim moves between **believed** and **measured** in either direction;
+- a release gate is added, removed, or changes what it reads;
+- a published number is corrected;
+- something in **Open** closes, or a new one opens.
+
+Refactors, tests for existing behaviour and documentation passes are not
+milestones. If every commit touches the ledger it stops being read.
+
+**The disproved section is the point.** A ledger of successes is a changelog,
+and this project's most expensive hours have gone into ideas that were
+well-argued and wrong — the Rust rewrite, the CLIP-style cosine, four
+successive theories of why one question would not train. Writing down what was
+believed *and what measurement said instead* is what stops the fifth theory
+being proposed with the same confidence as the first. When you disprove
+something, add the row before you fix the cause; the fix is easier to describe
+than the belief, so the belief is what gets lost.
+
+**Record errors that ran in your favour separately**, under *Corrected in our
+own favour*. They are the ones nobody else will find: a measurement that
+flatters the project gets repeated rather than checked, and this repository has
+shipped four of them — a cost figure that charged the test client to the
+gateway, a price comparison that cached only our side, the same comparison
+counting two different tokenizers, and a pooled ECE quoted as if it described
+the model.
+
+The counts in *State of the repository* are pinned by
+`tests/test_ledger_drift.py` with deliberate tolerances, so the build fails when
+the ledger has drifted far enough to mislead rather than on every commit. The
+gate count and the use-case count are exact, because a reader checking what this
+project enforces is entitled to a number that is not approximately true.
+
 ## Layout
 
 The core package is dependency-light on purpose — `pydantic` only. The
@@ -107,6 +147,7 @@ pip install -e ".[dev,server]"     # add "train" for the reference model
 pytest -q
 ruff check src tests scripts
 trigon eval all -n 200             # exits non-zero on a failed gate
+python scripts/price.py            # cost per decision, per use case
 trigon train --out reports/run.md --save-model reports/run.pt   # train, calibrate, gate
 python scripts/seed_sweep.py --seeds 0 1 2 3 -n 8000 --epochs 8  # certify on the spread
 python scripts/regate.py reports/run.pt --out reports/          # recalibrate, no retrain
