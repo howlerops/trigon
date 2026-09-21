@@ -1,0 +1,160 @@
+# The next plan
+
+`docs/plan.md` was the execution plan for getting from a working phase-0 repo
+to a drop-in alternative. Most of what it could reach without hardware, data
+access or counsel has now been reached, and two of its items turned out not to
+be blocked at all — they were blocked on a belief. This is the plan for what
+is left, written after those findings rather than before them.
+
+`docs/ledger.md` is the record of what is done. This is the record of what is
+next, and what each step would have to show to count.
+
+---
+
+## What the last plan actually established
+
+| Stage | State |
+| --- | --- |
+| 1.1 `size` | **Closed, negative.** Seven interventions, 22 runs, below its marginal on every seed |
+| 1.2 `at_risk` | Learned on three seeds of four. Unchanged |
+| 1.3 real backbone | Not started. Needs a GPU |
+| 2.1 data streams | **One of five built.** Banking77 loads, licence-gated in code |
+| 2.2 per-corpus calibration | Machinery built (`scripts/train_corpus.py`); one corpus measured |
+| 2.3 CC BY-SA | Unresolved. Needs counsel |
+| 3.1 KV cache | **Built, off by default**, for a measured reason |
+| 3.2 model server | Not started |
+| 3.3 L4 burn-in | Not started. Needs an L4 |
+| 4.1 compat adapter | **Built.** Was never blocked — the wire format is published |
+| 4.2 migration harness | **Built, and now able to reach an incumbent** |
+| 4.3 publish weights | Deliberately not done. See below |
+
+**The two most useful findings of the last plan were both about the plan.**
+Stage 4.1 was parked on "needs the incumbent's real wire format" and the
+format is public. Stage 2.1 was parked on "data streams unbuilt" and the first
+corpus was a `curl` away, already cleared green by our own audit. Both were
+recorded as blocked and neither was. That is a failure mode worth naming
+before writing another plan: *a blocker asserted once and never re-checked is
+indistinguishable from a blocker that is real*, and it costs more than a bad
+estimate because nobody argues with it.
+
+So every item below carries the thing that would unblock it, and whether that
+thing has been **checked** or is **assumed**.
+
+---
+
+## Stage A — Make the accuracy claim transfer
+
+This is now the only thing standing between the project and a usable product.
+Wire, envelope, calibration machinery, gates and migration tooling are all
+built; the model answers one synthetic question of three.
+
+**A.1 Certify Banking77 on a seed spread.** Two seeds are measured. Four is
+what this repo's own rule requires, and the rule exists because every
+configuration tried here decides its own outcome by seed. Blocker: none
+(checked — it runs on CPU in about an hour per seed).
+
+**Done when** ECE ≤ 0.05 and `accuracy_over_baseline` ≥ 0.05 hold on the
+median of four seeds, against a marginal predictor of ~1.3%.
+
+**A.2 Add the annotator-distribution corpora.** GoEmotions, HelpSteer2 and
+measuring_hate_speech are all green and all carry *distributions*, not just
+majority votes. This matters more than the third and fourth Choice corpus: a
+model trained on hard labels learns to be confident, and a model trained on
+annotator disagreement learns what disagreement looks like, which is the
+product. `Expectation.distribution` already exists and nothing has ever used
+it. Blocker: none checked yet — the loaders are plain-file today and these
+corpora may need a Parquet reader, which is a dependency question the
+`corpora` module deliberately has an opinion about.
+
+**Done when** the calibration report is published per corpus, never pooled,
+and coverage holds per corpus too. Nine corpora pooled into one ECE would hide
+exactly what a caller needs to know.
+
+**A.3 Replace the spike.** Unchanged from the last plan and now the single
+highest-value item, because it is also the only remaining explanation for
+`size`. Prefix-LM conversion of a 0.5–1.5B open base. Blocker: a GPU
+(**assumed**, not checked — nothing in this session tried to find one).
+
+**This invalidates every number in `reports/`.** Sequence it after A.1 and A.2
+so there is a real-data baseline to compare against, not only a synthetic one.
+
+**Done when** four seeds certify with all three synthetic questions above
+their marginals *and* per-corpus ECE holds on real data.
+
+---
+
+## Stage B — Make the cost claim real
+
+**B.1 The L4 burn-in.** Unchanged and still the most load-bearing unmeasured
+number in the project: $/MTok decides whether the economic story is "an order
+of magnitude" or "about twice". The token-layout advantage is measured at
+~1.6–2.9× break-even and everything beyond that is arithmetic over an
+unsourced input. Blocker: an L4 (**assumed**).
+
+**B.2 The model server.** No batching across requests today. Continuous
+batching over a prefill-only model is the easy case — no decode loop, no
+ragged generation, one pass per request — and the gateway is already measured
+at 1.5% of the p50 budget, so the batching layer is where the latency story is
+won or lost. Blocker: none checked; the logic is testable on CPU.
+
+**B.3 Measure the KV cache's wall clock.** It is built, it skips 53 of 69
+positions on a typical request, and its saving has never been timed on an idle
+machine. Until it is, "the schema is cacheable" is an architectural property
+with no number attached. Blocker: none — it needs a quiet machine, not a
+better one.
+
+---
+
+## Stage C — Make it something a stranger can adopt
+
+**C.1 Publish weights — but not these.** Stage 4.3 of the last plan is
+deliberately not done. The reference model is a spike whose accuracy is not a
+result, said so from the first commit, and publishing its weights under the
+project's name would be the most misleading thing in the repository: a
+`model_version` that answers questions badly is worse than no weights at all.
+This unblocks when A.3 does.
+
+**C.2 A cookbook per use case.** Three use cases are committed
+(`trigon.usecases`) and priced (`docs/pricing.md`). None has a worked
+end-to-end example a reader can run. Blocker: none.
+
+**C.3 Rate limiting and auth on the compat path.** `docs/compat.md` lists
+`401`, `429` and `529` as codes the adapter never returns, which means a
+caller's backoff path is untested against this server. Blocker: none.
+
+---
+
+## Ordering, and the one thing that does not wait
+
+A before B before C, for the reason the last plan gave and which has only got
+stronger: **a well-calibrated wrong answer is the worst product this project
+could ship**, and calibration is now far ahead of accuracy. Serving a model
+whose numbers do not transfer faster, or cheaper, or behind a nicer adapter,
+is optimising the wrong thing three times over.
+
+The exception is **B.3**, the KV cache timing. It needs a quiet machine rather
+than a better one, it takes an afternoon, and it closes a claim that is
+currently published as a token count with no time under it.
+
+---
+
+## What could make this not work
+
+Restated from the last plan where it still holds, with one addition.
+
+- **The backbone conversion costs more quality than the architecture buys.**
+  Unchanged, and now also the last hypothesis standing for `size`.
+- **Calibration does not transfer to a caller's domain.** The mitigation
+  ships: `trigon fit --conformal-out` gives a distribution-free guarantee on a
+  few hundred of their own labels and exits non-zero when it fails.
+- **$0.007/MTok is wrong.** Unchanged.
+- **Seed variance survives the backbone.** Unchanged, and the `size` record
+  sharpens it: across seven interventions the spread *within* an intervention
+  was larger than the difference *between* interventions. If a real backbone
+  does not fix that, every experiment in this project costs four runs and the
+  ones above get four times more expensive than written.
+- **New: the real corpora do not behave like the synthetic one.** Banking77 is
+  77 options and 606 tokens a request against four options and 70. Nothing in
+  this repo's numbers — latency, cost, the attention tables, the retrieval
+  trigger — was measured at that shape. The first per-corpus report is as
+  likely to move an infrastructure number as an accuracy one.

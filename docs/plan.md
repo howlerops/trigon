@@ -39,19 +39,15 @@ seeds of four, and a threshold over a wide range not at all. Two of those three
 are model problems, not calibration problems, and calibration is already ahead
 of the model.
 
-**1.1 Finish the `size` investigation.** Four seeds are running on a
-prose-independent vocabulary. Three hypotheses are dead (tokenizer alone,
-depth, capacity) and one positive observation did not reproduce. Outcomes:
+**1.1 Finish the `size` investigation.** ✅ **Closed, on the second branch of
+its own done-condition: documented as out of reach, with a measurement.**
+Seven interventions, twenty-two runs, below its own marginal on every seed.
+`reports/perlevel/README.md` is the record.
 
-- it reproduces across seeds → the Score head's repair becomes the default and
-  the 2×2 is the finding;
-- it does not → the remaining candidate is that *one readout slot* is a real
-  bottleneck for a question needing magnitude comparison, and the test is a
-  Score with readout-per-level, which the Choice head already does.
-
-**Done when** `worst_question_over_baseline` passes on the median seed, or the
-question is documented as out of reach with a measurement rather than an
-assertion.
+The distinction it insists on is the point: what is established is that *this*
+model does not learn *this* question and six attempts inside the model failed.
+What is not established is that the architecture cannot — every run shares the
+128-wide two-layer backbone, which is 1.3 below.
 
 **1.2 Make `at_risk` reliable.** Learned on three seeds of four, +0.09 against
 a Bayes ceiling of +0.14. The failing seed sits exactly on its marginal, which
@@ -72,8 +68,11 @@ above their marginals, and the jaggedness suite runs against it.
 
 ## Stage 2 — Make the numbers transfer
 
-**2.1 Build the data streams.** Four of five are unbuilt; outcome grounding
-rests on synthetic data alone. The licence audit has cleared nine corpora to
+**2.1 Build the data streams.** One of five is built: `trigon.evals.corpora`
+loads Banking77 with the licence tier enforced in code, and
+`scripts/train_corpus.py` trains, calibrates and gates on it. The blocker
+recorded here — "four of five unbuilt" — turned out to be a `curl` away from a
+corpus our own audit had already cleared. The licence audit has cleared nine corpora to
 green, which is enough to start: Banking77, CLINC150, MASSIVE (Choice);
 Circa (Noul); HelpSteer2, measuring_hate_speech (Score); GoEmotions,
 Civil Comments (both, with distributions).
@@ -149,6 +148,16 @@ restriction, with the eval harness that produced every number.
 
 **Done when** a caller can run the migration harness against their own traffic
 and read a number.
+
+---
+
+## What comes after this plan
+
+`docs/next.md`. Most of what this plan could reach without hardware, data
+access or counsel has been reached, and two of its items — 4.1 and 2.1 — were
+never blocked by what they said they were blocked by. That finding shapes the
+next plan: every item there carries the thing that would unblock it, and
+whether that thing has been *checked* or is *assumed*.
 
 ---
 

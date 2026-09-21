@@ -128,3 +128,16 @@ def test_the_use_case_count_matches():
     from trigon.usecases import all_use_cases
 
     assert _stated("Committed use cases") == len(all_use_cases())
+
+
+def test_the_corpus_count_matches():
+    """Exact, for the same reason as the gates.
+
+    A corpus is the difference between a calibration number measured on
+    generated data and one measured on somebody's real traffic, so a ledger
+    that overstates how many are loadable is overstating the only thing that
+    makes the calibration claim transfer.
+    """
+    from trigon.evals.corpora import CORPORA
+
+    assert _stated("Real corpora loadable") == len(CORPORA)

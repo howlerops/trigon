@@ -14,13 +14,14 @@ narrative sections are a discipline, not a test.
 
 | | |
 | --- | ---: |
-| Commits | 101 |
-| Tests | 430 |
-| Python files (`src`, `tests`, `scripts`) | 89 |
-| Lines in `src/` | 9,730 |
+| Commits | 105 |
+| Tests | 443 |
+| Python files (`src`, `tests`, `scripts`) | 93 |
+| Lines in `src/` | 10,178 |
 | Release gates | 8 |
 | Green-tier corpora in the licence audit | 9 |
 | Committed use cases | 3 |
+| Real corpora loadable | 1 |
 
 **Certified configuration.** 8,000 cases, 8 epochs, d_model 128, 2 layers,
 noise 0.2, `--option-scoring auto`. Clears every blocking gate on all four
@@ -30,8 +31,9 @@ predictor +0.1614 to +0.2277. Evidence in `reports/iso/`.
 **What the model can and cannot do.** `plan` (copy a value from the state) is
 learned to Bayes-optimal, +0.57 lift. `at_risk` (a conjunction plus a threshold
 over 13 values) is learned on three seeds of four, +0.09. `size` (a threshold
-over 500 values) is **not learned on any reproducible configuration** — see
-*Open* below.
+over 500 values) is **not learned by any of seven interventions over
+twenty-two runs** — the investigation is closed and the evidence is in
+`reports/perlevel/README.md`.
 
 ---
 
@@ -75,7 +77,19 @@ over 500 values) is **not learned on any reproducible configuration** — see
 - `scripts/load_test.py`, `scripts/gateway_cost.py`, `scripts/price.py`.
 - `scripts/migrate.py` — point it at both endpoints with the same traffic and
   read per-question agreement, calibration on each, and where they diverge. A
-  caller switches on a diff over their own traffic, not on a promise.
+  caller switches on a diff over their own traffic, not on a promise. It
+  speaks the incumbent's wire, so it can actually be pointed at one.
+- `scripts/train_corpus.py` — train, calibrate and gate on a real corpus, with
+  the marginal predictor as the floor since a human-labelled corpus has no
+  Bayes-optimal loss to quote.
+
+### Data
+- **Real corpora, licence-gated in code.** `trigon.evals.corpora` refuses the
+  uses a corpus's tier forbids — amber evals and never trains, red ships in
+  nothing — and `purpose` has no default, because a default is the argument a
+  caller least often thinks about. Committed tiers are pinned against
+  `docs/data.md`. Banking77 is the first: 10,003 train, 3,080 test, 77 intents,
+  a marginal predictor at ~1.3%.
 
 ### Reference model
 - Prefill-only transformer, byte-level BPE trained on the project's own data,
@@ -98,6 +112,7 @@ over 500 values) is **not learned on any reproducible configuration** — see
 | Per-question independence *with the KV cache on* | 4.6e-08 — a tolerance, not a guarantee |
 | Schema share of a typical request | 77%; the cache skips 53 of 69 positions |
 | Compat path vs native path | Identical answers through one process, asserted per primitive |
+| `size`, across 7 interventions and 22 runs | Below its own marginal on every seed; median −0.0095 |
 
 ---
 
@@ -118,6 +133,9 @@ The most useful section. Each of these was argued for before it was measured.
 | The tokenizer hid the numbers, so splitting digits fixes it | `size` did not move; two certified seeds regressed. |
 | Not enough capacity | 256×4 leaves it exactly where it was. |
 | The Score head was the constraint, +0.2425 proves it | Did not reproduce. The vocabulary had changed underneath. |
+| One readout slot carrying two bits is the bottleneck | A slot per level: median −0.0095. The last structural hypothesis, dead. |
+| Stage 4.1 is blocked on the incumbent's wire format | It is published. `decisions.md` had already cited that source. |
+| Stage 2.1 is blocked on data | Banking77 is reachable, green, and was cleared by our own audit. |
 
 ---
 
@@ -155,6 +173,18 @@ Errors that flattered the project, found by re-measuring rather than by review:
   estimators.** On one Noul head the two read 0.0251 and 0.1625 over the same
   answers, so selection was optimising the blinder one and declining the
   calibrator the gate was about to fail.
+- **The migration harness reported 100% agreement on Score questions it never
+  compared.** `_selected` read a `level` key no answer in this contract has, so
+  both sides were `None` and `None == None`. The test asserted the same wrong
+  key, so code and test agreed with each other and neither agreed with
+  `trigon.types`. Found by running it end to end, not by reading it.
+- **The migration harness could not reach the incumbent at all**, because it
+  sent our body shape to a service that speaks theirs. The artifact the plan
+  calls its most persuasive one answered 422 on every request.
+- **The first real-corpus evaluation set was a single intent.** Banking77's
+  test split is ordered by label and the loader sliced `[:eval_n]`; the
+  marginal predictor scored 1.0000 and `accuracy_over_baseline` read −1.0000.
+  No gate can catch that — the model really did lose to that baseline.
 
 ---
 
@@ -163,10 +193,13 @@ Errors that flattered the project, found by re-measuring rather than by review:
 `docs/plan.md` is the execution plan for closing these: what has to be true, in
 what order, and how each step is known to be done.
 
-- **`size` is unlearned** on every reproducible configuration. The diagnosis
-  that survives: it is a Score, a Score ran the dot-product head without its
-  documented repair, and it emits a near-constant answer (sd 0.019) rather than
-  a noisy one. Four seeds are running on a prose-independent vocabulary.
+- **`size` is unlearned, and the investigation is closed.** Seven
+  interventions, twenty-two runs, below its own marginal on every seed
+  (`reports/perlevel/README.md`). What is established is narrow: *this* model
+  does not learn *this* question and six attempts to fix it inside the model
+  failed. What is **not** established is that the architecture cannot — every
+  run shares the 128-wide two-layer backbone that has been the confound under
+  every finding here. Stage 1.3 is the experiment that settles it.
 - **$/MTok is unmeasured.** The whole cost argument beyond ~2× rests on it.
   Needs the L4 burn-in.
 - **The KV cache is off by default.** Not caution: turning it on changes the
@@ -177,6 +210,7 @@ what order, and how each step is known to be done.
 - **Semantic compatibility is unmet.** The wire, envelope and status codes now
   line up (`docs/compat.md`); the model answers one question of three well. An
   adapter cannot fix that, and calibration makes a wrong answer credible.
-- **Four of five data streams unbuilt.** Outcome grounding rests on synthetic
-  data alone.
+- **Three of five data streams unbuilt.** Banking77 is loaded and trainable;
+  the annotator-distribution corpora — the ones that teach a model what
+  disagreement looks like, which is the product — are not.
 - **CC BY-SA on a derived model** — counsel opinion requested, unresolved.
