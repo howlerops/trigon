@@ -259,6 +259,14 @@ def cmd_train(args: argparse.Namespace) -> int:
         ),
         seed=args.seed,
     )
+    if args.score_readout_per_level:
+        # Module-level rather than threaded through every call site:
+        # the slot count is a property of the compiled layout, which
+        # the compiler decides, and an experiment flag should not
+        # reshape the compiler's public signature.
+        from .schema import compiler as _compiler_module
+
+        _compiler_module.SCORE_READOUT_PER_LEVEL = True
     compiler = backend.make_compiler(option_scoring=OptionScoring(args.option_scoring))
 
     train_cases, calibration_cases, eval_cases = training_splits(
@@ -388,6 +396,7 @@ def _training_section(report, args) -> str:
         + (" --match-normalize" if args.match_normalize else "")
         + ("" if args.match_residual else " --no-match-residual")
         + (" --score-residual" if args.score_residual else "")
+        + (" --score-readout-per-level" if args.score_readout_per_level else "")
         + (f" --score-head {args.score_head}" if args.score_head != "dotproduct" else "")
         + (
             ""
@@ -994,6 +1003,11 @@ def build_parser() -> argparse.ArgumentParser:
     tr.add_argument("--layers", type=int, default=3)
     tr.add_argument("--seed", type=int, default=0)
     tr.add_argument("--floor-trials", type=int, default=100)
+    tr.add_argument(
+        "--score-readout-per-level",
+        action="store_true",
+        help="one readout slot per Score level, as a Choice gets per option",
+    )
     tr.add_argument(
         "--score-head",
         choices=("dotproduct", "linear"),

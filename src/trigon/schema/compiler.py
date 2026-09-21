@@ -558,11 +558,26 @@ def _labels(question: Question) -> list[str]:
     raise TypeError(f"unsupported question type {type(question).__name__}")
 
 
+#: Give a Score one readout slot per level rather than one for the question.
+#:
+#: Off by default because it changes the compiled layout, and the layout is
+#: what `tests/test_independence.py` specifies. It exists because the
+#: single-slot Score head is the last untested explanation for a question that
+#: five other interventions did not move, and the corpus contains the contrast:
+#: `plan` is a Choice with a slot per option and is learned; `size` is a Score
+#: with one slot for four levels and sits on its marginal on every seed;
+#: `at_risk` is a Noul reading one bit off one slot and is learned. One slot is
+#: not fatal per se -- one slot carrying two bits might be.
+SCORE_READOUT_PER_LEVEL = False
+
+
 def _readout_slots(question: Question, scoring: OptionScoring, cardinality: int) -> int:
     if isinstance(question, ChoiceQuestion) and scoring is OptionScoring.READOUT_PER_OPTION:
         return cardinality
-    # Score and Noul always read out from a single slot: their logits come from
-    # a fixed-width head, not from per-member states.
+    if SCORE_READOUT_PER_LEVEL and isinstance(question, ScoreQuestion):
+        return cardinality
+    # Noul always reads out from a single slot: its logit comes from a
+    # fixed-width head, not from per-member states.
     return 1
 
 

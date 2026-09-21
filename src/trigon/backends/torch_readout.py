@@ -650,7 +650,13 @@ class TorchReadoutBackend:
         for compiled_q in compiled.schema.questions:
             qid = compiled_q.question_id
             readouts = hidden[spans.readout[qid]]
-            if compiled_q.kind == "score" and self.config.score_head == "linear":
+            if compiled_q.kind == "score" and len(readouts) == len(compiled_q.labels) > 1:
+                # A slot per level, read out exactly as a Choice with a slot
+                # per option is -- the one head in this model that learns a
+                # multi-way question. `choice_head` rather than a new one: the
+                # arithmetic is identical and a second copy would drift.
+                out[qid] = self.model.choice_head(readouts).squeeze(-1)
+            elif compiled_q.kind == "score" and self.config.score_head == "linear":
                 # One slot, every level read off it at once. The dot-product
                 # alternative scores that slot against the pooled encoder
                 # states of the level names -- and those states are

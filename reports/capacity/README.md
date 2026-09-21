@@ -87,3 +87,40 @@ function without the indirection that lets those directions converge.
 Given that seed variance is the recurring finding of this whole project, a
 repair that removes the failure mode should beat one that makes it rarer. That
 is a prediction, and both arms are running against it.
+
+## Every intervention tried, on a prose-independent vocabulary
+
+The vocabulary used to move whenever documentation was written, which is how
+one arm produced a result that later vanished. It no longer does. Everything
+below is on the stable vocabulary, four seeds, same configuration otherwise.
+
+| Intervention | `size` lift, four seeds |
+| --- | --- |
+| none (reference shape) | −0.0062, −0.0112, −0.0023, −0.0230 |
+| digit tokens | −0.0055, −0.0112, −0.0022, −0.0128 |
+| 128×4 (depth) | −0.0025, −0.0182 |
+| 256×4 (capacity) | −0.0055, −0.0070 |
+| `--score-head linear` | −0.0172, −0.0098 |
+| **`--score-residual`** | **−0.0150, −0.0120, −0.0012, −0.0140** |
+
+**Six interventions, no movement.** The one arm that ever moved it — digit
+tokens plus the Score residual, +0.2425 on one seed — was measured against a
+vocabulary a later documentation commit destroyed, and gives −0.0123 on the
+vocabulary that exists. It is recorded in `../both/README.md` as the
+unreproducible observation it is.
+
+## What that leaves
+
+`at_risk` needs a conjunction and a threshold over 13 values, and is learned on
+three seeds of four. `plan` needs a copy and is learned to Bayes-optimal.
+`size` needs a threshold over 500 values and is learned by nothing.
+
+The last structural difference between them is the readout layout. `plan` is a
+Choice with **one slot per option**. `at_risk` is a Noul reading **one bit off
+one slot**. `size` is a Score reading **four logits off one slot** — two bits
+where the Noul needs one, without the per-member slots the Choice gets.
+
+One slot is evidently not fatal on its own, or `at_risk` would fail too. One
+slot carrying two bits might be. `--score-readout-per-level` gives a Score the
+same layout the Choice head has, and is the last structural hypothesis in this
+list.
