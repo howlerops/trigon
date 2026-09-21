@@ -43,7 +43,7 @@ OUT = pathlib.Path(__file__).resolve().parent.parent / "src" / "trigon" / "data"
 
 
 def corpus() -> list[str]:
-    """Every string the model is trained or evaluated on, plus the docs."""
+    """Every string the model is trained or evaluated on. Not the docs -- see below."""
     from trigon.evals.cardinality import build_cardinality_probe
     from trigon.evals.datasets import synthetic_outcome_cases
     from trigon.evals.jaggedness import all_benchmarks
@@ -68,16 +68,45 @@ def corpus() -> list[str]:
     for _, cases in all_workflows(n=200, seed=0):
         for case in cases:
             lines.append(str(case.state))
+    # The use-case schemas: their states are prose in the domains the model is
+    # meant to serve, and their label sets are what a caller actually sends.
+    # This is data, not writing about data.
+    from trigon.usecases import all_use_cases
+
+    for item in all_use_cases():
+        lines.append(str(item.state))
+        lines.append(item.purpose)
+        for question in item.questions.values():
+            lines.append(question.instructions)
+            for member in getattr(question, "options", None) or getattr(question, "levels", []):
+                lines.append(member.name)
+                if getattr(member, "criteria", None):
+                    lines.append(member.criteria)
+
     question, queries, _ = build_cardinality_probe(n_options=4096, n_queries=200, seed=0)
     lines.extend(option.name for option in question.options)
     lines.extend(option.criteria for option in question.options if option.criteria)
     lines.extend(queries)
 
-    root = pathlib.Path(__file__).resolve().parent.parent
-    for path in sorted((root / "docs").glob("*.md")):
-        lines.append(path.read_text())
-    lines.append((root / "README.md").read_text())
-
+    # **The prose is deliberately absent, and it used to be here.**
+    #
+    # The model never sees documentation. It sees state, instructions and
+    # label names, all of which this function already collects. Training the
+    # vocabulary on docs spent budget on text the model will never encounter
+    # -- and, far worse, coupled a committed generated artifact to prose.
+    #
+    # Every checkpoint records the vocabulary it was trained against and
+    # refuses to load under a different one, so editing a markdown file
+    # invalidated every checkpoint in the repository. That is not theoretical:
+    # this vocabulary went 5,635 -> 4,712 -> 6,392 -> 4,776 across one working
+    # session, and the single most important measurement in the `size`
+    # investigation -- the one run where that question beat its marginal --
+    # turned out to have been made against a vocabulary that a later
+    # documentation commit destroyed. It did not reproduce, and the reason it
+    # did not reproduce was this function.
+    #
+    # A generated artifact may depend on the data. It may not depend on the
+    # writing about the data.
     return [line for line in lines if line]
 
 

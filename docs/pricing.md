@@ -6,46 +6,61 @@ rates; the defaults quote no money at all.
 
 ## The finding, stated first because it corrects this project's own story
 
-**Token accounting buys about 2×. It does not buy 100×.** Compared like for
-like — both sides caching what they can cache — the typed path and a prompted
-LLM send almost the same number of tokens per request:
+**Per request, the typed path sends *more* tokens than a prompted LLM, not
+fewer.** Counted like for like — the same tokenizer on both sides, both caching
+what they can cache:
 
 | Use case | typed, cached | prompted, cached | prompted output |
 | --- | ---: | ---: | ---: |
-| moderation | 61 | 56 | 27 |
-| sentiment | 132 | 160 | 29 |
-| support_triage | 83 | 100 | 28 |
+| moderation | 80 | 74 | 40 |
+| sentiment | 202 | 196 | 40 |
+| support_triage | 136 | 130 | 38 |
 
-On `moderation` the typed path sends *more*. The advantage that survives a fair
-comparison comes from one place: **the typed path generates nothing.** Its
-output is logits, and a logit is not billed. At a typical 4× markup on
-generated tokens, those 27–29 tokens are worth ~110 token-equivalents, which is
-most of the gap.
+The relationship is exact, not approximate: **80 = 74 + 6**, **202 = 196 + 6**,
+**136 = 130 + 6**. Both paths read the same state; the typed path then pays one
+readout slot per question, and there are two questions plus a Noul in each of
+these, so six slots. That is the whole of its token disadvantage and it is a
+constant, not a rate.
 
-Break-even, which needs no price at all:
+What it buys for those six tokens is that **it generates nothing**. Its output
+is logits, and a logit is not billed. At a typical 4× markup on generated
+tokens, the 38–40 tokens of JSON the prompted path must produce are worth
+~160 token-equivalents — an order of magnitude more than the six it costs to
+avoid them.
+
+Break-even, which needs no price at all to state:
 
 | Use case | cold | cached |
 | --- | ---: | ---: |
-| moderation | 1.82×R | 2.69×R |
-| sentiment | 1.71×R | 2.09×R |
-| support_triage | 1.90×R | 2.55×R |
+| moderation | 1.96×R | 2.92×R |
+| sentiment | 1.60×R | 1.76×R |
+| support_triage | 1.76×R | 2.07×R |
 
 Read: the typed path is cheaper while its own $/MTok is below that multiple of
-the prompted path's prompt rate. **So token layout alone justifies a 2× price
-premium, not a 100× one.**
+the prompted path's prompt rate. **So the architecture justifies roughly a 2×
+price premium, not a 100× one.**
 
 Everything beyond 2× has to come from **$/token**, which is a function of model
 size and is the one number this project has never measured. `docs/roadmap.md`
 records the inherited figure — $0.80/hr on an L4 at ~30k prefill tok/s, so
 ~$0.007/MTok — as arithmetic over unsourced inputs, pending a burn-in. That
 burn-in is not a nice-to-have for the cost story. **It is the cost story.** The
-architecture contributes a factor of two; the remaining two orders of magnitude
-are entirely the claim that a small typed model serves tokens far cheaper than
-a frontier one, and that claim is currently unverified.
+token layout contributes a factor of two; the remaining two orders of magnitude
+are entirely the claim that a small typed model serves tokens far more cheaply
+than a frontier one, and that claim is unverified.
 
 At $0.007 against $0.25/MTok the tool prints savings of 75–96×. Those are
 *your* inputs multiplied by *our* exact token counts. The token counts are
 trustworthy. The 0.007 is not, yet.
+
+**Two corrections this table has already survived.** The first draft compared a
+*cached* typed path against an *uncached* prompted one, because the prompted
+path's instruction block is equally cacheable on any provider with prompt
+caching and that was overlooked; fixing it cut the headline by a third. The
+second counted the typed path with the compiler's character heuristic and the
+prompted path with the real BPE, comparing an estimate against an exact count —
+which inflated the prompted column by about 40%. Both errors ran in our favour,
+which is the direction errors run when nobody is looking for them.
 
 ## What is measured and what is not
 

@@ -100,12 +100,24 @@ def main() -> int:
 
     from trigon.bpe import BPETokenizer
     from trigon.schema import SchemaCompiler
+    from trigon.schema.tokens import CallableEstimator
     from trigon.types import SystemOneRequest
     from trigon.usecases import all_use_cases, use_case
 
     cases = [use_case(args.use_case)] if args.use_case else all_use_cases()
     tokenizer = BPETokenizer.load()
-    compiler = SchemaCompiler(estimator=None)
+    # **The same tokenizer on both sides.** The compiler defaults to a
+    # character heuristic, and the baseline is counted with the real BPE, so
+    # leaving the default in place compares an estimate against an exact count
+    # and calls the difference a saving. It inflated the prompted column by
+    # roughly 40% here.
+    #
+    # This is the third time in this repository that two halves of one
+    # pipeline using different tokenizers has been the defect --
+    # `CLAUDE.md` documents it for backends, where it was a 500 on every
+    # request. A cost model is the same shape of mistake with a quieter
+    # failure: it produces a number, and the number is wrong.
+    compiler = SchemaCompiler(estimator=CallableEstimator(tokenizer.encode, exact=True))
 
     print("Tokens per decision. Both columns are counted, not estimated.")
     print()

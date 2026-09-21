@@ -115,16 +115,27 @@ def test_the_typed_advantage_is_modest_on_tokens_alone(name):
     would just get deleted.
     """
     from trigon.bpe import BPETokenizer
+    from trigon.schema.tokens import CallableEstimator
 
     item = use_case(name)
-    compiled = SchemaCompiler().compile_request(
-        SystemOneRequest(state=item.state, questions=item.questions)
-    )
+    tokenizer_for_compiler = BPETokenizer.load()
+    # The same tokenizer both sides, which is the other way this comparison
+    # gets rigged: the compiler's default is a character heuristic, and
+    # counting the baseline exactly against our estimate inflated the
+    # prompted column by about 40%.
+    compiled = SchemaCompiler(
+        estimator=CallableEstimator(tokenizer_for_compiler.encode, exact=True)
+    ).compile_request(SystemOneRequest(state=item.state, questions=item.questions))
     tokenizer = BPETokenizer.load()
     prefix, per_request, reply = price._prompt_for(item)
 
     typed_cached = compiled.state_tokens + compiled.readout_tokens
     prompted_cached = tokenizer.count(per_request)
+
+    # The exact relationship the doc leads with: both paths read the same
+    # state, and the typed path then pays one readout slot per question. If
+    # this stops holding, the headline is describing something else.
+    assert typed_cached == prompted_cached + compiled.readout_tokens
     break_even = (prompted_cached + tokenizer.count(reply) * 4.0) / typed_cached
 
     assert 1.5 < break_even < 5.0, (
