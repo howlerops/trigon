@@ -38,3 +38,8 @@ reports/iso/iso-seed?.json
 reports/iso/iso-seed?-training.json
 reports/iso/iso-seed?-temperatures.json
 reports/iso/iso-seed?-isotonic.json
+
+# Fetched corpora. Someone else's data, cached on first use and never
+# committed: a checked-in copy is a second source of truth that goes stale
+# silently. `trigon.evals.corpora` records provenance and attribution instead.
+corpora/
