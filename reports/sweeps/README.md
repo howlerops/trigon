@@ -212,3 +212,37 @@ task and its confidence has not followed. Whether that is a property of the
 model or of a temperature fitted on 1,000 cases is the next measurement; the
 `--calibration-n` default was chosen by argument ("enough to fit three
 scalars") and not by experiment.
+
+## `decline-8k` — declining a temperature that raises held-out ECE
+
+Same configuration again; the only change is that a fitted temperature is
+checked on a slice of the calibration split it was not fitted on and discarded
+if it does not lower ECE there (`docs/decisions.md`, "A temperature is a
+proposal, not a result"). The `noul` column is where the action is:
+
+| Seed | Pooled, apply always | Pooled, declining | `noul` apply | `noul` decline | Certified |
+| ---: | ---: | ---: | ---: | ---: | --- |
+| 0 | 0.0128 | **0.0219** | 0.0210 | **0.0480** | **yes** |
+| 1 | 0.0516 ❌ | **0.0393** | 0.0928 | **0.0251** | no |
+| 2 | 0.0083 | 0.0077 | 0.0152 | 0.0140 | **yes** |
+| 3 | 0.0157 | 0.0121 | 0.0121 | 0.0148 | **yes** |
+
+**Still 3 of 4, and it moved in both directions.** Seed 1's `noul` head fell
+from 0.0928 to 0.0251 and its `workhorse_ece` now *passes* at 0.0393 — the
+change doing exactly what it was built for. Seed 0's `noul` rose from 0.0210
+to 0.0480, because the check declined a temperature that was genuinely
+helping, and that seed's pooled ECE went from 0.0128 to 0.0219.
+
+The cause is in the rule, not the idea. The first version was a bare
+comparison — decline if `after >= before` — on a 500-point estimate, which is a
+threshold with no noise floor under it: the one error this project refuses
+everywhere else, committed inside the mechanism that refuses it. It is a
+paired bootstrap now, declining only at 95% confidence, with the burden of
+proof on declining because the measured cost of a false accept (0.0251 →
+0.0928) is several times the cost of a false decline (0.0128 → 0.0219).
+
+**Seed 1 now fails on adaptive ECE rather than ECE, and its `choice` head is
+untouched by any of this** — 0.0879 before and 0.0879 after, because that
+head's temperature was accepted both times. No calibration change fixes it.
+That is the remaining question about this configuration, and it is a question
+about the model rather than about the calibration layer.
