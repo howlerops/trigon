@@ -30,6 +30,10 @@ jobs:
       - name: Format check
         run: ruff format --check src tests scripts sdk
       - name: Test
+        # Includes tests/test_end_to_end.py, which trains a tiny model and
+        # drives it through the gateway and the generated SDK. It is the only
+        # test that would have caught either of the two components this repo
+        # shipped green-in-unit-tests and broken end to end.
         run: pytest -q
       - name: OpenAPI spec is current
         run: |
