@@ -68,6 +68,17 @@ def verdict(rows: list[dict], require: str) -> tuple[int, str]:
     anything -- the rule is the part that decides whether CI goes red, and it
     would otherwise be reachable only by a twenty-minute job.
     """
+    # `certified` is the report's own `passed`; `blocked` is re-derived from
+    # its gate list. Two sources for one fact, kept because the derived list
+    # is what a reader wants to see -- so the disagreement has to be loud.
+    # Recomputing the verdict is precisely what went wrong once already.
+    for row in rows:
+        if row["certified"] and row["blocked"]:
+            raise RuntimeError(
+                f"seed {row['seed']}: the report says it passed but lists blocking "
+                f"failures ({', '.join(row['blocked'])}) -- one of the two is wrong, "
+                "and a sweep must not choose between them silently"
+            )
     certified = [r for r in rows if r["certified"]]
     if require == "none":
         return 0, ""
@@ -137,9 +148,19 @@ def main() -> int:
             raise RuntimeError(f"seed {seed} failed to run ({result.returncode}); see {log}")
 
         sidecar = json.loads(pathlib.Path(f"{report.with_suffix('')}-training.json").read_text())
-        gates = json.loads(report.with_suffix(".json").read_text())["gates"]
+        payload = json.loads(report.with_suffix(".json").read_text())
+        gates = payload["gates"]
         by_name = {g["name"]: g for g in gates}
+        # `passed` is the command's own exit condition, so take it rather than
+        # recomputing one. Recomputing it is what went wrong: this read
+        # `g.get("advisory")` against a report format that did not carry the
+        # flag, so every advisory failure counted as blocking and the first
+        # 8,000-case sweep reported 0 of 4 seeds certifying when 3 of 4 did.
+        # The flag is emitted now; taking the verdict from the file means a
+        # future omission cannot produce a wrong answer, only a missing one.
+        certified = payload["passed"]
         blocked = [g["name"] for g in gates if not g["passed"] and not g.get("advisory")]
+        advisory = [g["name"] for g in gates if not g["passed"] and g.get("advisory")]
         if not known.keep_reports:
             for extra in out_dir.glob(f"{known.name}-seed{seed}*"):
                 if extra.suffix in {".pt", ".log"}:
@@ -150,8 +171,9 @@ def main() -> int:
             "kept_epoch": sidecar.get("kept_epoch"),
             "lift": by_name.get("accuracy_over_baseline", {}).get("value"),
             "ece": by_name.get("workhorse_ece", {}).get("value"),
-            "certified": not blocked,
+            "certified": certified,
             "blocked": blocked,
+            "advisory": advisory,
         }
 
     rows = []
@@ -170,15 +192,24 @@ def main() -> int:
             rows.append(run_one(seed))
 
     print()
-    print("| Seed | Final loss | Kept epoch | Lift over baseline | ECE | Certified | Blocked on |")
-    print("| ---: | ---: | ---: | ---: | ---: | --- | --- |")
+    print(
+        "| Seed | Final loss | Kept epoch | Lift over baseline | ECE | Certified "
+        "| Blocked on | Advisory |"
+    )
+    print("| ---: | ---: | ---: | ---: | ---: | --- | --- | --- |")
     for row in rows:
         lift = "—" if row["lift"] is None else f"{row['lift']:+.4f}"
         ece = "—" if row["ece"] is None else f"{row['ece']:.4f}"
         blocked = ", ".join(f"`{name}`" for name in row["blocked"]) or "—"
+        # Advisory failures get their own column rather than being folded into
+        # "blocked on" or dropped. Folding them in is the bug above; dropping
+        # them hides that every seed of this configuration fails the
+        # per-question gate, which is the most informative thing the sweep says.
+        advisory = ", ".join(f"`{name}`" for name in row.get("advisory", ())) or "—"
         print(
             f"| {row['seed']} | {row['final_loss']:.4f} | {row['kept_epoch']} | "
-            f"{lift} | {ece} | {'**yes**' if row['certified'] else 'no'} | {blocked} |"
+            f"{lift} | {ece} | {'**yes**' if row['certified'] else 'no'} | "
+            f"{blocked} | {advisory} |"
         )
 
     losses = [r["final_loss"] for r in rows]

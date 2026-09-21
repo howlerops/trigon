@@ -193,12 +193,26 @@ def render_json(
     sibling that disagree about which suites ran is worse than having only one
     of them. ``passed`` is the CLI's own exit condition, so a consumer reading
     this file reaches the same verdict the command did.
+
+    Each gate carries ``advisory``, which the markdown has always printed and
+    this file used to omit. That omission was not cosmetic: the top-level
+    ``passed`` is computed over ``blocking(gates)`` alone, so a consumer
+    re-deriving the verdict from the gate list got a stricter answer than the
+    command's -- `scripts/seed_sweep.py` did exactly that and reported a
+    configuration as certifying on none of four seeds when it certified on
+    three.
     """
     return json.dumps(
         {
             "results": [r.to_dict() for r in results],
             "gates": [
-                {"name": g.name, "value": g.value, "limit": g.limit, "passed": g.passed}
+                {
+                    "name": g.name,
+                    "value": g.value,
+                    "limit": g.limit,
+                    "passed": g.passed,
+                    "advisory": g.advisory,
+                }
                 for g in gates
             ],
             "slices": {k: v.to_dict() for k, v in (slices or {}).items()},

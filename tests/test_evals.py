@@ -491,3 +491,44 @@ def test_the_json_verdict_ignores_advisory_gates_like_the_exit_code_does():
     gates = check_gates(result)
     payload = json.loads(render_json([result], gates))
     assert payload["passed"] == all(g.passed for g in blocking(gates))
+
+
+def test_the_json_report_says_which_failures_block():
+    """A consumer must reach the same verdict from the file as the command did.
+
+    The top-level `passed` is computed over `blocking(gates)`, but the gate
+    list carried no `advisory` flag, so anything re-deriving the verdict by
+    filtering on `passed` got a stricter answer than `trigon train`'s own exit
+    code. `scripts/seed_sweep.py` did exactly that, and reported an 8,000-case
+    configuration as certifying on none of four seeds when three of the four
+    were blocked only by the advisory per-question gate.
+
+    That is the `honest defaults` rule applied to a machine-readable file: a
+    report may say a run failed, and may say the failure does not block, but it
+    may not say the first while withholding the second.
+    """
+    import json as _json
+
+    from trigon.evals.calibration_suite import GateResult
+    from trigon.evals.report import render_json
+
+    gates = [
+        GateResult("workhorse_ece", 0.01, 0.05, True),
+        GateResult("worst_question_over_baseline", -0.04, 0.05, False, advisory=True),
+    ]
+    payload = _json.loads(render_json([], gates))
+
+    by_name = {g["name"]: g for g in payload["gates"]}
+    assert by_name["worst_question_over_baseline"]["advisory"] is True
+    assert by_name["workhorse_ece"]["advisory"] is False
+
+    # The two verdicts agree: an advisory failure does not fail the run, and
+    # the file says so rather than leaving it to be inferred.
+    assert payload["passed"] is True
+    rederived = all(g["passed"] for g in payload["gates"] if not g["advisory"])
+    assert rederived == payload["passed"]
+
+    # And a blocking failure fails both.
+    blocked = _json.loads(render_json([], [GateResult("workhorse_ece", 0.9, 0.05, False)]))
+    assert blocked["passed"] is False
+    assert all(g["advisory"] is False for g in blocked["gates"])

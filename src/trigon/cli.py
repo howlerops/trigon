@@ -308,6 +308,9 @@ def _training_section(report, args) -> str:
             else f" --validation-fraction {args.validation_fraction}"
         )
         + (f" --tokenizer {args.tokenizer}" if args.tokenizer != "bpe" else "")
+        # Omitting it changes which gates the report carries, so a header
+        # without it describes a different run from the one printed below.
+        + (" --no-quantization-gate" if args.no_quantization_gate else "")
     )
     lines = [
         "# Reference run",

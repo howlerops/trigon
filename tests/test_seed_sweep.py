@@ -90,3 +90,26 @@ def test_median_is_not_an_option():
     """
     assert "median" not in seed_sweep.REQUIREMENTS
     assert set(seed_sweep.REQUIREMENTS) == {"none", "all"}
+
+
+def test_a_row_cannot_be_certified_and_blocked_at_once():
+    """The two fields come from different places, so they can disagree.
+
+    `certified` is the report's own `passed`; `blocked` is re-derived from its
+    gate list. Re-deriving is what broke: the old code filtered on an
+    `advisory` key the report format did not carry, counted every advisory
+    failure as blocking, and reported an 8,000-case configuration as
+    certifying on none of four seeds when three of four did.
+
+    Both are kept, because the derived list is what a reader wants to see. So
+    the contradiction has to be loud rather than resolved by preferring one.
+    """
+    row = _row(0, True)
+    row["blocked"] = ["workhorse_ece"]
+    with pytest.raises(RuntimeError, match="says it passed but lists blocking"):
+        seed_sweep.verdict([row], "all")
+
+    # And it is checked even in the mode that gates on nothing, because a
+    # report contradicting itself is a broken report either way.
+    with pytest.raises(RuntimeError):
+        seed_sweep.verdict([row], "none")

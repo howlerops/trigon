@@ -165,6 +165,10 @@ def test_train_writes_every_artifact_a_deployment_and_a_sweep_need(tmp_path, cap
     # The header has to be a command someone can paste back, which is the only
     # thing standing between a committed report and an unreproducible number.
     assert "trigon train" in printed and "--seed 0" in printed and "--eval-n 120" in printed
+    # Flags that change which gates the report carries belong in the header,
+    # and their absence has to mean the default rather than nothing: this run
+    # kept the quantization gate, so the header must not disclaim it.
+    assert "--no-quantization-gate" not in printed
 
     # And the checkpoint is a servable build, named after its weights rather
     # than after the code that made them.
