@@ -96,10 +96,17 @@ conformal wrapper's coverage holds per corpus too.
 
 ## Stage 3 — Make it deployable
 
-**3.1 The KV cache.** The layout permits it and `tests/test_independence.py`
-asserts the property; nothing caches it. `Usage.cached_schema_tokens` reports 0
-and says so. This is the difference between the cold and cached columns in
-`docs/pricing.md` — roughly a third of the token cost for these use cases.
+**3.1 The KV cache.** ✅ **Built.** `SchemaPrefix` caches each layer's
+pre-attention normed states and the schema block's outputs, keyed on
+`schema_hash`; `Usage.cached_schema_tokens` reports hits. On a request whose
+schema is 77% of the sequence it skips 53 of 69 positions.
+
+It is **off by default**, which was not the plan. The saving requires querying
+with only the non-schema positions, which changes the GEMM shape, so float32
+rounds differently: per-question independence goes from exact to 4.6e-08 on the
+served path. A claim asserted to exact equality should not silently become a
+tolerance to save compute, so an operator opts in. Wall-clock is unmeasured —
+the benchmark ran under four concurrent training jobs and is not publishable.
 
 **3.2 The model server.** The gateway is 1.5% of the p50 budget and saturates
 at ~430 req/s per process; there is no model server behind it and no batching

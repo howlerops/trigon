@@ -11,11 +11,12 @@ export const CONTRACT_VERSION = "0.1.0";
 
 export interface Usage {
   /**
-   * Schema tokens served from a cross-request KV prefix cache. Always 0 in
-   * this reference implementation, which holds no KV cache: the layout
-   * makes the schema prefix cacheable (asserted in
-   * tests/test_independence.py) but the cache itself is the phase-3
-   * serving stack. Read a 0 as 'not cached', never as 'not cacheable'.
+   * Schema tokens served from a cross-request KV prefix cache rather than
+   * recomputed. 0 means this request recomputed its schema block -- either
+   * the cache is off, or this was the first request carrying this schema.
+   * Read a 0 as 'not cached on this request', never as 'not cacheable':
+   * the layout makes the schema prefix cacheable and
+   * tests/test_independence.py asserts it.
    */
   cached_schema_tokens?: number;
   /**

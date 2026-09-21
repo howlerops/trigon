@@ -43,7 +43,7 @@ def create_router(config: ServerConfig | None = None) -> TieredRouter:
     conformal = config.load_conformal()
 
     workhorse = Engine(
-        _backend(config.backend, config.weights),
+        _backend(config.backend, config.weights, config.cache_prefixes),
         scaler=scaler,
         isotonic=isotonic,
         conformal=conformal,
@@ -51,7 +51,7 @@ def create_router(config: ServerConfig | None = None) -> TieredRouter:
     )
     premium = (
         Engine(
-            _backend(config.premium_backend, config.premium_weights),
+            _backend(config.premium_backend, config.premium_weights, config.cache_prefixes),
             scaler=scaler,
             isotonic=isotonic,
             conformal=conformal,
@@ -67,7 +67,7 @@ def create_router(config: ServerConfig | None = None) -> TieredRouter:
     )
 
 
-def _backend(name: str, weights: str | None = None) -> Any:
+def _backend(name: str, weights: str | None = None, cache_prefixes: bool = False) -> Any:
     if name == "lexical":
         if weights:
             raise ValueError("the lexical backend has no weights to load")
@@ -75,7 +75,12 @@ def _backend(name: str, weights: str | None = None) -> Any:
     if name == "torch":
         from ..backends.torch_readout import TorchReadoutBackend
 
-        return TorchReadoutBackend.load(weights) if weights else TorchReadoutBackend()
+        backend = TorchReadoutBackend.load(weights) if weights else TorchReadoutBackend()
+        # A schema prefix belongs to the weights that produced it. Those are
+        # fixed for this process's lifetime, which is what makes reuse safe
+        # here and unsafe in the trainer.
+        backend.cache_prefixes = cache_prefixes
+        return backend
     raise ValueError(f"unknown backend {name!r}; known backends are 'lexical' and 'torch'")
 
 

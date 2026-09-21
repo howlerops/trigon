@@ -150,6 +150,53 @@ def _sinusoidal(length: int, d_model: int, device, dtype) -> torch.Tensor:
     return pe
 
 
+class SchemaPrefix:
+    """A schema block's attention keys and values, computed once.
+
+    The architectural claim this project rests on is that the schema half of
+    the sequence encodes identically regardless of state --
+    `tests/test_independence.py` asserts it on hidden states. This is what the
+    claim is *for*: if those states do not move, neither do the keys and values
+    derived from them, so a request carrying the same schema can skip
+    recomputing them and attend to these instead.
+
+    What is stored is the *pre-attention normed* hidden state at each layer,
+    not the raw hidden state. With `norm_first=True` a layer computes
+    `x + attn(norm1(x), norm1(x), norm1(x))`, so `norm1(x)` is the quantity
+    the keys and values are projected from. Storing it rather than `x` keeps
+    the cached path arithmetically identical to the uncached one instead of
+    approximately equal.
+
+    Keyed by `schema_hash`, which the compiler already computes over exactly
+    the things a schema block depends on and nothing else.
+    """
+
+    __slots__ = ("schema_hash", "layers", "outputs", "tokens")
+
+    def __init__(
+        self,
+        schema_hash: str,
+        layers: list[torch.Tensor],
+        outputs: torch.Tensor,
+        tokens: int,
+    ) -> None:
+        self.schema_hash = schema_hash
+        self.layers = layers
+        #: The schema block's post-encoder states. Cached too, because a
+        #: caller reads hidden states at every position -- a Choice's option
+        #: keys are pooled from the schema block -- and the first version of
+        #: this recomputed them, which meant a "cache" that recomputed
+        #: everything it had just cached and saved nothing at all.
+        self.outputs = outputs
+        self.tokens = tokens
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging aid
+        return (
+            f"SchemaPrefix(schema_hash={self.schema_hash!r}, "
+            f"tokens={self.tokens}, layers={len(self.layers)})"
+        )
+
+
 class PrefillOnlyModel(nn.Module):
     """A prefix-LM encoder with a caller-supplied attention mask.
 
@@ -235,6 +282,82 @@ class PrefillOnlyModel(nn.Module):
         hidden = self.encoder(hidden, mask=attn_mask)
         return self.norm(hidden)
 
+    # -- cacheable schema prefix -----------------------------------------
+
+    def _embed_inputs(self, token_embeddings, positions, segment_types) -> torch.Tensor:
+        table = _sinusoidal(
+            int(positions.max().item()) + 1,
+            self.config.d_model,
+            token_embeddings.device,
+            token_embeddings.dtype,
+        )
+        hidden = token_embeddings + table[positions] + self.segment_embed(segment_types)
+        return hidden if hidden.dim() == 3 else hidden.unsqueeze(0)
+
+    def encode_prefix(
+        self,
+        token_embeddings: torch.Tensor,
+        mask: torch.Tensor,
+        positions: torch.Tensor,
+        segment_types: torch.Tensor,
+        tokens: int,
+        schema_hash: str,
+    ) -> SchemaPrefix:
+        """Run the first ``tokens`` positions and keep what a later request needs.
+
+        Only correct because the block mask forbids a schema token from
+        attending to state or readout tokens, so running the prefix alone
+        computes the same states running the whole sequence would. That is the
+        same property `tests/test_independence.py` asserts, used rather than
+        merely checked.
+        """
+        hidden = self._embed_inputs(token_embeddings, positions, segment_types)[:, :tokens]
+        block = ~mask[:tokens, :tokens]
+        captured: list[torch.Tensor] = []
+        for layer in self.encoder.layers:
+            normed = layer.norm1(hidden)
+            captured.append(normed.detach())
+            attended, _ = layer.self_attn(
+                normed, normed, normed, attn_mask=block, need_weights=False
+            )
+            hidden = hidden + layer.dropout1(attended)
+            hidden = hidden + layer._ff_block(layer.norm2(hidden))
+        return SchemaPrefix(schema_hash, captured, hidden.detach(), tokens)
+
+    def forward_with_prefix(
+        self,
+        token_embeddings: torch.Tensor,
+        mask: torch.Tensor,
+        positions: torch.Tensor,
+        segment_types: torch.Tensor,
+        prefix: SchemaPrefix,
+    ) -> torch.Tensor:
+        """Encode a request whose schema block is already computed.
+
+        Returns the full sequence's hidden states, schema included, so callers
+        downstream cannot tell the difference -- which is the point, and what
+        `tests/test_independence.py` asserts to exact equality.
+        """
+        n = prefix.tokens
+        hidden = self._embed_inputs(token_embeddings, positions, segment_types)
+        rest = hidden[:, n:]
+        # Rows for the non-schema tokens, columns for the whole sequence. The
+        # schema is a prefix in this layout, so the concatenation below is
+        # already in the order these columns expect; it is not a coincidence to
+        # rely on silently, so `_heads` is given the reassembled sequence.
+        block = ~mask[n:, :]
+        for index, layer in enumerate(self.encoder.layers):
+            normed = layer.norm1(rest)
+            keys = torch.cat([prefix.layers[index], normed], dim=1)
+            attended, _ = layer.self_attn(normed, keys, keys, attn_mask=block, need_weights=False)
+            rest = rest + layer.dropout1(attended)
+            rest = rest + layer._ff_block(layer.norm2(rest))
+
+        # The schema's states come straight out of the cache. Nothing in the
+        # schema block is recomputed, which is the entire point and is what
+        # the first version of this got wrong.
+        return self.norm(torch.cat([prefix.outputs, rest], dim=1))
+
 
 def _to_int8_and_back(weight: torch.Tensor) -> torch.Tensor:
     """Round a weight matrix onto the int8 grid, per output channel.
@@ -268,6 +391,7 @@ class TorchReadoutBackend:
         tokenizer: Tokenizer | None = None,
         version: str = UNTRAINED_VERSION,
         seed: int | None = 0,
+        cache_prefixes: bool = False,
     ) -> None:
         self.config = config or ReadoutConfig()
         self.tokenizer = tokenizer or default_tokenizer()
@@ -282,6 +406,15 @@ class TorchReadoutBackend:
         # Mask tensors are shape-keyed like the masks themselves: at spike
         # sizes building one costs more than the forward pass.
         self._mask_cache: dict[object, torch.Tensor] = {}
+        # The schema KV prefix, the thing the layout was designed to make
+        # cacheable. Off by default: a prefix belongs to the weights that
+        # produced it, and a gateway is the only place where the weights are
+        # fixed for the process's lifetime.
+        self.cache_prefixes = cache_prefixes
+        self._prefix_cache: dict[str, SchemaPrefix] = {}
+        # Reported as `usage.cached_schema_tokens`, set per request by
+        # `logits` so the number describes the request the caller just made.
+        self._last_cached_tokens = 0
 
     @property
     def model_version(self) -> str:
@@ -452,8 +585,53 @@ class TorchReadoutBackend:
                 f"{embeddings.shape[1]}; the compiler's estimator must be the "
                 f"backend's tokenizer"
             )
-        hidden = self.model(embeddings, mask, spans.positions(), spans.segment_types())[0]
+        positions, segments = spans.positions(), spans.segment_types()
+        self._last_cached_tokens = 0
+        prefix = self._prefix_for(compiled, embeddings, mask, positions, segments)
+        if prefix is None:
+            hidden = self.model(embeddings, mask, positions, segments)[0]
+        else:
+            hidden = self.model.forward_with_prefix(embeddings, mask, positions, segments, prefix)[
+                0
+            ]
         return self._heads(compiled, request, hidden, spans), int(embeddings.shape[1])
+
+    def _prefix_for(self, compiled, embeddings, mask, positions, segments):
+        """The cached schema prefix for this request, computing it if needed.
+
+        Returns None when caching is off, which is the default and is what
+        training uses. **A prefix is only valid for the weights that produced
+        it**, and training mutates the weights on every step, so a cache left
+        on during training would serve a schema block from an earlier epoch
+        into a later one and the gradient would be silently wrong.
+        """
+        if not self.cache_prefixes or self.model.training:
+            return None
+        schema_hash = compiled.schema.schema_hash
+        tokens = sum(
+            segment.tokens
+            for segment in compiled.segments
+            if segment.kind
+            in {SegmentKind.SCHEMA_QUESTION, SegmentKind.SCHEMA_OPTION, SegmentKind.SCHEMA_LEVEL}
+        )
+        cached = self._prefix_cache.get(schema_hash)
+        if cached is not None and cached.tokens == tokens:
+            # Only a *hit* counts as cached. The request that fills the cache
+            # paid full price for the schema block, and reporting otherwise
+            # would overstate the saving by exactly one request per schema --
+            # which on a gateway serving a handful of schemas is most of them.
+            self._last_cached_tokens = tokens
+            return cached
+        prefix = self.model.encode_prefix(
+            embeddings, mask, positions, segments, tokens, schema_hash
+        )
+        if len(self._prefix_cache) >= 64:
+            # Bounded, and cleared rather than evicted one at a time: a schema
+            # prefix is tens of kilobytes per layer and an unbounded cache on a
+            # gateway serving many schemas is a slow memory leak.
+            self._prefix_cache.clear()
+        self._prefix_cache[schema_hash] = prefix
+        return prefix
 
     def _heads(
         self,
@@ -623,6 +801,7 @@ class TorchReadoutBackend:
             outputs=outputs,
             model_version=self._version,
             model_ms=(time.perf_counter() - started) * 1000.0,
+            cached_schema_tokens=self._last_cached_tokens,
             diagnostics={"sequence_tokens": length},
         )
 

@@ -47,11 +47,20 @@ and the BM25 option index are cached on schema-shaped keys. When you add
 something in that class, cache it the same way and key it on what it actually
 depends on.
 
-The KV prefix is the same class of thing and is *not* cached here — the layout
-makes it cacheable, and `tests/test_independence.py` asserts that the schema
-encodes identically regardless of state, but this repo holds no KV cache. The
-cache is the phase-3 serving stack, and `Usage.cached_schema_tokens` therefore
-reports 0 on every response and says so in the spec.
+The KV prefix is the same class of thing and **is** cached now, behind a flag.
+`SchemaPrefix` stores each layer's pre-attention normed states plus the schema
+block's outputs, keyed on `schema_hash`; `Usage.cached_schema_tokens` reports a
+hit rather than always 0.
+
+**It is off by default on the gateway, and that is a trade rather than
+caution.** The saving requires attending with only the non-schema positions as
+queries, which changes the GEMM shape, so float32 rounds differently and
+per-question independence goes from exact to 4.6e-08 on the served path. That
+is far below anything a caller could act on and it is still the difference
+between a guarantee and a tolerance, so an operator opts in rather than
+discovering it. Never enable it during training: a prefix belongs to the
+weights that produced it, weights move every step, and nothing raises because
+the shapes all match.
 
 **Claims are tested, not asserted.** The two architectural claims — per-question
 independence and schema-prefix cacheability — are asserted in
