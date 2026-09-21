@@ -20,6 +20,7 @@ import sys
 import pytest
 from fastapi.testclient import TestClient
 
+from conftest import assert_answer_unmoved
 from trigon.server.app import build_app
 from trigon.server.config import ServerConfig
 
@@ -251,4 +252,4 @@ def test_added_questions_do_not_move_the_others_on_the_served_path(deployment):
     }
     after = deployment.post("/v1/systemone", json=crowded).json()
     for qid in TICKET["questions"]:
-        assert before["answers"][qid] == after["answers"][qid], f"{qid} moved"
+        assert_answer_unmoved(before["answers"][qid], after["answers"][qid], qid)

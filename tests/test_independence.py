@@ -33,6 +33,7 @@ import pytest
 
 torch = pytest.importorskip("torch", reason="the reference model needs the 'train' extra")
 
+from conftest import assert_answer_unmoved  # noqa: E402
 from trigon.backends.torch_readout import TorchReadoutBackend  # noqa: E402
 from trigon.engine import Engine  # noqa: E402
 from trigon.schema import SegmentKind, materialize_mask  # noqa: E402
@@ -69,34 +70,6 @@ def _answers(engine: Engine, questions: dict) -> dict:
     return {k: v.model_dump() for k, v in response.answers.items()}
 
 
-# float32 carries ~1.2e-07 of relative precision. Anything at or below this is
-# the arithmetic; a question actually reading another question's tokens would
-# move an answer by a visible fraction, not by an ulp.
-ROUNDING = 1e-6
-
-
-def _same(before: dict, after: dict, qid: str) -> None:
-    """Two answers for one question, across sequences of different lengths."""
-    assert before.keys() == after.keys(), f"{qid}: the answer's shape changed"
-    for field, value in before.items():
-        other = after[field]
-        if isinstance(value, dict):
-            assert value.keys() == other.keys(), f"{qid}.{field}: labels changed"
-            for label, probability in value.items():
-                assert abs(probability - other[label]) < ROUNDING, (
-                    f"{qid}.{field}[{label}] moved by "
-                    f"{abs(probability - other[label]):.3e}, which is not rounding"
-                )
-        elif isinstance(value, float):
-            assert abs(value - other) < ROUNDING, (
-                f"{qid}.{field} moved by {abs(value - other):.3e}, which is not rounding"
-            )
-        else:
-            # Labels, selected options, primitive names: these are decisions,
-            # and a decision that moves is a failure at any magnitude.
-            assert value == other, f"{qid}.{field} changed from {value!r} to {other!r}"
-
-
 def test_adding_a_question_moves_nothing_else(engine):
     before = _answers(engine, BASE)
     after = _answers(
@@ -110,21 +83,21 @@ def test_adding_a_question_moves_nothing_else(engine):
         },
     )
     for qid in BASE:
-        _same(before[qid], after[qid], qid)
+        assert_answer_unmoved(before[qid], after[qid], qid)
 
 
 def test_removing_every_other_question_moves_nothing(engine):
     before = _answers(engine, BASE)
     for qid in BASE:
         alone = _answers(engine, {qid: BASE[qid]})
-        _same(before[qid], alone[qid], qid)
+        assert_answer_unmoved(before[qid], alone[qid], qid)
 
 
 def test_question_map_order_does_not_matter(engine):
     before = _answers(engine, BASE)
     reordered = _answers(engine, dict(reversed(list(BASE.items()))))
     for qid in BASE:
-        _same(before[qid], reordered[qid], qid)
+        assert_answer_unmoved(before[qid], reordered[qid], qid)
 
 
 def test_twenty_extra_questions_still_move_nothing(engine):
@@ -134,7 +107,7 @@ def test_twenty_extra_questions_still_move_nothing(engine):
         f"filler_{i}": NoulQuestion(instructions=f"Is fact number {i} present?") for i in range(20)
     }
     after = _answers(engine, {"urgent": BASE["urgent"], **crowd})
-    _same(before["urgent"], after["urgent"], "urgent")
+    assert_answer_unmoved(before["urgent"], after["urgent"], "urgent")
 
 
 def test_schema_states_do_not_depend_on_state(engine):
