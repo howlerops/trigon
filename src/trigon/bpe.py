@@ -60,20 +60,27 @@ DEFAULT_VOCAB_PATH = pathlib.Path(__file__).resolve().parent / "data" / "bpe.jso
 # no alternative at all and be dropped -- silently, since ``findall`` skips
 # what it cannot match. That cost a round of debugging: ``open_tickets`` came
 # out as two tokens with the separator gone.
-# Digits stay glued into whole numbers, and that is measured rather than
-# assumed. Splitting them one per piece is a well-motivated idea: BPE merges
-# within a piece and never across one, so ` ?\d+` lets the trainer fuse whole
-# numbers, and `127` and `128` really do become two unrelated embedding rows.
+# **Digits are split one per piece.** BPE merges within a piece and never
+# across one, so ` ?\d+` lets the trainer fuse whole numbers: `127` and `128`
+# become two unrelated embedding rows with nothing to say about which is
+# larger, and a threshold on a value ranging over five hundred becomes five
+# hundred arbitrary id-to-tier mappings to memorise from sixteen examples each.
 #
-# It bought nothing. The question it was aimed at -- a threshold on a value
-# ranging over five hundred -- did not move at all, while `at_risk` lost a seed
-# and `plan` collapsed to chance on another. The cause was in the Score head,
-# which ran the dot-product configuration this repository documents as
-# collapsing to the marginal, without that configuration's own repair. See
-# `docs/decisions.md`, "The tokenizer was hiding the numbers ... and splitting
-# them did not help".
+# This was reverted once, on a measurement that changed it alone and saw no
+# improvement. That measurement was right about its own cell and wrong about
+# the cause, because the effect needs two things at once -- legible numbers
+# *and* a Score head that does not collapse:
+#
+#     whole numbers + collapsing head   chance (8 observations)
+#     digits        + collapsing head   chance (4 seeds)
+#     whole numbers + repaired head     chance (3 seeds)
+#     digits        + repaired head     +0.2425
+#
+# Only the last cell moves. Changing one factor at a time and concluding each
+# is useless is exactly the trap a two-factor interaction sets.
+# `docs/decisions.md`, "The tokenizer was hiding the numbers".
 _PIECE = re.compile(
-    r"'(?:s|t|re|ve|m|ll|d)| ?[^\W\d_]+| ?\d+| ?(?:[^\s\w]|_)+|\s+(?!\S)|\s+",
+    r"'(?:s|t|re|ve|m|ll|d)| ?[^\W\d_]+|\d| ?(?:[^\s\w]|_)+|\s+(?!\S)|\s+",
     re.UNICODE,
 )
 

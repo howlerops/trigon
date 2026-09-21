@@ -110,7 +110,12 @@ def main() -> int:
     # `127` and `128` trained as single tokens 2030 and 2262, two unrelated
     # embedding rows, and the threshold question over `seats` sat at chance on
     # every seed. `tests/test_bpe.py` asserts this file and the encoder agree.
-    tokenizer.pre_tokenizer = pre_tokenizers.ByteLevel(add_prefix_space=False)
+    tokenizer.pre_tokenizer = pre_tokenizers.Sequence(
+        [
+            pre_tokenizers.Digits(individual_digits=True),
+            pre_tokenizers.ByteLevel(add_prefix_space=False),
+        ]
+    )
     tokenizer.decoder = decoders.ByteLevel()
     tokenizer.train_from_iterator(
         lines,

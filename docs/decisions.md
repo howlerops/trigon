@@ -651,7 +651,7 @@ beats a larger one spent on five hundred numbers.
 of a vocabulary change. Checkpoints record `{kind, vocab_size}` and refuse to
 load under a different one rather than reading every id as a different word.
 
-### …and splitting them did not help
+### …and it takes both that and a working Score head
 
 **The measurement, which does not support the change.** Same configuration,
 same seeds, same data; only the tokenizer differs. Lift over each question's
@@ -687,9 +687,42 @@ and 128×4 before this change is kept or reverted. A tokenizer change that costs
 
 **What would change our mind about keeping it.** It ships only if a
 configuration exists where `size` clears its marginal *and* nothing else
-regresses. Absent that, the cost is real and the benefit is zero, and the
-honest move is to revert to whole-number tokens and record that the question
-needs something this architecture does not have.
+regresses. Absent that, the cost is real and the benefit is zero.
+
+### The retraction above was wrong, and the way it was wrong is the lesson
+
+`size` is a **Score**, and a Score ran the dot-product head *without* the
+residual — the configuration this document already records as collapsing to
+the marginal, exempted from its own repair on the strength of one measurement
+that read the pooled run metric and so could not see what the Score question
+did. Turning that repair on changes the picture entirely:
+
+| | whole-number tokens | digit tokens |
+| --- | --- | --- |
+| collapsing Score head | chance, 8 observations | chance, 4 seeds |
+| **repaired Score head** | chance, 3 seeds | **+0.2425** and +0.0002 |
+
+**Only the both-on cell moves**, and the tokenizer arm was reverted on the
+strength of its own cell being flat. Both factors are necessary and neither is
+sufficient: whole-number tokens make the number unreadable, so no head repair
+can help; a collapsing head emits a near-constant answer, so no amount of
+legibility gets out. Changing one at a time and concluding each is useless is
+exactly the trap a two-factor interaction sets, and this project walked into it
+with the diagnosis *written down and correct*.
+
+The symptom was sitting in `reports/README.md` the whole time and was read
+wrong twice: `size` emits a near-constant answer, **sd 0.019 across the entire
+input range**. A model that cannot read its input guesses; a head whose keys
+have converged says one thing forever. That distinguishes the two failures and
+it was there before any of these runs.
+
+**What would change our mind.** The effect is one seed of two in the cell that
+works, so it is not yet a result — it is a demonstration that the head *can*
+learn a question eight prior measurements said it could not. Both repairs are
+being measured against digit tokens across seeds, and the prediction is that
+`--score-head linear` beats `--score-residual`: the residual makes collapse
+less likely, while the linear head removes the mode by reading every level off
+one slot directly, and seed variance is this project's recurring finding.
 
 ### Neither calibrator wins, so the run picks per primitive
 
