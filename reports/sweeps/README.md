@@ -95,3 +95,64 @@ advisory failure counted as blocking. The flag is emitted now, the sweep takes
 the verdict from the report's own `passed` field rather than recomputing one,
 and it raises if the two disagree. A tool for measuring whether a result is
 real is the last place a silent wrong answer belongs.
+
+## `calibsplit-8k` — the same configuration, with the temperature fitted properly
+
+Identical to `candidate-8k` in every respect but one: the temperature is
+fitted on a third split the model never trained on
+(`docs/decisions.md`, "The temperature was fitted on the split the model
+trained on"). Same seeds, same data, same weights — the *uncalibrated* column
+is bit-identical across the two sweeps, which is how we know only the
+temperature moved.
+
+```bash
+python scripts/seed_sweep.py --seeds 0 1 2 3 --jobs 4 --name calibsplit-8k \
+  -n 8000 --epochs 8 --lr 0.01 --d-model 128 --layers 2 --noise 0.2 \
+  --option-scoring auto --eval-n 6000 --floor-trials 40
+```
+
+| Seed | Uncalibrated | Fit on **train** | Fit on **held-out** | Certified |
+| ---: | ---: | ---: | ---: | --- |
+| 0 | 0.0303 | 0.0102 | 0.0128 | **yes** |
+| 1 | 0.0431 | 0.0677 ❌ | 0.0516 ❌ | no |
+| 2 | 0.0096 | 0.0067 | 0.0083 | **yes** |
+| 3 | 0.0121 | 0.0190 | 0.0157 | **yes** |
+
+**Certified: 3 of 4 seeds, unchanged.** The fix is real and it is not enough,
+and both halves of that are worth stating.
+
+**What it bought.** The worst seed improved from 0.0677 to 0.0516, and its
+adaptive-ECE failure cleared entirely (0.0682 → 0.0498, inside the gate). The
+range across seeds narrowed from 0.0610 to 0.0433 — a 29% reduction in exactly
+the quantity that makes a gate a coin flip.
+
+**What it did not buy, and this is the part that matters.** Temperature
+scaling *still* raises ECE on seeds 1 and 3, relative to not scaling at all.
+Fitting on data the model had memorised was a real defect with a measurable
+cost, and it was not the whole cause. A diagnosis that explains part of an
+effect and gets promoted to the explanation is how the dot-product head
+absorbed three wrong hypotheses before instrumentation found the real one.
+
+The fitted temperatures point somewhere specific. Per primitive, across the
+four seeds:
+
+| Seed | Choice | Noul | **Score** |
+| ---: | ---: | ---: | ---: |
+| 0 | 0.868 | 1.418 | **3.301** |
+| 1 | 0.949 | 0.706 | **0.201** |
+| 2 | 1.012 | 0.990 | **0.460** |
+| 3 | 0.995 | 1.045 | **0.346** |
+
+Choice and Noul sit near 1.0 on every seed. Score ranges over a factor of
+sixteen, and on three seeds of four it is below 0.5 — a temperature below 1
+*sharpens*, so the fit is making a head more confident. `size`, the Score
+question, is the one the model never learns: 0.2447 accuracy against a 0.2558
+marginal on seed 1. Sharpening a head that carries no signal is how you
+manufacture confident wrong answers, which is precisely what ECE measures.
+
+`temperature.py` already warns when a fit pins at the ceiling (20.0, flattening
+to uniform). It has a floor warning too, at 0.05 — and 0.20 does not trip it.
+Whether the floor is in the wrong place, or the Score head needs a different
+treatment, is the open question. The per-primitive calibration table added
+alongside this sweep is the instrument for answering it; the pooled number
+could only say that something was wrong.
