@@ -1,5 +1,6 @@
 {
   "cardinality": [],
+  "gated": "banking77/calibrated",
   "gates": [
     {
       "advisory": false,
@@ -183,8 +184,8 @@
         "slice_name": "banking77/uncalibrated"
       },
       "extra": {},
-      "latency_p50_ms": 37.0294529993771,
-      "latency_p99_ms": 66.23373799993715,
+      "latency_p50_ms": 41.03295799905027,
+      "latency_p99_ms": 125.51510100092855,
       "lift_over_baseline": 0.7020000000000001,
       "mean_prefill_tokens": 608.593,
       "model": "trigon-reference-0.1.0+c6b37ab2",
@@ -455,8 +456,8 @@
         "slice_name": "banking77/calibrated"
       },
       "extra": {},
-      "latency_p50_ms": 37.262182999256765,
-      "latency_p99_ms": 89.60978200047975,
+      "latency_p50_ms": 35.21542899943597,
+      "latency_p99_ms": 56.59527900024841,
       "lift_over_baseline": 0.6952,
       "mean_prefill_tokens": 608.593,
       "model": "trigon-reference-0.1.0+c6b37ab2",

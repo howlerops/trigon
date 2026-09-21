@@ -21,11 +21,11 @@ for the `accuracy_over_baseline` gate.
 | Question | Marginal predictor |
 | --- | ---: |
 | `intent` | 0.0144 |
-| Epochs | 6 |
+| Epochs | 4 |
 | Seed | 2 |
 
 ```
-python scripts/train_corpus.py banking77 -n 0 --calibration-n 1000 --eval-n 0 --epochs 6 --lr 0.0003 --accumulate 8 --d-model 128 --layers 2 --seed 2
+python scripts/train_corpus.py banking77 -n 0 --calibration-n 1000 --eval-n 0 --epochs 4 --lr 0.0003 --accumulate 8 --d-model 128 --layers 2 --seed 2
 ```
 
 `MIN_CALIBRATION_SAMPLES` is 5,000 and this
@@ -46,8 +46,8 @@ Model(s): trigon-reference-0.1.0+c6b37ab2
 
 | Suite | Cases | Accuracy | ECE | Adaptive ECE | Brier | p50 ms | p99 ms | Tokens |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| banking77/uncalibrated | 5000 | 0.7194 | 0.0335 | 0.0353 | 0.3918 | 37.0 | 66.2 | 609 |
-| banking77/calibrated | 5000 | 0.7126 | 0.0185 | 0.0183 | 0.3921 | 37.3 | 89.6 | 609 |
+| banking77/uncalibrated | 5000 | 0.7194 | 0.0335 | 0.0353 | 0.3918 | 41.0 | 125.5 | 609 |
+| banking77/calibrated | 5000 | 0.7126 | 0.0185 | 0.0183 | 0.3921 | 35.2 | 56.6 | 609 |
 
 ## Release gates
 
@@ -65,9 +65,11 @@ All blocking gates passed.
 
 The pooled lift above averages over questions. A model that has learned one question and answers the rest by rote clears a pooled gate, so the breakdown is printed whether or not it is gated on.
 
+Measured on `banking77/calibrated`, the same run the gates read. Calibration can move a decision -- an isotonic map is monotone per class and not jointly -- so this can differ from the uncalibrated accuracy in the suites table above.
+
 | Question | n | Accuracy | Its marginal predictor | Lift |
 | --- | ---: | ---: | ---: | ---: |
-| `intent` | 5,000 | 0.7194 | 0.0174 | +0.7020 |
+| `intent` | 5,000 | 0.7126 | 0.0174 | +0.6952 |
 
 ## Per-domain calibration
 
