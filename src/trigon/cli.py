@@ -407,6 +407,57 @@ def _scaled(logits: list[float], temperature: float) -> list[float]:
     return [x / total for x in exponentiated]
 
 
+#: How sure the check has to be that a temperature hurts before declining it.
+#: A paired bootstrap at this level: the fit is kept unless it raises ECE in
+#: at least this share of resamples of the check split.
+DECLINE_CONFIDENCE = 0.95
+
+
+def _harm_is_real(unscaled, rescaled, labels, *, resamples: int = 200, seed: int = 4919) -> bool:
+    """Does this temperature raise ECE by more than sampling noise?
+
+    A paired bootstrap over the check split. The two ECEs are computed on the
+    *same* points, so the quantity with a meaningful spread is their
+    difference; resampling the points together preserves that pairing and
+    asks, directly, how often the scaled version is worse.
+
+    **This exists because the first version of the decision was a bare
+    comparison** -- decline if `after >= before` -- which is a threshold on a
+    noisy estimate with no noise floor under it, the one error this project
+    refuses everywhere else. It cost exactly what that error costs: on seed 0
+    of the 8,000-case sweep it declined a temperature that was genuinely
+    helping, and that seed's ECE went from 0.0128 to 0.0219 while seed 1's
+    real problem was fixed. A rule that is right about a large effect and
+    random about a small one has to be told which it is looking at.
+
+    The asymmetry is deliberate. A false decline costs a temperature that
+    would have helped a little; a false accept costs a head served through a
+    scalar that makes it much worse -- measured, 0.0251 against 0.0928 on one
+    head of one seed. So the burden of proof is on declining, and a tie keeps
+    the fit.
+    """
+    import random
+
+    from .calibration.metrics import report as calibration_report
+
+    rng = random.Random(seed)
+    n = len(labels)
+    if n < 2:
+        return False
+    worse = 0
+    for _ in range(resamples):
+        picks = [rng.randrange(n) for _ in range(n)]
+        pick_labels = [labels[i] for i in picks]
+        if len(set(pick_labels)) < 2:
+            # A resample with one label has no calibration to speak of;
+            # counting it either way would be noise about noise.
+            continue
+        a = calibration_report([unscaled[i] for i in picks], pick_labels, simulate_floor=False).ece
+        b = calibration_report([rescaled[i] for i in picks], pick_labels, simulate_floor=False).ece
+        worse += b > a
+    return worse >= DECLINE_CONFIDENCE * resamples
+
+
 def _fit_temperatures(engine, cases):
     """Fit one temperature per primitive, and keep it only if it helps.
 
@@ -473,13 +524,11 @@ def _fit_temperatures(engine, cases):
                 value = scaler.fit(primitive, [x for x, _ in fit_rows], [y for _, y in fit_rows])
 
             labels = [y for _, y in check_rows]
-            before = calibration_report(
-                [_scaled(x, 1.0) for x, _ in check_rows], labels, simulate_floor=False
-            ).ece
-            after = calibration_report(
-                [_scaled(x, value) for x, _ in check_rows], labels, simulate_floor=False
-            ).ece
-            if after >= before:
+            unscaled = [_scaled(x, 1.0) for x, _ in check_rows]
+            rescaled = [_scaled(x, value) for x, _ in check_rows]
+            before = calibration_report(unscaled, labels, simulate_floor=False).ece
+            after = calibration_report(rescaled, labels, simulate_floor=False).ece
+            if _harm_is_real(unscaled, rescaled, labels):
                 declined[primitive] = (value, before, after)
                 # Remove the count too: `fitted_on` is what a reader checks to
                 # see whether a primitive was calibrated at all, and leaving it

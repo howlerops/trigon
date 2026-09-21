@@ -290,3 +290,48 @@ def test_a_temperature_that_raises_held_out_ece_is_declined():
     assert "choice" in scaler.primitive
     scaler.primitive.pop("choice")
     assert scaler.temperature("choice") == 1.0
+
+
+def test_the_decline_decision_needs_more_than_a_bare_comparison():
+    """A large harm is declined; a coin-flip difference is not.
+
+    The first version of this check was `if after >= before: decline` — a
+    threshold on a noisy estimate with no noise floor under it, which is the
+    one error this project refuses everywhere else. It cost what that error
+    costs: on seed 0 of the 8,000-case sweep it threw away a temperature that
+    was helping and took that seed's ECE from 0.0128 to 0.0219, in the same
+    run that fixed seed 1's real problem.
+    """
+    import math
+    import random
+
+    from trigon.cli import _harm_is_real, _scaled
+
+    rng = random.Random(17)
+    rows = _constant_confidence_rows(rng, 1200, 4, confidence=0.75, accuracy=0.75)
+    logits = [[math.log(max(p, 1e-12)) for p in probs] for probs, _ in rows]
+    labels = [y for _, y in rows]
+    unscaled = [_scaled(x, 1.0) for x in logits]
+
+    # A temperature that wrecks an already-calibrated head: declined.
+    assert _harm_is_real(unscaled, [_scaled(x, 0.25) for x in logits], labels)
+
+    # A temperature that changes almost nothing: kept, because the burden of
+    # proof is on declining. A false decline loses a small improvement; a
+    # false accept serves a head through a scalar that makes it much worse
+    # (0.0251 against 0.0928, measured on one head of one seed).
+    assert not _harm_is_real(unscaled, [_scaled(x, 1.001) for x in logits], labels)
+
+    # A temperature that plainly helps is never declined.
+    skewed = _constant_confidence_rows(rng, 1200, 4, confidence=0.95, accuracy=0.70)
+    skewed_logits = [[math.log(max(p, 1e-12)) for p in probs] for probs, _ in skewed]
+    skewed_labels = [y for _, y in skewed]
+    assert not _harm_is_real(
+        [_scaled(x, 1.0) for x in skewed_logits],
+        [_scaled(x, 2.2) for x in skewed_logits],
+        skewed_labels,
+    )
+
+    # Degenerate input is not a decline: with nothing to measure, keep the fit
+    # rather than refuse it on no evidence.
+    assert not _harm_is_real([], [], [])

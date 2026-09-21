@@ -639,6 +639,35 @@ number would have selected the setting with the most cancellation.
 fitted on, so scoring it there would accept every fit by construction. Half the
 calibration split fits, half checks.
 
+**And why the check needs a noise floor of its own.** The first version of the
+decision was a bare comparison — decline if `after >= before`. That is a
+threshold on a noisy estimate with nothing under it, which is the single error
+this project refuses everywhere else, and it cost exactly what that error
+costs. Across the four seeds:
+
+| Seed | Apply always | Bare comparison | |
+| ---: | ---: | ---: | --- |
+| 0 | 0.0128 | **0.0219** | a helpful temperature thrown away |
+| 1 | 0.0516 ❌ | **0.0393** | the real problem fixed |
+| 2 | 0.0083 | 0.0077 | — |
+| 3 | 0.0157 | 0.0121 | — |
+
+Seed 1's `noul` head went from 0.0928 to 0.0251 — the change working as
+designed. Seed 0's `noul` went from 0.0210 to 0.0480, because a 500-point
+check made a coin-flip call on a small difference and called it harm. A rule
+that is right about a large effect and random about a small one has to be told
+which one it is looking at.
+
+So the decision is a **paired bootstrap** over the check split: the two ECEs
+are computed on the same points, so the quantity with meaningful spread is
+their difference, and resampling the points together preserves that pairing.
+The fit is declined only if it is worse in at least 95% of resamples.
+
+The asymmetry is deliberate and follows from the measured costs. A false
+decline loses a temperature that would have helped a little (0.0128 → 0.0219).
+A false accept serves a head through a scalar that makes it much worse (0.0251
+→ 0.0928). So the burden of proof sits on declining, and a tie keeps the fit.
+
 **This is the honest-defaults rule one level up.** A degenerate fit — pinned at
 the ceiling or the floor — already warns rather than returning a quiet number.
 A fit that is perfectly well-formed and simply harmful should not be applied
