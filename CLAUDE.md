@@ -64,6 +64,14 @@ pipeline's order of operations lives in `src/trigon/engine.py`. The contract
 lives in `src/trigon/types.py` and is exported to `spec/openapi.json`. Do not
 duplicate any of them.
 
+Where the prose has to restate one anyway — a decisions document that says
+"see `limits.py`" decides nothing — the restatement is pinned by a test.
+`tests/test_openapi_drift.py` does it for the contract and
+`tests/test_docs_drift.py` for the budgets and the gate limits, so a gate
+relaxed in code and left alone in the docs fails the build instead of
+certifying a threshold nothing enforces. If you add a number to the docs that
+the code also holds, add it there too.
+
 **Honest defaults.** An uncalibrated deployment is allowed; a silently
 uncalibrated one is not (`/healthz` reports it). A degenerate temperature fit
 warns rather than returning a quiet number. Benchmarks that measure explicit
