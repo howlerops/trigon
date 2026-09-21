@@ -100,6 +100,7 @@ class ReadoutConfig:
         max_levels: int = 32,
         match_normalize: bool = False,
         match_residual: bool = True,
+        match_residual_score: bool = False,
     ) -> None:
         if d_model % n_heads:
             raise ValueError(f"d_model {d_model} must divide by n_heads {n_heads}")
@@ -117,6 +118,10 @@ class ReadoutConfig:
         # once, at spike scale -- see docs/decisions.md.
         self.match_normalize = match_normalize
         self.match_residual = match_residual
+        # Off by default, and separately switchable, because the one
+        # measurement of it regressed a run -- see `_heads`. It exists so the
+        # question can be answered rather than argued about.
+        self.match_residual_score = match_residual_score
 
 
 def _sinusoidal(length: int, d_model: int, device, dtype) -> torch.Tensor:
@@ -454,17 +459,27 @@ class TorchReadoutBackend:
                 out[qid] = self.model.choice_head(readouts).squeeze(-1)
             else:
                 members = torch.stack([hidden[idx].mean(dim=0) for idx in spans.members[qid]])
-                # Choice only. The residual was designed and measured for the
-                # dot-product *option* head, where the failure was that an
-                # option's identity did not survive the encoder. A Score's
-                # members are ordered levels and share the same code path by
-                # accident of implementation, not because the mechanism
-                # applies -- and applying it there regressed the reference run
-                # from closing 20% of the gap to Bayes to closing 3%, on a
-                # `readout_per_option` run where the Score head was the only
-                # thing the flag could touch. Measure it on Score before
-                # extending it there.
-                if self.config.match_residual and compiled_q.kind == "choice":
+                # The residual was designed and measured for the dot-product
+                # *option* head, where the failure was that an option's
+                # identity did not survive the encoder. A Score's members are
+                # ordered levels and share this code path by accident of
+                # implementation rather than because the mechanism applies, so
+                # it is switched separately.
+                #
+                # The one measurement of it on Score regressed a run, and that
+                # measurement read the *pooled* metric on a single seed -- it
+                # could not see what the Score question itself did. The symptom
+                # on the Score question is the collapse signature exactly:
+                # `size` emits a near-constant answer, sd 0.019 across the
+                # whole seat range, and sits on its marginal on every seed of
+                # every configuration tried. That is what a head whose keys
+                # have converged looks like, not what an unreadable input looks
+                # like. `--score-residual` is how that gets measured per
+                # question instead of pooled.
+                applies = compiled_q.kind == "choice" or (
+                    compiled_q.kind == "score" and self.config.match_residual_score
+                )
+                if self.config.match_residual and applies:
                     # Carry the option's own input embedding past the encoder,
                     # so which option this is survives layer norm rather than
                     # having to be rediscovered from a smoothed hidden state.

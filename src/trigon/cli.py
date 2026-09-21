@@ -254,6 +254,7 @@ def cmd_train(args: argparse.Namespace) -> int:
             n_layers=args.layers,
             match_normalize=args.match_normalize,
             match_residual=args.match_residual,
+            match_residual_score=args.score_residual,
         ),
         seed=args.seed,
     )
@@ -385,6 +386,7 @@ def _training_section(report, args) -> str:
         f"--option-scoring {args.option_scoring}"
         + (" --match-normalize" if args.match_normalize else "")
         + ("" if args.match_residual else " --no-match-residual")
+        + (" --score-residual" if args.score_residual else "")
         + (
             ""
             if args.validation_fraction == 0.1
@@ -990,6 +992,11 @@ def build_parser() -> argparse.ArgumentParser:
     tr.add_argument("--layers", type=int, default=3)
     tr.add_argument("--seed", type=int, default=0)
     tr.add_argument("--floor-trials", type=int, default=100)
+    tr.add_argument(
+        "--score-residual",
+        action="store_true",
+        help="extend the dot-product residual to Score heads; measured, not assumed",
+    )
     tr.add_argument(
         "--calibration-n",
         type=int,
