@@ -100,7 +100,22 @@ def main() -> int:
     # add_prefix_space=False keeps "pro" and " pro" distinct, which matters:
     # an option name is emitted without a leading space and the same word
     # inside the state has one.
-    tokenizer.pre_tokenizer = pre_tokenizers.ByteLevel(add_prefix_space=False)
+    # Digits individually, then byte level -- the same pre-tokenization
+    # `trigon.bpe._PIECE` applies at encode time. BPE merges within a piece and
+    # never across one, so training with `\d+` pieces and encoding with `\d`
+    # pieces builds a vocabulary full of whole-number tokens the encoder can
+    # never emit, and leaves the numbers it *can* emit undertrained.
+    #
+    # That mismatch is what hid the numbers from the model in the first place:
+    # `127` and `128` trained as single tokens 2030 and 2262, two unrelated
+    # embedding rows, and the threshold question over `seats` sat at chance on
+    # every seed. `tests/test_bpe.py` asserts this file and the encoder agree.
+    tokenizer.pre_tokenizer = pre_tokenizers.Sequence(
+        [
+            pre_tokenizers.Digits(individual_digits=True),
+            pre_tokenizers.ByteLevel(add_prefix_space=False),
+        ]
+    )
     tokenizer.decoder = decoders.ByteLevel()
     tokenizer.train_from_iterator(
         lines,

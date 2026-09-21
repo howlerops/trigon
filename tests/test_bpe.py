@@ -141,7 +141,17 @@ def test_matches_the_reference_implementation():
             merges=[tuple(m.split(" ", 1)) for m in payload["merges"]],
         )
     )
-    reference.pre_tokenizer = tokenizers.pre_tokenizers.ByteLevel(add_prefix_space=False)
+    # The same sequence `scripts/train_tokenizer.py` trains with. This test is
+    # the only thing holding the trainer's pre-tokenization and the encoder's
+    # regex together, and they drifted once: the trainer kept `\d+` as one
+    # piece while the encoder split digits, so the vocabulary carried
+    # whole-number merges the encoder could never emit.
+    reference.pre_tokenizer = tokenizers.pre_tokenizers.Sequence(
+        [
+            tokenizers.pre_tokenizers.Digits(individual_digits=True),
+            tokenizers.pre_tokenizers.ByteLevel(add_prefix_space=False),
+        ]
+    )
 
     mine = BPETokenizer.load()
     for text in SAMPLES:

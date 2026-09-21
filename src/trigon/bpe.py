@@ -60,8 +60,33 @@ DEFAULT_VOCAB_PATH = pathlib.Path(__file__).resolve().parent / "data" / "bpe.jso
 # no alternative at all and be dropped -- silently, since ``findall`` skips
 # what it cannot match. That cost a round of debugging: ``open_tickets`` came
 # out as two tokens with the separator gone.
+# **Digits are split one per piece**, and that is the single most consequential
+# line in this file. BPE merges within a piece and never across one, so ` ?\d+`
+# let the trainer fuse whole numbers: `127` and `128` became token 2030 and
+# token 2262, two unrelated embedding rows with nothing to say about which is
+# larger. A model asked for a threshold on `seats` (1-500) then had to memorise
+# five hundred arbitrary id-to-tier mappings from about sixteen examples each,
+# and it did not -- that question sat at chance on every seed.
+#
+# The corpus contains its own control. `open_tickets` ranges over thirteen
+# values, `seats` over five hundred, and the same model on the same run learns
+# the threshold on the first and not the second. The difficulty was never the
+# comparison; it was that the tokenizer destroyed the number.
+#
+# `\d` -- bare, with no optional leading space -- gives every digit its own
+# token, so magnitude is recoverable from position and place value is
+# learnable. The space is deliberately *not* attached to the first digit: ` 1`
+# and `1` would be different tokens, halving the evidence for each digit and
+# making what the model learns about `1` depend on where it sat. It is also
+# exactly what `tokenizers.pre_tokenizers.Digits(individual_digits=True)` does,
+# and the two have to agree -- `scripts/train_tokenizer.py` trains the
+# vocabulary through that library, so a pre-tokenizer here that differs from
+# the one there produces a vocabulary full of merges this encoder can never
+# emit. `tests/test_bpe.py` asserts the two agree token for token.
+#
+# See `docs/decisions.md`, "The tokenizer was hiding the numbers".
 _PIECE = re.compile(
-    r"'(?:s|t|re|ve|m|ll|d)| ?[^\W\d_]+| ?\d+| ?(?:[^\s\w]|_)+|\s+(?!\S)|\s+",
+    r"'(?:s|t|re|ve|m|ll|d)| ?[^\W\d_]+|\d| ?(?:[^\s\w]|_)+|\s+(?!\S)|\s+",
     re.UNICODE,
 )
 

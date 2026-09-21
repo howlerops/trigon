@@ -590,6 +590,73 @@ evidence about the ranking there.
 
 The risk is retired as a blocker and stays open as a measurement.
 
+### The tokenizer was hiding the numbers
+
+**Decision.** Digits are pre-tokenized **one per piece**, in both the encoder
+(`trigon.bpe._PIECE`) and the trainer (`scripts/train_tokenizer.py`, via
+`pre_tokenizers.Digits(individual_digits=True)`). The leading space is not
+attached to the first digit.
+
+**The diagnosis, which is not the one the docs had been giving.** Three
+questions, one model, one run. `plan` is a copy task and the model does it at
+0.849 against a Bayes-optimal 0.85. `at_risk` is a conjunction with a threshold
+on `open_tickets` and the model learns it, +0.09 over its marginal. `size` is a
+threshold on `seats` and the model sat at **chance on every seed**, which the
+model card attributed to the documented non-goal — no arithmetic, no counting.
+
+That explanation was wrong, and the corpus contains its own control.
+`open_tickets` ranges over 13 values and `seats` over 500. *The same model in
+the same run learns the threshold on the first and not the second.* If
+thresholds were the difficulty, both would fail.
+
+What actually happened is visible in the token ids. BPE merges within a
+pre-tokenized piece, and ` ?\d+` made every whole number one piece, so the
+trainer fused them:
+
+| `seats` | token |
+| ---: | ---: |
+| 127 | 2030 |
+| 128 | 2262 |
+| 255 | 1926 |
+| 256 | 1572 |
+
+**127 and 128 were two unrelated embedding rows.** A model asked which tier a
+seat count falls in had to memorise five hundred arbitrary id-to-tier mappings
+from about sixteen examples each, with boundaries that bear no relation to the
+ids. It did not, and no amount of capacity or training was going to make it.
+`open_tickets` has thirteen values at roughly six hundred examples each, which
+*is* memorisable — hence the control.
+
+With one digit per piece, `127` is `1 2 7` and `128` is `1 2 8`: they share a
+prefix, differ in the last position, and the digit count gives the magnitude
+scale directly. Place value becomes learnable rather than memorisable.
+
+**The trainer and the encoder had drifted, and only a test held them
+together.** The first attempt changed the encoder alone. The trainer still
+pre-tokenized with plain `ByteLevel`, so it trained a vocabulary full of
+whole-number merges the encoder could never emit, and left the digits it *can*
+emit undertrained. `tests/test_bpe.py` — which asserts the pure-Python encoder
+agrees with the library that trained the vocabulary, token for token — failed
+immediately. It is the only thing holding those two definitions together, and
+it earned its keep.
+
+**What it costs.** A state renders to 48 tokens where it used to take 41, about
+17% more prefill, and the vocabulary drops from 5,635 tokens to 4,712 because
+the whole-number merges are gone. Both are the right trade: the tokens are
+cheap (the schema block is block-diagonal and state is the only quadratic term,
+but this is a 48-token state), and a smaller vocabulary spent on real subwords
+beats a larger one spent on five hundred numbers.
+
+**And it invalidates every existing checkpoint**, which is the documented cost
+of a vocabulary change. Checkpoints record `{kind, vocab_size}` and refuse to
+load under a different one rather than reading every id as a different word.
+
+**What would change our mind.** A measurement showing the extra 17% of prefill
+costs more than the question is worth — which would be a strange trade, since
+the question is currently unanswerable. Or a domain where numbers are
+incidental and the vocabulary is better spent elsewhere; the pre-tokenizer is
+one regex and one `pre_tokenizers` argument, and they have to change together.
+
 ### Neither calibrator wins, so the run picks per primitive
 
 **Decision.** `trigon train` fits *both* a temperature and an isotonic map for
