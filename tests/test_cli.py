@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import pathlib
 
 import pytest
 
@@ -110,3 +111,65 @@ def test_fit_writes_a_conformal_profile(tmp_path, capsys):
     # "size" is a Score and "at_risk" a Noul, and conformal sets are over
     # categorical labels.
     assert loaded.calibration_n == 200
+
+
+def test_train_writes_every_artifact_a_deployment_and_a_sweep_need(tmp_path, capsys):
+    """`trigon train`'s output files are a contract, and it has been broken.
+
+    `scripts/seed_sweep.py` reads the `-training.json` sidecar and the `.json`
+    report to compare runs; `trigon serve --weights` reads the checkpoint;
+    `trigon ask` reads the temperatures. None of that was covered at the CLI
+    level, and the sweep shipped broken because `train` wrote no `.json`
+    sibling -- a file every other command writes, missing from the one command
+    whose output anything automated reads.
+
+    Deliberately the smallest run that still exercises all five paths. What is
+    under test is that the artifacts exist, are parseable and refer to each
+    other; whether the model is any good is the gates' job, and at this size
+    they will say it is not.
+    """
+    pytest.importorskip("torch", reason="training needs the 'train' extra")
+
+    out = tmp_path / "reports" / "run.md"
+    weights = tmp_path / "reports" / "run.pt"
+    # A failed gate exits 1 and is a result, not an error -- at 200 cases the
+    # sample-size gate fails by construction, which is the harness working.
+    code = main(
+        [
+            "train",
+            *("-n", "200", "--epochs", "1", "--d-model", "32", "--layers", "1"),
+            *("--eval-n", "120", "--floor-trials", "5", "--seed", "0"),
+            *("--out", str(out), "--save-model", str(weights)),
+        ]
+    )
+    assert code in (0, 1)
+    printed = capsys.readouterr().out
+
+    stem = out.with_suffix("")
+    report = json.loads(out.with_suffix(".json").read_text())
+    training = json.loads(pathlib.Path(f"{stem}-training.json").read_text())
+    temperatures = json.loads(pathlib.Path(f"{stem}-temperatures.json").read_text())
+
+    # The two fields the sweep reads by name. It parses no markdown, on
+    # purpose: a report format is for people, and anything that compares runs
+    # reading it is one heading rename away from silently reporting nothing.
+    assert training["final_loss"] > 0
+    assert "kept_epoch" in training
+    assert {g["name"] for g in report["gates"]} >= {
+        "accuracy_over_baseline",
+        "workhorse_ece",
+        "quantization_ece_delta",
+    }
+    assert set(temperatures["primitive"]) <= {"choice", "noul", "score"}
+
+    # The header has to be a command someone can paste back, which is the only
+    # thing standing between a committed report and an unreproducible number.
+    assert "trigon train" in printed and "--seed 0" in printed and "--eval-n 120" in printed
+
+    # And the checkpoint is a servable build, named after its weights rather
+    # than after the code that made them.
+    from trigon.backends.torch_readout import TorchReadoutBackend
+
+    reloaded = TorchReadoutBackend.load(weights)
+    assert not reloaded.model_version.endswith("-untrained")
+    assert reloaded.model_version in printed or reloaded.model_version in out.read_text()
