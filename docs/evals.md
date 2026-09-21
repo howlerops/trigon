@@ -43,6 +43,28 @@ An accuracy-only check would wave through a KV bit-width that quietly
 destroyed calibration — which is why quantization is gated on ECE and why
 temperature layers are re-fitted after any change to the serving path.
 
+**What feeds it now.** For most of this phase, nothing did: `check_gates` took
+a `quantized=` run and the only caller that ever passed one was a unit test
+that perturbed probabilities by hand. A gate whose only input is synthetic
+tests the gate, not the system — the same mistake as a benchmark you only run
+when you expect to win. `trigon train` now builds a real quantized twin of the
+model it just trained (`TorchReadoutBackend.quantized()`: weight-only,
+symmetric, per-output-channel int8 over every linear and the attention input
+projection), runs the full calibration suite through it under the same
+temperature, and publishes it as its own row beside the fp32 one. On the
+reference configuration it scores an identical accuracy and an ECE 0.0002 away,
+which is the shape the gate predicts — the decision survives, the distribution
+under it moves.
+
+Two honest limits on that. It is *weight* precision, not the KV-cache
+bit-width phase 3 actually ships; they share the property the gate is about (a
+serving-numerics change that spares argmax) and nothing else. And the weights
+are rounded onto the int8 grid and held in fp32, so the matmul is fp32 over
+int8-representable values — the standard way quantization error is measured,
+and identical to an int8 kernel up to accumulation order. It is deliberately
+not built on `torch.ao.quantization`, which is scheduled for removal in torch
+2.10; a gate on a deprecation clock is a gate that stops running.
+
 ### The gate on the measurement comes first
 
 Both ECE estimators are biased upward at small n: bin accuracy carries sampling

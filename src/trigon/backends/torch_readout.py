@@ -209,6 +209,27 @@ class PrefillOnlyModel(nn.Module):
         return self.norm(hidden)
 
 
+def _to_int8_and_back(weight: torch.Tensor) -> torch.Tensor:
+    """Round a weight matrix onto the int8 grid, per output channel.
+
+    Symmetric, per-row scales -- the layout every weight-only int8 kernel
+    uses, because one scale for the whole matrix lets a single large row set
+    the step size for all the others.
+
+    The result is an fp32 tensor holding only int8-representable values, so a
+    forward pass through it computes what an int8 kernel computes up to
+    accumulation order. That is the standard way quantization error is
+    measured, and it keeps the module an ordinary `nn.Linear`: no packed
+    weight, no engine dependency, and no API on a deprecation clock -- the
+    gate has to still run in two years, and `torch.ao.quantization` is
+    already scheduled for removal.
+    """
+    scale = weight.abs().amax(dim=-1, keepdim=True) / 127.0
+    # A row of exact zeros has no scale; leave it alone rather than dividing.
+    scale = scale.clamp_min(torch.finfo(weight.dtype).tiny)
+    return torch.round(weight / scale).clamp_(-127, 127) * scale
+
+
 class TorchReadoutBackend:
     """Runs a ``PrefillOnlyModel`` over a compiled request."""
 
@@ -259,6 +280,47 @@ class TorchReadoutBackend:
     def make_compiler(self, **kwargs) -> SchemaCompiler:
         """A compiler wired to this backend's tokenizer."""
         return SchemaCompiler(estimator=self.estimator, **kwargs)
+
+    def quantized(self) -> TorchReadoutBackend:
+        """A copy of this backend whose linear weights are int8-representable.
+
+        Weight-only, symmetric, per-output-channel -- every `nn.Linear` in the
+        model, encoder and heads alike. Activations stay fp32, which is what
+        weight-only quantization means and is the cheap kind that needs no
+        calibration pass.
+
+        **What it is a proxy for.** Phase 3's quantization is KV-cache
+        bit-width, not weight precision, and this is not that. What the two
+        share is the thing the gate is about: a change to the serving numerics
+        that leaves argmax almost untouched and can move the probabilities
+        underneath it. `quantization_ece_delta` has existed since the first
+        eval harness and until now the only thing that ever fed it was a test
+        fixture built by perturbing probabilities by hand -- which tests the
+        gate, not the system. This makes it a measurement.
+
+        The copy is independent, so quantizing does not disturb this backend,
+        and it keeps the same tokenizer: a quantized model served under a
+        different vocabulary is two changes at once.
+        """
+        twin = TorchReadoutBackend(
+            self.config,
+            tokenizer=self.tokenizer,
+            version=f"{self._version}+int8",
+            seed=None,
+        )
+        twin.model.load_state_dict(self.model.state_dict())
+        with torch.no_grad():
+            for module in twin.model.modules():
+                if isinstance(module, nn.Linear):
+                    module.weight.copy_(_to_int8_and_back(module.weight))
+                # `nn.MultiheadAttention` keeps its input projection as a bare
+                # parameter rather than a child `nn.Linear`, so iterating over
+                # linears alone would leave three quarters of the attention
+                # weights at full precision and quietly understate the delta.
+                if isinstance(module, nn.MultiheadAttention):
+                    module.in_proj_weight.copy_(_to_int8_and_back(module.in_proj_weight))
+        twin.model.eval()
+        return twin
 
     # -- persistence -----------------------------------------------------
 

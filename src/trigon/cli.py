@@ -222,8 +222,28 @@ def cmd_train(args: argparse.Namespace) -> int:
         suite="calibration/temperature-scaled",
         floor_trials=args.floor_trials,
     )
-    gates = check_gates(after)
-    markdown = _training_section(report, args) + render_markdown([before, after], gates, slices)
+    # The same calibrated serving path, with int8 weights. `check_gates` has
+    # always had a slot for this and nothing ever filled it, so
+    # `quantization_ece_delta` was a gate over a run that did not exist. The
+    # quantized twin is built from the trained weights and read through the
+    # same temperature, because the question is whether the numerics move
+    # calibration, not whether they move it enough to need refitting.
+    quantized = None
+    if not args.no_quantization_gate:
+        twin = backend.quantized()
+        quantized, _ = run_calibration_suite(
+            Engine(twin, compiler=compiler, scaler=scaler),
+            eval_cases,
+            suite="calibration/int8",
+            floor_trials=args.floor_trials,
+        )
+    gates = check_gates(after, quantized=quantized)
+    # The int8 run is published as a row of its own, not folded into a delta.
+    # A delta says how far two numbers are apart and hides which one is which;
+    # the row says what the quantized path actually scores, which is the thing
+    # a reader deciding whether to deploy it needs.
+    suites = [before, after] + ([quantized] if quantized is not None else [])
+    markdown = _training_section(report, args) + render_markdown(suites, gates, slices)
 
     print(markdown)
     if args.out:
@@ -237,7 +257,7 @@ def cmd_train(args: argparse.Namespace) -> int:
         # it a training run can only be read by a person, and anything that
         # compares runs -- scripts/seed_sweep.py, a CI trend -- has to parse
         # markdown.
-        out.with_suffix(".json").write_text(render_json([before, after], gates, slices))
+        out.with_suffix(".json").write_text(render_json(suites, gates, slices))
         stem = out.with_suffix("")
         temperatures = pathlib.Path(f"{stem}-temperatures.json")
         training = pathlib.Path(f"{stem}-training.json")
@@ -514,6 +534,11 @@ def build_parser() -> argparse.ArgumentParser:
     tr.add_argument("--layers", type=int, default=3)
     tr.add_argument("--seed", type=int, default=0)
     tr.add_argument("--floor-trials", type=int, default=100)
+    tr.add_argument(
+        "--no-quantization-gate",
+        action="store_true",
+        help="skip the int8 twin; it is a second full eval pass over the same cases",
+    )
     tr.add_argument(
         "--validation-fraction",
         type=float,

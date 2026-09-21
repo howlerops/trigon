@@ -460,3 +460,64 @@ def test_the_residual_still_changes_a_dot_product_choice():
         with torch.no_grad():
             logits[residual] = backend.logits(compiled, request)[0]["route"]
     assert not torch.equal(logits[True], logits[False])
+
+
+def test_the_quantized_twin_is_a_real_serving_path():
+    """`quantization_ece_delta` gated a run that nothing produced.
+
+    `check_gates` has always accepted a `quantized=` suite result, and until
+    now the only thing that ever passed one was a test fixture built by
+    perturbing probabilities by hand. A gate whose input is synthetic tests the
+    gate, not the system. `TorchReadoutBackend.quantized()` makes it a
+    measurement: int8 weights, the same tokenizer, through the same engine.
+
+    What is asserted here is the property the gate is *for* -- that the
+    numerics move under the argmax rather than with it -- not a quality
+    threshold, which is `trigon train`'s job on real cases.
+    """
+    from trigon.engine import Engine
+    from trigon.types import SystemOneRequest
+
+    backend = _tiny_backend()
+    compiler = backend.make_compiler()
+    twin = backend.quantized()
+
+    # Named after what it is. Serving int8 answers under the float build's
+    # name is the same failure as serving an untrained model under a trained
+    # one's, which `stamp_version` exists to prevent.
+    assert twin.model_version == f"{backend.model_version}+int8"
+    assert backend.model_version.endswith("+int8") is False
+
+    request = SystemOneRequest.model_validate(
+        {
+            "state": {"plan": "pro", "seats": 12, "open_tickets": 3},
+            "questions": {
+                "plan": {
+                    "type": "choice",
+                    "instructions": "Which plan is this account on?",
+                    "options": [{"name": n} for n in ("free", "standard", "pro")],
+                },
+                "at_risk": {"type": "noul", "instructions": "Is this account at risk?"},
+            },
+        }
+    )
+    served = Engine(backend, compiler=compiler).answer(request)
+    int8 = Engine(twin, compiler=compiler).answer(request)
+
+    float_probs = served.answers["plan"].probabilities
+    int8_probs = int8.answers["plan"].probabilities
+    assert set(float_probs) == set(int8_probs)
+    assert sum(int8_probs.values()) == pytest.approx(1.0)
+
+    # The decision survives; the distribution under it does not, which is
+    # precisely why argmax accuracy cannot stand in for this gate. Both halves
+    # are asserted: a `quantized()` that quietly returned an unmodified copy
+    # would pass the upper bound and make the gate vacuous, which is the exact
+    # failure this whole path exists to end.
+    assert int8.answers["plan"].selected == served.answers["plan"].selected
+    moved = max(abs(int8_probs[k] - float_probs[k]) for k in float_probs)
+    assert 0.0 < moved < 0.05, f"int8 weights moved the distribution by {moved}"
+
+    # Quantizing copies; it must not reach back into the model it came from.
+    again = Engine(backend, compiler=compiler).answer(request)
+    assert again.answers["plan"].probabilities == float_probs
