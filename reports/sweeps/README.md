@@ -178,3 +178,37 @@ do not**, and temperature scaling raises ECE on two seeds. Whether those two
 facts are the same fact is not yet established. The per-primitive calibration
 table added alongside this sweep is the instrument for deciding it; the pooled
 number could only say that something was wrong.
+
+### Per primitive, all four seeds: the passes are honest
+
+The question the cancellation finding raises is whether the three seeds that
+*certify* do so on real calibration or on two bad heads offsetting. Re-run with
+the per-primitive table, same seeds and flags, reproducing each pooled figure
+to the digit:
+
+| Seed | Pooled | `choice` | `noul` | `score` | |
+| ---: | ---: | ---: | ---: | ---: | --- |
+| 0 | 0.0128 | 0.0166 | 0.0210 | 0.0009 | every head inside the gate |
+| 1 | 0.0516 | **0.0885** | **0.0928** | 0.0193 | two heads at ~2× the limit |
+| 2 | 0.0083 | 0.0025 | 0.0152 | 0.0072 | every head inside the gate |
+| 3 | 0.0157 | 0.0207 | 0.0121 | 0.0142 | every head inside the gate |
+
+**No cancellation is propping up the passes.** On seeds 0, 2 and 3 every
+primitive is comfortably inside the 0.05 limit, so the pooled number is a fair
+summary of them and `worst_primitive_workhorse_ece` would pass on all three.
+Seed 1 is the only seed where pooling flatters, and it fails anyway.
+
+That is worth stating plainly because the alternative was much worse: had the
+certified seeds been passing on cancellation, the configuration would not have
+been a candidate at all and neither would the committed reference model. The
+gate was added on a constructed demonstration and a single real example; run
+against the other three seeds it reports no further offenders, which is what a
+gate that measures something looks like when the thing is not there.
+
+**What it says about seed 1.** Its `choice` head is as *accurate* as the
+certified seeds' — 0.847, against 0.849 on seed 2 — and it is underconfident
+by 0.056 where seed 2's is calibrated to within 0.002. Seed 1 has learned the
+task and its confidence has not followed. Whether that is a property of the
+model or of a temperature fitted on 1,000 cases is the next measurement; the
+`--calibration-n` default was chosen by argument ("enough to fit three
+scalars") and not by experiment.
