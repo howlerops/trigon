@@ -255,6 +255,7 @@ def cmd_train(args: argparse.Namespace) -> int:
             match_normalize=args.match_normalize,
             match_residual=args.match_residual,
             match_residual_score=args.score_residual,
+            score_head=args.score_head,
         ),
         seed=args.seed,
     )
@@ -387,6 +388,7 @@ def _training_section(report, args) -> str:
         + (" --match-normalize" if args.match_normalize else "")
         + ("" if args.match_residual else " --no-match-residual")
         + (" --score-residual" if args.score_residual else "")
+        + (f" --score-head {args.score_head}" if args.score_head != "dotproduct" else "")
         + (
             ""
             if args.validation_fraction == 0.1
@@ -992,6 +994,12 @@ def build_parser() -> argparse.ArgumentParser:
     tr.add_argument("--layers", type=int, default=3)
     tr.add_argument("--seed", type=int, default=0)
     tr.add_argument("--floor-trials", type=int, default=100)
+    tr.add_argument(
+        "--score-head",
+        choices=("dotproduct", "linear"),
+        default="dotproduct",
+        help="how a Score reads its levels; linear uses one fixed-width head",
+    )
     tr.add_argument(
         "--score-residual",
         action="store_true",

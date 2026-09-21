@@ -55,6 +55,7 @@ except ModuleNotFoundError as exc:  # pragma: no cover
         "the torch readout backend needs the 'train' extra: pip install 'trigon[train]'"
     ) from exc
 
+from ..limits import MAX_LEVELS_PER_SCORE
 from ..schema import (
     CompiledRequest,
     OptionScoring,
@@ -97,7 +98,8 @@ class ReadoutConfig:
         n_heads: int = 4,
         d_ff: int = 256,
         dropout: float = 0.0,
-        max_levels: int = 32,
+        max_levels: int = MAX_LEVELS_PER_SCORE,
+        score_head: str = "dotproduct",
         match_normalize: bool = False,
         match_residual: bool = True,
         match_residual_score: bool = False,
@@ -110,7 +112,19 @@ class ReadoutConfig:
         self.n_heads = n_heads
         self.d_ff = d_ff
         self.dropout = dropout
+        # Defaults to the contract's cap. It was 32 while the contract accepts
+        # 64, which nothing noticed because the field was stored and serialized
+        # and never used to build anything; it sizes `score_head` now.
+        #
+        # Deliberately not validated here. Checkpoints written before this head
+        # existed record 32, and refusing to load one outright would be wrong:
+        # it serves any Score up to 32 levels correctly. `_heads` raises
+        # instead, naming the checkpoint's own cap, at the point where a Score
+        # too wide for it actually arrives.
         self.max_levels = max_levels
+        if score_head not in ("dotproduct", "linear"):
+            raise ValueError(f"score_head must be 'dotproduct' or 'linear', got {score_head!r}")
+        self.score_head = score_head
         # ``match_residual`` defaults ON: without it the dot-product head
         # collapses to the marginal and answers 0.254 against a 0.253 marginal
         # predictor; with it, 0.847. ``match_normalize`` defaults OFF: it does
@@ -174,6 +188,14 @@ class PrefillOnlyModel(nn.Module):
         # Held in log space so it stays positive under unconstrained descent;
         # exp(2.66) ~ 1477/1000, i.e. the 1/0.07 CLIP initialises to.
         self.match_log_scale = nn.Parameter(torch.tensor(math.log(1.0 / 0.07)))
+        # A fixed-width head for Score, the shape `max_levels` was declared for
+        # and never used. Choice needs the dot-product head because it can
+        # carry a hundred thousand options and one slot has to serve them all;
+        # a Score is capped at MAX_LEVELS_PER_SCORE by the contract, so a head
+        # that reads all of them off one slot at once is affordable -- and it
+        # is the same shape as `noul_head`, which is the one single-slot head
+        # in this model that demonstrably learns its question.
+        self.score_head = nn.Linear(config.d_model, config.max_levels)
 
     def forward(
         self,
@@ -450,7 +472,27 @@ class TorchReadoutBackend:
         for compiled_q in compiled.schema.questions:
             qid = compiled_q.question_id
             readouts = hidden[spans.readout[qid]]
-            if compiled_q.kind == "noul":
+            if compiled_q.kind == "score" and self.config.score_head == "linear":
+                # One slot, every level read off it at once. The dot-product
+                # alternative scores that slot against the pooled encoder
+                # states of the level names -- and those states are
+                # state-independent by construction, because the schema half of
+                # the sequence encodes identically regardless of state (that is
+                # the cacheability claim `tests/test_independence.py` asserts).
+                # So the dot-product head is already a linear readout of one
+                # vector through four fixed directions; this is the same thing
+                # without the indirection that lets those directions collapse
+                # into each other.
+                levels = len(compiled_q.labels)
+                if levels > self.config.max_levels:
+                    raise ValueError(
+                        f"question {qid!r} has {levels} levels and this build's Score "
+                        f"head was sized for {self.config.max_levels}; it was trained "
+                        "before the head was widened to the contract's cap, so retrain "
+                        "or serve it with --score-head dotproduct"
+                    )
+                out[qid] = self.model.score_head(readouts[:1]).squeeze(0)[:levels]
+            elif compiled_q.kind == "noul":
                 out[qid] = self.model.noul_head(readouts[0]).reshape(1)
             elif (
                 compiled_q.kind == "choice"

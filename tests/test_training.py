@@ -521,3 +521,79 @@ def test_the_quantized_twin_is_a_real_serving_path():
     # Quantizing copies; it must not reach back into the model it came from.
     again = Engine(backend, compiler=compiler).answer(request)
     assert again.answers["plan"].probabilities == float_probs
+
+
+def test_the_linear_score_head_reads_every_level_off_one_slot():
+    """Score's fixed-width head: the shape `max_levels` was declared for.
+
+    Choice needs the dot-product head because it can carry a hundred thousand
+    options and one readout slot has to serve them all. A Score is capped at
+    `MAX_LEVELS_PER_SCORE` by the contract, so reading every level off one slot
+    at once is affordable — and it is the same shape as `noul_head`, which is
+    the one single-slot head in this model that demonstrably learns its
+    question.
+    """
+    from trigon.engine import Engine
+    from trigon.limits import MAX_LEVELS_PER_SCORE
+    from trigon.types import SystemOneRequest
+
+    request = SystemOneRequest.model_validate(
+        {
+            "state": {"seats": 142},
+            "questions": {
+                "size": {
+                    "type": "score",
+                    "instructions": "How large is this account?",
+                    "levels": [
+                        {"name": n, "value": float(i)}
+                        for i, n in enumerate(("bronze", "silver", "gold", "platinum"))
+                    ],
+                }
+            },
+        }
+    )
+
+    backend = TorchReadoutBackend(
+        ReadoutConfig(d_model=64, n_layers=1, n_heads=2, d_ff=64, score_head="linear"), seed=0
+    )
+    answer = Engine(backend, compiler=backend.make_compiler()).answer(request)
+    probabilities = answer.answers["size"].probabilities
+    assert set(probabilities) == {"bronze", "silver", "gold", "platinum"}
+    assert sum(probabilities.values()) == pytest.approx(1.0)
+
+    # Sized to the contract's cap by default, not to the 32 the field carried
+    # while nothing used it.
+    assert backend.config.max_levels == MAX_LEVELS_PER_SCORE
+    assert backend.model.score_head.out_features == MAX_LEVELS_PER_SCORE
+
+
+def test_a_score_wider_than_the_head_is_refused_by_name():
+    """A checkpoint trained before the head was widened says so precisely.
+
+    Those record `max_levels: 32` and serve any Score up to 32 levels
+    correctly, so refusing to load one would be wrong. The error belongs where
+    a Score too wide for it actually arrives.
+    """
+    from trigon.engine import Engine
+    from trigon.types import SystemOneRequest
+
+    backend = TorchReadoutBackend(
+        ReadoutConfig(
+            d_model=64, n_layers=1, n_heads=2, d_ff=64, score_head="linear", max_levels=3
+        ),
+        seed=0,
+    )
+    request = SystemOneRequest.model_validate(
+        {
+            "state": "x",
+            "questions": {
+                "size": {
+                    "type": "score",
+                    "instructions": "How large?",
+                    "levels": [{"name": n, "value": float(i)} for i, n in enumerate("abcd")],
+                }
+            },
+        }
+    )
+    with pytest.raises(ValueError, match="sized for 3"):
+        Engine(backend, compiler=backend.make_compiler()).answer(request)
