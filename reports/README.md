@@ -3,7 +3,14 @@
 `docs/model-card.md` is the summary of what these runs add up to — what the
 reference model can do, what it cannot, and what it is not suitable for.
 
-> **Read every number here as one draw.** These are single-seed runs, and the
+> **`iso/` is the certified configuration; everything else here is one draw.**
+> `reports/iso/` holds a configuration that clears every blocking gate on all
+> four seeds, which is what `docs/decisions.md` requires before a configuration
+> may be called certified. The runs in this directory predate that rule and are
+> kept because the pipeline they exercise is real and because two of them are
+> the clearest demonstrations of what the gates are for.
+
+> **Read every number in *this* directory as one draw.** These are single-seed runs, and the
 > 2,500-case configuration turns out to decide its own outcome by seed: seed 0
 > never leaves chance while seeds 1, 2 and 3 beat this run's *final* loss by
 > epoch 2, on one commit with identical flags. That is not a caveat about

@@ -30,6 +30,48 @@ is one sample from a distribution that was not measured at the time, and
 reproducing it exactly reproduces the sample, not the result. See
 `docs/decisions.md`, "A single-seed training run is not evidence".
 
+## The certified configuration
+
+The run described below is a **single seed** and predates the rule that a
+configuration is certified on its spread rather than on one draw. The
+configuration that now meets that rule is in `reports/iso/`:
+
+```bash
+trigon train -n 8000 --eval-n 6000 --epochs 8 --lr 0.01 \
+  --d-model 128 --layers 2 --noise 0.2 --option-scoring auto --seed N
+```
+
+| Seed | ECE | Adaptive ECE | Lift over baseline | Certified |
+| ---: | ---: | ---: | ---: | --- |
+| 0 | 0.0247 | 0.0289 | +0.1614 | **yes** |
+| 1 | 0.0235 | 0.0262 | +0.2203 | **yes** |
+| 2 | 0.0084 | 0.0162 | +0.2277 | **yes** |
+| 3 | 0.0087 | 0.0153 | +0.2141 | **yes** |
+
+Four of four, against a 0.05 gate on both estimators. Per question, against
+each question's own marginal predictor:
+
+| Question | What it needs | Seed 0 | Seed 1 | Seed 2 | Seed 3 |
+| --- | --- | ---: | ---: | ---: | ---: |
+| `plan` | copy a value out of the state | +0.3950 | +0.5888 | +0.5947 | +0.5712 |
+| `at_risk` | a conjunction over two fields | +0.0955 | **+0.0000** | +0.0913 | +0.0940 |
+| `size` | a threshold on a number | −0.0062 | −0.0112 | −0.0023 | −0.0230 |
+
+**Two questions of three, on three seeds of four.** `at_risk` is genuinely
+learned at +0.09 — above the 0.05 bar — everywhere but seed 1, where it sits
+exactly on its marginal. `size` is never learned on any seed, which is
+consistent with the documented non-goals: it is arithmetic on a number, and
+this model does no arithmetic. That single question is why
+`worst_question_over_baseline` still fails on every seed and remains advisory.
+
+**Every calibrated head on every seed uses an isotonic map, and no temperature
+is kept anywhere.** The selection fits both and applies whichever demonstrably
+helps (`docs/decisions.md`, "Neither calibrator wins"); on this model it picks
+isotonic for `choice` on all four seeds, adds `noul` on seed 1, and declines a
+temperature every time. That is a fact about this model's confidence being
+*tilted* rather than uniformly mis-scaled, and it is the reason four earlier
+rules about when to apply a temperature all left seed 1 failing.
+
 ## What it can do
 
 **Answer typed questions about a state in one pass, with probabilities that
