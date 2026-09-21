@@ -14,3 +14,9 @@ runs/
 artifacts/
 *.pt
 *.safetensors
+
+# Per-seed training logs from scripts/seed_sweep.py. They exist so a sweep in
+# flight can be followed with `tail -f` -- a twenty-minute job with no visible
+# progress is indistinguishable from a hung one. The results are the committed
+# .md and .json reports beside them; a progress log is not evidence.
+reports/sweeps/*.log
