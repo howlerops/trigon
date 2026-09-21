@@ -86,6 +86,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--log-every", type=int, default=25)
     parser.add_argument("--floor-trials", type=int, default=200)
     parser.add_argument("--option-scoring", default="auto")
+    parser.add_argument(
+        "--torch-threads",
+        type=int,
+        default=1,
+        help=(
+            "torch intra-op threads. One by default so several seeds in parallel "
+            "are cores rather than oversubscription, and so the latency the report "
+            "publishes is measured under a known thread count"
+        ),
+    )
     parser.add_argument("--validation-fraction", type=float, default=0.1)
     return parser.parse_args(argv)
 
@@ -247,9 +257,21 @@ def header(spec, args, train, calibration, evaluation, marginal, topped_up: int)
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    # Set here rather than inherited from the trainer, which is where it used
+    # to come from: `TrainingConfig.torch_threads` is 1 and `run_training`
+    # applies it, so every eval after a training run was single-threaded by
+    # accident. Re-gating a checkpoint skips training, so four seeds in
+    # parallel each took four threads on four cores -- 3.5x slower, and worse
+    # than slow, because the suite publishes p50 and p99 latency and those
+    # numbers are meaningless under oversubscription. The accuracy and the ECE
+    # would have been right and the latency quietly wrong.
+    import torch
+
     from trigon.backends.torch_readout import ReadoutConfig, TorchReadoutBackend
     from trigon.training import TrainingConfig
     from trigon.training import train as run_training
+
+    torch.set_num_threads(args.torch_threads)
 
     spec = corpus(args.corpus)
     if args.weights:
