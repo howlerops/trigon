@@ -100,25 +100,38 @@ def splits(spec, args) -> tuple[list, list, list]:
     return training, calibration, evaluation
 
 
-def baseline_accuracy(train: list, evaluation: list, question: str = "intent") -> float:
-    """What a model that ignores its input scores: predict the modal label.
+def baseline_accuracy(train: list, evaluation: list) -> dict[str, float]:
+    """What a model that ignores its input scores, per question.
 
-    Computed from the *training* split and applied to evaluation, because a
-    baseline fitted on the evaluation split is not a baseline, it is an
-    oracle with one degree of freedom.
+    The modal label is computed from the *training* split and applied to
+    evaluation, because a baseline fitted on the evaluation split is not a
+    baseline, it is an oracle with one degree of freedom.
+
+    Per question rather than pooled. A corpus like HelpSteer2 asks five Score
+    questions over the same state and their marginals differ -- pooling them
+    into one number would let a well-predicted question carry a badly
+    predicted one, which is the same cancellation that made pooled ECE
+    misleading here before.
     """
-    counts: dict[int, int] = {}
+    counts: dict[str, dict[int, int]] = {}
     for case in train:
-        label = case.expected[question].label
-        counts[label] = counts.get(label, 0) + 1
-    if not counts:
-        return 0.0
-    modal = max(counts, key=lambda k: counts[k])
-    hits = sum(1 for case in evaluation if case.expected[question].label == modal)
-    return hits / len(evaluation) if evaluation else 0.0
+        for qid, expectation in case.expected.items():
+            counts.setdefault(qid, {})
+            label = expectation.label
+            counts[qid][label] = counts[qid].get(label, 0) + 1
+    out: dict[str, float] = {}
+    for qid, tally in counts.items():
+        modal = max(tally, key=lambda k: tally[k])
+        seen = [c for c in evaluation if qid in c.expected]
+        hits = sum(1 for c in seen if c.expected[qid].label == modal)
+        out[qid] = hits / len(seen) if seen else 0.0
+    return out
 
 
-def header(spec, args, train, calibration, evaluation, marginal: float) -> str:
+def header(spec, args, train, calibration, evaluation, marginal: dict[str, float]) -> str:
+    questions = train[0].request.questions
+    first = next(iter(questions.values()))
+    labels = getattr(first, "options", None) or getattr(first, "levels", [])
     return "\n".join(
         [
             f"# {spec.name}",
@@ -136,8 +149,12 @@ def header(spec, args, train, calibration, evaluation, marginal: float) -> str:
             f"| Training cases | {len(train):,} |",
             f"| Calibration cases (held out of train) | {len(calibration):,} |",
             f"| Evaluation cases (the corpus's own test split) | {len(evaluation):,} |",
-            f"| Options | {len(train[0].request.questions['intent'].options)} |",
-            f"| Marginal predictor accuracy | {marginal:.4f} |",
+            f"| Questions per request | {len(questions)} |",
+            f"| Labels per question | {len(labels)} |",
+            "",
+            "| Question | Marginal predictor |",
+            "| --- | ---: |",
+            *(f"| `{qid}` | {value:.4f} |" for qid, value in sorted(marginal.items())),
             f"| Epochs | {args.epochs} |",
             f"| Seed | {args.seed} |",
             "",
@@ -169,10 +186,10 @@ def main(argv: list[str] | None = None) -> int:
     compiler = backend.make_compiler(option_scoring=OptionScoring(args.option_scoring))
     train, calibration, evaluation = splits(spec, args)
     marginal = baseline_accuracy(train, evaluation)
-
+    summary = " ".join(f"{qid}={value:.4f}" for qid, value in sorted(marginal.items()))
     print(
         f"{spec.name}: {len(train)} train, {len(calibration)} calibration, "
-        f"{len(evaluation)} eval; marginal {marginal:.4f}",
+        f"{len(evaluation)} eval; marginals {summary}",
         file=sys.stderr,
     )
     report = run_training(

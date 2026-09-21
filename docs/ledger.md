@@ -21,7 +21,7 @@ narrative sections are a discipline, not a test.
 | Release gates | 8 |
 | Green-tier corpora in the licence audit | 9 |
 | Committed use cases | 3 |
-| Real corpora loadable | 1 |
+| Real corpora loadable | 2 |
 
 **Certified configuration.** 8,000 cases, 8 epochs, d_model 128, 2 layers,
 noise 0.2, `--option-scoring auto`. Clears every blocking gate on all four
@@ -88,8 +88,10 @@ twenty-two runs** — the investigation is closed and the evidence is in
   uses a corpus's tier forbids — amber evals and never trains, red ships in
   nothing — and `purpose` has no default, because a default is the argument a
   caller least often thinks about. Committed tiers are pinned against
-  `docs/data.md`. Banking77 is the first: 10,003 train, 3,080 test, 77 intents,
-  a marginal predictor at ~1.3%.
+  `docs/data.md`. Two are loadable: Banking77 (Choice, 77 intents, marginal
+  ~1.3%) and HelpSteer2 (Score, five ordered ratings over one state) — the
+  first real exercise of the Score primitive and of multi-question
+  independence on data the generator did not write.
 
 ### Reference model
 - Prefill-only transformer, byte-level BPE trained on the project's own data,
@@ -136,6 +138,7 @@ The most useful section. Each of these was argued for before it was measured.
 | One readout slot carrying two bits is the bottleneck | A slot per level: median −0.0095. The last structural hypothesis, dead. |
 | Stage 4.1 is blocked on the incumbent's wire format | It is published. `decisions.md` had already cited that source. |
 | Stage 2.1 is blocked on data | Banking77 is reachable, green, and was cleared by our own audit. |
+| The distribution corpora need a Parquet reader | HelpSteer2 is gzipped JSONL. Three of four do; it does not. |
 
 ---
 
@@ -210,7 +213,13 @@ what order, and how each step is known to be done.
 - **Semantic compatibility is unmet.** The wire, envelope and status codes now
   line up (`docs/compat.md`); the model answers one question of three well. An
   adapter cannot fix that, and calibration makes a wrong answer credible.
-- **Three of five data streams unbuilt.** Banking77 is loaded and trainable;
-  the annotator-distribution corpora — the ones that teach a model what
-  disagreement looks like, which is the product — are not.
+- **Three of five data streams unbuilt.** Two corpora load. The
+  *annotator-distribution* data — the stream that teaches a model what
+  disagreement looks like, which is the product — is still not among them:
+  HelpSteer2's main split carries aggregated integer ratings, and its
+  `disagreements/` split is a separate thing to load.
+- **GoEmotions, measuring_hate_speech and Circa are Parquet-only.** A reader
+  for them would put a compiled dependency in the import path of the
+  calibration math and the drift tests. They get converted in `scripts/`
+  first, or not at all.
 - **CC BY-SA on a derived model** — counsel opinion requested, unresolved.

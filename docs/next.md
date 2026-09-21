@@ -56,15 +56,21 @@ configuration tried here decides its own outcome by seed. Blocker: none
 **Done when** ECE ≤ 0.05 and `accuracy_over_baseline` ≥ 0.05 hold on the
 median of four seeds, against a marginal predictor of ~1.3%.
 
-**A.2 Add the annotator-distribution corpora.** GoEmotions, HelpSteer2 and
-measuring_hate_speech are all green and all carry *distributions*, not just
-majority votes. This matters more than the third and fourth Choice corpus: a
-model trained on hard labels learns to be confident, and a model trained on
+**A.2 Add the annotator-distribution corpora.** Blocker: **checked, and it
+was half real.** HelpSteer2 is gzipped JSONL, needs nothing beyond stdlib, and
+is now loaded — five ordered ratings over one state, the first real exercise of
+the Score primitive. GoEmotions, measuring_hate_speech and Circa are
+Parquet-only, and a reader for them would put a compiled dependency in the
+import path of the calibration math and the drift tests. Those get converted
+in `scripts/` first, or not at all.
+
+**What is still missing is the thing the stream is for.** HelpSteer2's main
+split carries *aggregated* integer ratings, not per-annotator distributions;
+the distribution-carrying data is in its `disagreements/` split and is a
+separate load. `Expectation.distribution` exists and nothing has ever used it.
+A model trained on hard labels learns to be confident; a model trained on
 annotator disagreement learns what disagreement looks like, which is the
-product. `Expectation.distribution` already exists and nothing has ever used
-it. Blocker: none checked yet — the loaders are plain-file today and these
-corpora may need a Parquet reader, which is a dependency question the
-`corpora` module deliberately has an opinion about.
+product.
 
 **Done when** the calibration report is published per corpus, never pooled,
 and coverage holds per corpus too. Nine corpora pooled into one ECE would hide

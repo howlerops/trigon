@@ -28,14 +28,16 @@ never touch either -- they build a tiny corpus on disk and read it back.
 from __future__ import annotations
 
 import csv
+import gzip
+import json
 import os
 import pathlib
 import urllib.request
 from collections.abc import Iterator
-from dataclasses import dataclass
-from typing import Literal
+from dataclasses import dataclass, field
+from typing import Any, Literal
 
-from ..types import ChoiceQuestion, SystemOneRequest
+from ..types import ChoiceQuestion, ScoreQuestion, SystemOneRequest
 from .harness import Case, Expectation
 
 __all__ = [
@@ -78,6 +80,21 @@ class CorpusSpec:
     # imports without one.
     files: dict[str, str]
     instructions: str
+    # -- Choice corpora --------------------------------------------------
+    # One column holds the text and one holds the label.
+    text_field: str = "text"
+    label_field: str = "category"
+    # -- Score corpora ---------------------------------------------------
+    # Several ordered ratings over one piece of state, each its own question.
+    # The levels are named by their index for the same reason the compat
+    # adapter names them that way: an ordinal rating's number *is* its label,
+    # and a Score anchored at its indices reports on the caller's own scale.
+    score_fields: tuple[str, ...] = ()
+    levels: int = 0
+    # Fields concatenated to make the state, in order, each under its own
+    # heading. A record is state; flattening it loses which part was which.
+    state_fields: tuple[str, ...] = ()
+    per_question_instructions: dict[str, str] = field(default_factory=dict)
 
     def permits(self, purpose: Purpose) -> bool:
         return purpose in _PERMITS[self.tier]
@@ -105,7 +122,44 @@ BANKING77 = CorpusSpec(
     instructions="Which banking intent does this customer message express?",
 )
 
-CORPORA: dict[str, CorpusSpec] = {BANKING77.name: BANKING77}
+HELPSTEER2 = CorpusSpec(
+    name="helpsteer2",
+    primitive="score",
+    tier="green",
+    licence="CC BY 4.0",
+    attribution=(
+        "HelpSteer2 (Wang et al., 2024), NVIDIA. CC BY 4.0. "
+        "https://huggingface.co/datasets/nvidia/HelpSteer2"
+    ),
+    files={
+        "train": "https://huggingface.co/datasets/nvidia/HelpSteer2/resolve/main/train.jsonl.gz",
+        "test": (
+            "https://huggingface.co/datasets/nvidia/HelpSteer2/resolve/main/validation.jsonl.gz"
+        ),
+    },
+    instructions="Rate this response.",
+    # Five ordered ratings, 0-4, over the same prompt-and-response pair. This
+    # is the first real **Score** corpus here, which matters because Score is
+    # the primitive with the least real evidence behind it and the one the
+    # synthetic `size` question failed on for seven straight interventions.
+    #
+    # These are aggregated integer ratings, **not** annotator distributions.
+    # The distribution-carrying split lives in `disagreements/` and is a
+    # separate thing to load; saying otherwise here would claim the product's
+    # headline data stream on the strength of a file that does not carry it.
+    score_fields=("helpfulness", "correctness", "coherence", "complexity", "verbosity"),
+    levels=5,
+    state_fields=("prompt", "response"),
+    per_question_instructions={
+        "helpfulness": "How helpful is the response to the prompt?",
+        "correctness": "How correct and factually accurate is the response?",
+        "coherence": "How coherent and easy to follow is the response?",
+        "complexity": "How much domain expertise does writing the response require?",
+        "verbosity": "How verbose is the response relative to what was asked?",
+    },
+)
+
+CORPORA: dict[str, CorpusSpec] = {c.name: c for c in (BANKING77, HELPSTEER2)}
 
 
 def corpus(name: str) -> CorpusSpec:
@@ -127,7 +181,7 @@ def fetch(spec: CorpusSpec, *, root: pathlib.Path | None = None) -> dict[str, pa
     root.mkdir(parents=True, exist_ok=True)
     paths = {}
     for split, url in spec.files.items():
-        path = root / f"{split}.csv"
+        path = root / f"{split}{_extension(url)}"
         if not path.exists():
             with urllib.request.urlopen(url, timeout=120) as response:  # noqa: S310
                 path.write_bytes(response.read())
@@ -135,13 +189,96 @@ def fetch(spec: CorpusSpec, *, root: pathlib.Path | None = None) -> dict[str, pa
     return paths
 
 
-def _rows(path: pathlib.Path) -> Iterator[tuple[str, str]]:
-    with path.open(newline="", encoding="utf-8") as handle:
-        for row in csv.DictReader(handle):
-            text = (row.get("text") or "").strip()
-            category = (row.get("category") or "").strip()
-            if text and category:
-                yield text, category
+def _records(path: pathlib.Path) -> Iterator[dict[str, Any]]:
+    """Rows from a corpus file, as dicts, whichever plain format it is in.
+
+    CSV and gzipped JSONL, both stdlib. A Parquet-only corpus needs a reader
+    this module deliberately does not have -- `pyarrow` in `trigon.evals`
+    would put a compiled dependency in the import path of the calibration math
+    and the drift tests, which is the thing the package's dependency rule
+    exists to prevent. Such a corpus gets converted in `scripts/` first.
+    """
+    if path.suffix == ".csv":
+        with path.open(newline="", encoding="utf-8") as handle:
+            yield from csv.DictReader(handle)
+        return
+    opener = gzip.open if path.suffixes[-1:] == [".gz"] else open
+    with opener(path, "rt", encoding="utf-8") as handle:  # type: ignore[operator]
+        for line in handle:
+            line = line.strip()
+            if line:
+                yield json.loads(line)
+
+
+def _extension(url: str) -> str:
+    """The suffix a cached file keeps, so `_records` can dispatch on it."""
+    for suffix in (".jsonl.gz", ".json.gz", ".jsonl", ".csv"):
+        if url.endswith(suffix):
+            return suffix
+    return ".csv"
+
+
+def _labelled(spec: CorpusSpec, path: pathlib.Path) -> Iterator[tuple[str, str]]:
+    for row in _records(path):
+        text = str(row.get(spec.text_field) or "").strip()
+        label = str(row.get(spec.label_field) or "").strip()
+        if text and label:
+            yield text, label
+
+
+def _state(spec: CorpusSpec, row: dict[str, Any]) -> str:
+    """A record's fields under their own headings, in declared order.
+
+    Concatenating them bare would make a prompt and a response
+    distinguishable only by position, which is a thing the model would have to
+    learn rather than be told.
+    """
+    return "\n\n".join(
+        f"{name.upper()}:\n{str(row.get(name) or '').strip()}" for name in spec.state_fields
+    )
+
+
+def _score_cases(spec: CorpusSpec, split: str, path: pathlib.Path, limit: int | None) -> list[Case]:
+    """Several ordered ratings over one piece of state, each its own question.
+
+    One request, several Score questions, which is exactly the shape the
+    independence claim is about -- and the first time it is exercised on real
+    data rather than on the generator.
+    """
+    levels = [{"name": str(i), "value": float(i)} for i in range(spec.levels)]
+    questions = {
+        name: ScoreQuestion(
+            instructions=spec.per_question_instructions.get(name, spec.instructions),
+            levels=levels,
+        )
+        for name in spec.score_fields
+    }
+    cases: list[Case] = []
+    for i, row in enumerate(_records(path)):
+        if limit is not None and len(cases) >= limit:
+            break
+        expected = {}
+        for name in spec.score_fields:
+            value = row.get(name)
+            # A rating outside the declared range is not clipped into it: a
+            # silently clamped label trains the model on an answer nobody
+            # gave. The row is dropped and the drop is visible in the count.
+            if not isinstance(value, int) or not 0 <= value < spec.levels:
+                expected = {}
+                break
+            expected[name] = Expectation(label=value)
+        if not expected:
+            continue
+        cases.append(
+            Case(
+                case_id=f"{spec.name}/{split}/{i}",
+                request=SystemOneRequest(state=_state(spec, row), questions=questions),
+                expected=expected,
+                domain=spec.name,
+                tags=(spec.name, split, "real"),
+            )
+        )
+    return cases
 
 
 def load(
@@ -167,14 +304,16 @@ def load(
     paths = fetch(spec, root=root)
     if split not in paths:
         raise KeyError(f"{spec.name} has no split {split!r}; it has {sorted(paths)}")
+    if spec.primitive == "score":
+        return _score_cases(spec, split, paths[split], limit)
 
-    rows = list(_rows(paths[split]))
+    rows = list(_labelled(spec, paths[split]))
     # The option set is every label in the corpus, in a fixed order, on every
     # request. It is not the labels present in this split: a model asked to
     # choose between 70 options on train and 77 on test is being asked two
     # different questions, and the second one is harder for a reason that has
     # nothing to do with the model.
-    labels = sorted({category for path in paths.values() for _, category in _rows(path)})
+    labels = sorted({label for path in paths.values() for _, label in _labelled(spec, path)})
     index = {label: i for i, label in enumerate(labels)}
     options = [{"name": label.replace("_", " ")} for label in labels]
 

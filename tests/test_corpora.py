@@ -120,3 +120,128 @@ def test_the_committed_tiers_match_the_licence_audit():
 def test_an_unknown_corpus_names_the_ones_that_exist():
     with pytest.raises(KeyError, match="banking77"):
         corpus("definitely_not_a_corpus")
+
+
+# -- Score corpora: several ordered ratings over one piece of state ----------
+
+HS2 = [
+    {
+        "prompt": "why is the sky blue",
+        "response": "Rayleigh scattering.",
+        "helpfulness": 3,
+        "correctness": 4,
+        "coherence": 4,
+        "complexity": 2,
+        "verbosity": 0,
+    },
+    {
+        "prompt": "why is the sky blue",
+        "response": "Because.",
+        "helpfulness": 0,
+        "correctness": 1,
+        "coherence": 2,
+        "complexity": 0,
+        "verbosity": 0,
+    },
+    # A rating outside the declared range. Never clipped into it: a silently
+    # clamped label trains the model on an answer nobody gave.
+    {
+        "prompt": "x",
+        "response": "y",
+        "helpfulness": 9,
+        "correctness": 1,
+        "coherence": 1,
+        "complexity": 1,
+        "verbosity": 1,
+    },
+    # A missing rating. Same treatment, for the same reason.
+    {"prompt": "x", "response": "y", "helpfulness": 2, "correctness": 2, "coherence": 2},
+]
+
+
+@pytest.fixture
+def scored(tmp_path: pathlib.Path) -> pathlib.Path:
+    """A gzipped-JSONL corpus in the cache, so nothing is fetched."""
+    import gzip
+    import json
+
+    root = tmp_path / "cache"
+    (root / "helpsteer2").mkdir(parents=True)
+    for split in ("train", "test"):
+        with gzip.open(root / "helpsteer2" / f"{split}.jsonl.gz", "wt") as handle:
+            for row in HS2:
+                handle.write(json.dumps(row) + "\n")
+    return root
+
+
+def test_a_score_corpus_asks_one_question_per_rating(scored):
+    cases = load("helpsteer2", "test", purpose="eval", root=scored)
+    questions = cases[0].request.questions
+    assert list(questions) == [
+        "helpfulness",
+        "correctness",
+        "coherence",
+        "complexity",
+        "verbosity",
+    ]
+    assert [level.name for level in questions["helpfulness"].levels] == ["0", "1", "2", "3", "4"]
+    # Anchored at their own indices, so the reported score is on the corpus's
+    # scale rather than on a positional one that happens to match.
+    assert [level.value for level in questions["helpfulness"].levels] == [0.0, 1.0, 2.0, 3.0, 4.0]
+    assert cases[0].expected["helpfulness"].label == 3
+    assert cases[1].expected["verbosity"].label == 0
+
+
+def test_each_question_gets_its_own_instructions(scored):
+    """Five questions sharing one instruction string would make five
+    identical schema blocks and ask the model to tell them apart by position.
+    """
+    questions = load("helpsteer2", "test", purpose="eval", root=scored)[0].request.questions
+    texts = {q.instructions for q in questions.values()}
+    assert len(texts) == len(questions)
+    assert "verbose" in questions["verbosity"].instructions.lower()
+
+
+def test_a_rating_outside_the_declared_levels_drops_the_row(scored):
+    """Not clipped. A clamped label is an answer nobody gave, and it would
+    train the model on it while every count still looked right."""
+    cases = load("helpsteer2", "test", purpose="eval", root=scored)
+    assert len(cases) == 2, "the out-of-range row and the incomplete row must both be dropped"
+    for case in cases:
+        for expectation in case.expected.values():
+            assert 0 <= expectation.label <= 4
+
+
+def test_the_state_labels_which_field_is_which(scored):
+    """A prompt and a response concatenated bare are distinguishable only by
+    position, which is a thing the model would have to learn rather than be
+    told."""
+    state = load("helpsteer2", "test", purpose="eval", root=scored)[0].request.state
+    assert "PROMPT:" in state and "RESPONSE:" in state
+    assert state.index("PROMPT:") < state.index("RESPONSE:")
+
+
+def test_gzipped_jsonl_and_csv_both_load_without_a_compiled_dependency():
+    """The dependency rule, checked rather than asserted.
+
+    `trigon.evals.corpora` is imported by the drift tests and by the gateway's
+    budgeting path, neither of which has a GPU stack. A Parquet reader here
+    would put `pyarrow` in all of them.
+    """
+    import ast
+
+    import trigon.evals.corpora as module
+
+    # Parsed, not grepped. The first version searched the source text and
+    # failed on "task-specific-datasets" inside a URL and on the word
+    # `pyarrow` inside the comment explaining why it is absent -- a test
+    # tripping over the documentation of the rule it is enforcing.
+    tree = ast.parse(pathlib.Path(module.__file__).read_text())
+    imported: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported.update(alias.name.split(".")[0] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+            imported.add(node.module.split(".")[0])
+    for banned in ("pyarrow", "pandas", "datasets", "torch", "numpy"):
+        assert banned not in imported, f"{banned} must not be imported by the corpus loader"
