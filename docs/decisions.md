@@ -590,6 +590,62 @@ evidence about the ranking there.
 
 The risk is retired as a blocker and stays open as a measurement.
 
+### Neither calibrator wins, so the run picks per primitive
+
+**Decision.** `trigon train` fits *both* a temperature and an isotonic map for
+each primitive, scores both on the held-out half of the calibration split, and
+applies whichever demonstrably lowers ECE there — or neither.
+
+**Because neither dominates, and not by a little.** Scored against heads whose
+true calibration is known (`scripts/calibrator_choice.py`), worst-case ECE on
+4,000 unseen answers:
+
+| Head | Calibration answers | None | Temperature | Isotonic |
+| --- | ---: | ---: | ---: | ---: |
+| already calibrated | 1,000 | **0.0201** | 0.0201 | 0.0461 |
+| already calibrated | 4,000 | **0.0182** | 0.0182 | 0.0298 |
+| clearly overconfident | 1,000 | 0.2178 | **0.0452** | 0.0457 |
+| clearly overconfident | 4,000 | 0.2135 | **0.0247** | 0.0294 |
+| tilted | 1,000 | 0.0581 | 0.0581 | **0.0483** |
+| tilted | 4,000 | 0.0607 | 0.0607 | **0.0286** |
+| tilted hard | 1,000 | 0.1186 | 0.1235 | **0.0350** |
+| tilted hard | 4,000 | 0.1232 | 0.1232 | **0.0227** |
+
+Three regimes, three different right answers:
+
+**Where the head is already calibrated, do nothing.** Isotonic is the *worst*
+option by a factor of 1.6 even at 4,000 answers, because a free-form monotone
+map fitted to noise is noise. Temperature ties with doing nothing because the
+accept rule correctly declines it.
+
+**Where the head is uniformly overconfident, scale it.** A temperature takes
+0.2135 to 0.0247. Isotonic gets there too but slightly worse, and with far
+more machinery — one number beats a step function when one number is the
+shape of the problem.
+
+**Where the head is tilted, only isotonic helps, and it helps enormously.** At
+4,000 answers on the harder tilt it scores 0.0227 against 0.1232 for both
+alternatives — five times better. No temperature can do this; the whole point
+is that the correction has opposite signs at the two ends.
+
+That last row is not an abstraction. Seed 1 of the 8,000-case sweep has a
+Choice head at ECE 0.0879 that did not move under four different rules about
+whether to apply a temperature, because it is tilted and no temperature was
+ever going to help it.
+
+**Two honest limits.** Isotonic needs data: below 400 answers it is memorising
+(with *k* points it can place *k* steps) and `IsotonicCalibrator.fit` refuses
+rather than returning a map that reports excellent calibration on the split it
+memorised. And at 400 it is still worse than doing nothing on three of the
+four shapes — the selection, not the calibrator, is what makes it safe to
+have.
+
+**What would change our mind.** A head whose miscalibration is monotone in
+neither direction — isotonic is monotone by construction, and a genuinely
+non-monotone confidence map would need something else again. Nothing in the
+suite produces one yet, and if something does, the selection already has the
+shape to take a third candidate.
+
 ### A temperature is a proposal, not a result
 
 **Decision.** Each primitive's fitted temperature is checked on a slice of the
