@@ -82,6 +82,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
     except ModuleNotFoundError:
         raise SystemExit("serving needs the 'server' extra: pip install 'trigon[server]'") from None
     from .server.app import build_app
+    from .server.compat import build_compat_app
     from .server.config import ServerConfig
 
     config = ServerConfig.from_env()
@@ -94,7 +95,12 @@ def cmd_serve(args: argparse.Namespace) -> int:
             "weights; /healthz will report trained=false",
             file=sys.stderr,
         )
-    uvicorn.run(build_app(config), host=args.host, port=args.port)
+    # `--compat` puts their path at the root, which is the whole point: a
+    # caller migrating changes a base URL and nothing else. The native gateway
+    # serves the same thing under `/compat`, so this flag is for the migration
+    # rather than for the capability.
+    app = build_compat_app(config) if args.compat else build_app(config)
+    uvicorn.run(app, host=args.host, port=args.port)
     return 0
 
 
@@ -942,6 +948,11 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--weights", default=None, help="a checkpoint written by 'trigon train'")
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8000)
+    serve.add_argument(
+        "--compat",
+        action="store_true",
+        help="serve the incumbent's request and response shapes at the root path",
+    )
     serve.set_defaults(func=cmd_serve)
 
     spec = sub.add_parser("spec", help="print the OpenAPI spec")

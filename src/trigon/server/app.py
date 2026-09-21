@@ -153,6 +153,14 @@ def build_app(config: ServerConfig | None = None, router: TieredRouter | None = 
             },
         }
 
+    # Their shapes, on their path, under a prefix -- so one process serves both
+    # and `tests/test_compat.py` can assert the two return the same numbers.
+    # A caller actually migrating points at `build_compat_app`, whose root is
+    # their base URL; see docs/compat.md.
+    from .compat import compat_router
+
+    app.include_router(compat_router(router), prefix="/compat")
+
     return app
 
 

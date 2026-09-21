@@ -268,6 +268,27 @@ class TrigonClient:
         self.timeout = timeout
         self.headers = dict(headers or {})
 
+    def systemone(
+        self,
+        state,
+        questions: dict[str, dict],
+        *,
+        model: str | None = None,
+        options: dict | None = None,
+    ) -> Response:
+        """The incumbent's request and response shapes, answered by this model
+
+        ``state`` is text, a JSON-shaped mapping, or a list of documents.
+        Every question is answered in the same forward pass, and none can
+        influence another.
+        """
+        body: dict = {"state": state, "questions": questions}
+        if model is not None:
+            body["model"] = model
+        if options:
+            body["options"] = options
+        return Response.from_dict(self._call("POST", "/compat/v1/systemone", body))
+
     def healthz(self) -> dict:
         """Liveness and calibration status"""
         return self._call("GET", "/healthz")

@@ -731,6 +731,145 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/compat/v1/systemone": {
+      "post": {
+        "operationId": "systemone_compat_v1_systemone_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "model": {
+                    "description": "Accepted; the response names what ran.",
+                    "type": "string"
+                  },
+                  "questions": {
+                    "additionalProperties": {
+                      "properties": {
+                        "criteria": {
+                          "description": "choice: a map of option name to description, in answer order. score: an ordered array of level descriptions, index-numbered. noul: an optional object with 'true' and/or 'false'."
+                        },
+                        "instructions": {
+                          "description": "string, object or array"
+                        },
+                        "type": {
+                          "enum": [
+                            "noul",
+                            "choice",
+                            "score"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "instructions"
+                      ],
+                      "type": "object"
+                    },
+                    "minProperties": 1,
+                    "type": "object"
+                  },
+                  "state": {
+                    "description": "What the questions are about."
+                  }
+                },
+                "required": [
+                  "state",
+                  "model",
+                  "questions"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "answers": {
+                      "additionalProperties": {
+                        "properties": {
+                          "choice": {
+                            "description": "choice only.",
+                            "type": "string"
+                          },
+                          "confidence": {
+                            "description": "choice and score only.",
+                            "type": "number"
+                          },
+                          "legend": {
+                            "description": "score only: level -> criteria.",
+                            "type": "object"
+                          },
+                          "noul": {
+                            "description": "noul only. No confidence field.",
+                            "type": "number"
+                          },
+                          "probabilities": {
+                            "description": "choice and score only.",
+                            "type": "object"
+                          },
+                          "score": {
+                            "description": "score only: the probability-weighted mean of the levels.",
+                            "type": "number"
+                          },
+                          "type": {
+                            "enum": [
+                              "noul",
+                              "choice",
+                              "score"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "object"
+                    },
+                    "model": {
+                      "description": "The build that answered.",
+                      "type": "string"
+                    },
+                    "usage": {
+                      "properties": {
+                        "input_tokens": {
+                          "type": "integer"
+                        },
+                        "output_tokens": {
+                          "description": "Always 0: prefill-only, there is no decode half.",
+                          "type": "integer"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "model",
+                    "answers",
+                    "usage"
+                  ],
+                  "title": "Response Systemone Compat V1 Systemone Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "One typed answer per question."
+          },
+          "422": {
+            "description": "A request their contract would reject."
+          }
+        },
+        "summary": "The incumbent's request and response shapes, answered by this model",
+        "tags": [
+          "compat"
+        ]
+      }
+    },
     "/healthz": {
       "get": {
         "operationId": "healthz_healthz_get",
