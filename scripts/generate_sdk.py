@@ -263,6 +263,15 @@ def render(spec: dict) -> str:
     ]
 
     for path, operations in spec["paths"].items():
+        if path.startswith(COMPAT_PREFIX):
+            # The compatibility routes are in the spec because they exist, and
+            # they are deliberately not in our SDK. The adapter's entire point
+            # is that a caller migrating keeps the client they already have:
+            # generating a second method here for *their* request shape is
+            # exactly backwards, and since it collides on the operation name it
+            # silently redefined `systemone()` to call the compat endpoint with
+            # our arguments. Their shapes belong to their SDK.
+            continue
         for method, operation in operations.items():
             name = _method_name(path)
             summary = operation.get("summary") or operation.get("description") or path
@@ -544,6 +553,11 @@ def render_typescript(spec: dict) -> str:
         "",
     ]
     return "\n".join(out)
+
+
+# Kept here rather than imported from the server package: this script reads a
+# checked-in spec and must not need the gateway importable to run.
+COMPAT_PREFIX = "/compat/"
 
 
 def _method_name(path: str) -> str:

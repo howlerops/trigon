@@ -238,9 +238,7 @@ def test_the_cache_costs_exact_independence_and_that_is_why_it_is_opt_in():
     )
 
     def spread(cache_prefixes: bool) -> float:
-        client = TestClient(
-            build_app(ServerConfig(backend="torch", cache_prefixes=cache_prefixes))
-        )
+        client = TestClient(build_app(ServerConfig(backend="torch", cache_prefixes=cache_prefixes)))
         alone = client.post("/v1/systemone", json=REQUEST).json()["answers"]["plan"]
         among = client.post("/v1/systemone", json=crowded).json()["answers"]["plan"]
         return max(

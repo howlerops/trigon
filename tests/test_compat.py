@@ -338,9 +338,10 @@ def test_our_request_translates_out_to_their_shape():
     out = to_compat_request(native)
     assert out["model"] == "jev-latest"
     assert out["questions"]["bug_severity"]["type"] == "score"
-    assert out["questions"]["bug_severity"]["criteria"] == SCORE_REQUEST["questions"][
-        "bug_severity"
-    ]["criteria"]
+    assert (
+        out["questions"]["bug_severity"]["criteria"]
+        == SCORE_REQUEST["questions"]["bug_severity"]["criteria"]
+    )
 
 
 def test_an_option_without_a_description_sends_its_name_not_an_empty_string():
@@ -352,9 +353,7 @@ def test_an_option_without_a_description_sends_its_name_not_an_empty_string():
     request = SystemOneRequest(
         state="x",
         questions={
-            "q": ChoiceQuestion(
-                instructions="Pick.", options=[{"name": "alpha"}, {"name": "beta"}]
-            )
+            "q": ChoiceQuestion(instructions="Pick.", options=[{"name": "alpha"}, {"name": "beta"}])
         },
     )
     assert to_compat_request(request)["questions"]["q"]["criteria"] == {

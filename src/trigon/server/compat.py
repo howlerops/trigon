@@ -478,9 +478,7 @@ def compat_answer_to_native(answer: dict[str, Any], question: Any) -> dict[str, 
                 for index, value in probabilities.items()
                 if str(index).isdigit() and int(index) < len(names)
             }
-        selected = (
-            max(probabilities, key=lambda k: probabilities[k]) if probabilities else None
-        )
+        selected = max(probabilities, key=lambda k: probabilities[k]) if probabilities else None
         return {
             "type": "score",
             "score": answer.get("score"),

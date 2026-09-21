@@ -1,9 +1,18 @@
 name: CI
 
+# Every branch, not just `main`. This said `branches: [main]` and this
+# repository has no `main` -- its default branch is the one the work is on --
+# so the workflow had never run once. A CI configuration that cannot fire is
+# indistinguishable from a green one, which is the worse half of that.
 on:
   push:
-    branches: [main]
   pull_request:
+
+# A pull request from a branch in this repository would otherwise run the
+# matrix twice, once for the push and once for the PR.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
