@@ -217,8 +217,12 @@ def test_the_three_training_splits_are_three_different_datasets():
         assert len(shared) < min(len(left), len(right)) // 2
 
     # Offsets, not derived seeds, so `--seed 0` and `--seed 1` cannot collide:
-    # no two runs within 1,000 seeds of each other share a split.
-    assert len(set(SPLIT_SEED_OFFSETS.values())) == 3
+    # no two runs within 1,000 seeds of each other share a split. Two offsets
+    # were 500 and 900 apart, which made that false for `--seed 500` -- a
+    # conformal split of the run at seed 0 was the training split of the run
+    # at seed 500, and a conformal threshold fitted on another run's training
+    # data reports a coverage number that is simply too good.
+    assert len(set(SPLIT_SEED_OFFSETS.values())) == len(SPLIT_SEED_OFFSETS)
     assert (
         min(
             abs(a - b)

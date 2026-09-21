@@ -144,12 +144,25 @@ def cmd_eval(args: argparse.Namespace) -> int:
     return 0 if passed else 1
 
 
-#: Seed offsets for the three splits a training run needs. Offsets rather than
-#: derived seeds so that `--seed 0` and `--seed 1` cannot collide: a run's
-#: calibration split is 2000 away from its own training split and 1000 away
-#: from its own eval split, and no two runs within 1000 seeds of each other
-#: share one.
-SPLIT_SEED_OFFSETS = {"train": 0, "eval": 1_000, "calibration": 2_000}
+#: Every split any command derives from the synthetic generator, in one place.
+#:
+#: Offsets rather than derived seeds, spaced 1,000 apart, so that no two runs
+#: within 1,000 seeds of each other share a split. Two of these were 500 and
+#: 900 apart, which made that guarantee false for `--seed 500`: a conformal
+#: split of the run at seed 0 was the *training* split of the run at seed 500.
+#: Nothing had gone wrong yet, and nothing would have announced it when it
+#: did -- a conformal threshold fitted on another run's training data reports
+#: a coverage number that is simply too good.
+#:
+#: `train` is 0 so that `--seed N` still means "the model initialised and
+#: trained at N", which is what every committed report's header says.
+SPLIT_SEED_OFFSETS = {
+    "train": 0,
+    "eval": 1_000,
+    "calibration": 2_000,
+    "conformal_fit": 3_000,
+    "conformal_test": 4_000,
+}
 
 
 def training_splits(
@@ -427,8 +440,18 @@ def cmd_fit(args: argparse.Namespace) -> int:
     from .evals import run_cases, synthetic_outcome_cases
 
     engine = _engine(args.backend, args.domain, weights=args.weights)
+    # The same seed offset `trigon train` reserves for calibration, so that
+    # `trigon fit --weights` on a checkpoint from `trigon train --seed N` fits
+    # on data that model has never seen. It used `args.seed` unshifted, which
+    # is exactly the training split -- see `docs/decisions.md`, "The
+    # temperature was fitted on the split the model trained on". With a
+    # `--weights` checkpoint in play this command is the user-facing half of
+    # that same defect.
     outcomes = run_cases(
-        engine, synthetic_outcome_cases(n=args.n, seed=args.seed, noise=args.noise)
+        engine,
+        synthetic_outcome_cases(
+            n=args.n, seed=args.seed + SPLIT_SEED_OFFSETS["calibration"], noise=args.noise
+        ),
     )
     scaler = TemperatureScaler()
     by_primitive: dict[str, list[tuple[list[float], int]]] = {}
@@ -459,8 +482,12 @@ def cmd_fit(args: argparse.Namespace) -> int:
         # Fitted on a split the temperatures never saw, and reported on a
         # third: a coverage number measured where the threshold was fitted is
         # not a coverage number.
-        calib = synthetic_outcome_cases(n=args.n, seed=args.seed + 500, noise=args.noise)
-        test = synthetic_outcome_cases(n=args.n, seed=args.seed + 900, noise=args.noise)
+        calib = synthetic_outcome_cases(
+            n=args.n, seed=args.seed + SPLIT_SEED_OFFSETS["conformal_fit"], noise=args.noise
+        )
+        test = synthetic_outcome_cases(
+            n=args.n, seed=args.seed + SPLIT_SEED_OFFSETS["conformal_test"], noise=args.noise
+        )
         rows = _choice_rows(engine, calib)
         held = _choice_rows(engine, test)
         predictor = fit_conformal(
