@@ -39,11 +39,13 @@ def create_router(config: ServerConfig | None = None) -> TieredRouter:
     """Assemble the serving stack described by ``config``."""
     config = config or ServerConfig.from_env()
     scaler = config.load_scaler()
+    isotonic = config.load_isotonic()
     conformal = config.load_conformal()
 
     workhorse = Engine(
         _backend(config.backend, config.weights),
         scaler=scaler,
+        isotonic=isotonic,
         conformal=conformal,
         config=EngineConfig(domain=config.domain, tier="workhorse"),
     )
@@ -51,6 +53,7 @@ def create_router(config: ServerConfig | None = None) -> TieredRouter:
         Engine(
             _backend(config.premium_backend, config.premium_weights),
             scaler=scaler,
+            isotonic=isotonic,
             conformal=conformal,
             config=EngineConfig(domain=config.domain, tier="premium"),
         )

@@ -41,7 +41,26 @@ def _engine(
         raise SystemExit(f"unknown backend {backend!r}; try 'lexical' or 'torch'")
 
     scaler = TemperatureScaler.load(temperature_path) if temperature_path else None
-    return Engine(impl, compiler=compiler, scaler=scaler, config=EngineConfig(domain=domain))
+    # The isotonic map is written beside the temperatures by `trigon train`,
+    # so it is found beside them here. Loading one without the other would
+    # serve any isotonic-calibrated primitive raw -- the same shape of failure
+    # as compiling with one tokenizer and running tensors built by another.
+    isotonic = None
+    if temperature_path:
+        sibling = pathlib.Path(
+            str(temperature_path).replace("-temperatures.json", "-isotonic.json")
+        )
+        if sibling != pathlib.Path(temperature_path) and sibling.exists():
+            from .calibration.isotonic import IsotonicCalibrator
+
+            isotonic = IsotonicCalibrator.load(sibling)
+    return Engine(
+        impl,
+        compiler=compiler,
+        scaler=scaler,
+        isotonic=isotonic,
+        config=EngineConfig(domain=domain),
+    )
 
 
 def cmd_ask(args: argparse.Namespace) -> int:
@@ -272,8 +291,8 @@ def cmd_train(args: argparse.Namespace) -> int:
     # reporting on the same data is how a calibration number stops meaning
     # anything, and fitting on the training split is how it stops being a
     # calibration.
-    scaler = _fit_temperatures(engine, calibration_cases)
-    calibrated = Engine(backend, compiler=compiler, scaler=scaler)
+    scaler, isotonic = _fit_calibration(engine, calibration_cases)
+    calibrated = Engine(backend, compiler=compiler, scaler=scaler, isotonic=isotonic)
     after, slices = run_calibration_suite(
         calibrated,
         eval_cases,
@@ -290,7 +309,7 @@ def cmd_train(args: argparse.Namespace) -> int:
     if not args.no_quantization_gate:
         twin = backend.quantized()
         quantized, _ = run_calibration_suite(
-            Engine(twin, compiler=compiler, scaler=scaler),
+            Engine(twin, compiler=compiler, scaler=scaler, isotonic=isotonic),
             eval_cases,
             suite="calibration/int8",
             floor_trials=args.floor_trials,
@@ -320,6 +339,11 @@ def cmd_train(args: argparse.Namespace) -> int:
         temperatures = pathlib.Path(f"{stem}-temperatures.json")
         training = pathlib.Path(f"{stem}-training.json")
         scaler.save(temperatures)
+        # Beside the temperatures, not inside them: they are different objects
+        # with different fit requirements, and a reader checking whether a
+        # primitive was calibrated at all should see which tool was used.
+        if isotonic.knots:
+            isotonic.save(pathlib.Path(f"{stem}-isotonic.json"))
         training.write_text(_json.dumps(report.to_dict(), indent=2))
         written = [out.name, out.with_suffix(".json").name, temperatures.name, training.name]
         if args.save_model:
@@ -532,43 +556,50 @@ def _help_is_real(unscaled, rescaled, labels, *, resamples: int = 200, seed: int
     return counted > 0 and better >= ACCEPT_CONFIDENCE * counted
 
 
-def _fit_temperatures(engine, cases):
-    """Fit one temperature per primitive, and keep it only if it helps.
+def _fit_calibration(engine, cases):
+    """Fit both calibrators per primitive and apply whichever demonstrably helps.
 
-    **A temperature is a proposal, not a result.** It is fitted by minimising
-    NLL, and NLL is not ECE: the scalar that best explains the labels can be
-    the scalar that worsens the calibration the gates measure. Temperature
-    scaling is also a one-parameter family, so a head whose miscalibration is
-    not a uniform sharpening or flattening cannot be fixed by any member of
-    it -- and the fit will still return its best member rather than decline.
+    **A calibrator is a proposal, not a result**, and there are two proposals.
+    A temperature is fitted by minimising NLL, and NLL is not ECE. It is also
+    one-parameter: it sharpens or flattens everywhere at once, so a *tilted*
+    head -- overconfident where it is confident, underconfident where it is
+    not -- has no correct temperature and the fitter returns its best one
+    anyway. An isotonic map fits any monotone shape and handles exactly that
+    case, and overfits a head that was already calibrated.
 
-    That is not hypothetical. On seed 1 of the 8,000-case sweep, scaling took
-    pooled ECE from 0.0431 to 0.0516 and the run failed on that gate. Giving
-    the fit more data made it worse, not better: at 4,000 calibration cases
-    the Noul head's ECE reached 0.1453 against 0.0928 at 1,000, while the fit
-    itself was plainly converging -- the Score head's temperature climbed
-    0.09 -> 0.20 -> 0.41 -> 0.90 and its ECE fell monotonically. A
-    better-estimated temperature made that head worse, which is what "NLL is
-    not ECE" looks like from the outside.
+    Neither wins everywhere, so neither is chosen in advance. Worst-case ECE
+    against heads whose true calibration is known, at 4,000 answers
+    (`scripts/calibrator_choice.py`):
 
-    So each primitive's fit is checked on a slice of the calibration split it
-    was not fitted on, and a temperature that does not improve ECE there is
-    declined -- the primitive serves unscaled, and says so. This is the
-    project's honest-defaults rule applied one level up: a degenerate fit
-    already warns instead of returning a quiet number, and a fit that is
-    well-formed but harmful should not be applied silently either.
+    ====================== ======= ============ =========
+    head                   none    temperature  isotonic
+    ====================== ======= ============ =========
+    already calibrated     0.0182  0.0182       0.0298
+    clearly overconfident  0.2135  0.0247       0.0294
+    tilted                 0.0607  0.0607       0.0286
+    tilted hard            0.1232  0.1232       0.0227
+    ====================== ======= ============ =========
 
-    The check is held out because a temperature always improves the split it
-    was fitted on; scoring it there would accept every fit by construction.
+    So: fit both on half the calibration split, score both on the half neither
+    was fitted on, and apply the one that lowers ECE by more than sampling
+    noise -- or neither. The check is held out because any calibrator improves
+    the split it was fitted on, and scoring it there would accept every fit by
+    construction.
+
+    Which way the burden of proof points is itself measured rather than
+    assumed; see `docs/decisions.md`, "A temperature is a proposal, not a
+    result".
     """
     import math
     import warnings
 
+    from .calibration.isotonic import MIN_ISOTONIC_SAMPLES, IsotonicCalibrator
     from .calibration.metrics import report as calibration_report
     from .calibration.temperature import CalibrationWarning, TemperatureScaler
     from .evals import run_cases
 
     scaler = TemperatureScaler()
+    isotonic = IsotonicCalibrator()
     rows: dict[str, list[tuple[list[float], int]]] = {}
     for outcome in run_cases(engine, cases):
         for question in outcome.questions.values():
@@ -577,54 +608,73 @@ def _fit_temperatures(engine, cases):
             logits = [math.log(max(p, 1e-12)) for p in question.probabilities]
             rows.setdefault(question.primitive, []).append((logits, question.expected.hard_label))
 
-    declined: dict[str, tuple[float, float, float]] = {}
+    chosen: dict[str, str] = {}
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", CalibrationWarning)
         for primitive, data in sorted(rows.items()):
             cut = max(1, len(data) // 2)
             fit_rows, check_rows = data[:cut], data[cut:]
             if not check_rows:
-                # Too little data to check on. Decline rather than apply an
-                # unverified scalar: the failure mode being prevented is
-                # exactly a temperature nobody checked.
-                declined[primitive] = (float("nan"), float("nan"), float("nan"))
+                # Nothing to check on. Serve unscaled rather than apply an
+                # unverified calibrator: the failure being prevented is
+                # precisely a fit nobody checked.
+                chosen[primitive] = "none -- too few answers to check a fit on"
                 continue
 
+            labels = [y for _, y in check_rows]
+            unscaled = [_scaled(x, 1.0) for x, _ in check_rows]
+            baseline = calibration_report(unscaled, labels, simulate_floor=False).ece
+
+            # Candidate 1: a temperature.
             if primitive == "noul":
                 value = scaler.fit_binary(
                     [r[0][1] - r[0][0] for r in fit_rows], [y for _, y in fit_rows]
                 )
             else:
                 value = scaler.fit(primitive, [x for x, _ in fit_rows], [y for _, y in fit_rows])
+            warmed = [_scaled(x, value) for x, _ in check_rows]
+            warm_ece = calibration_report(warmed, labels, simulate_floor=False).ece
+            warm_ok = _help_is_real(unscaled, warmed, labels)
 
-            labels = [y for _, y in check_rows]
-            unscaled = [_scaled(x, 1.0) for x, _ in check_rows]
-            rescaled = [_scaled(x, value) for x, _ in check_rows]
-            before = calibration_report(unscaled, labels, simulate_floor=False).ece
-            after = calibration_report(rescaled, labels, simulate_floor=False).ece
-            if not _help_is_real(unscaled, rescaled, labels):
-                declined[primitive] = (value, before, after)
-                # Remove the count too: `fitted_on` is what a reader checks to
-                # see whether a primitive was calibrated at all, and leaving it
-                # behind would claim a fit that is not being applied.
+            # Candidate 2: an isotonic map, where there is enough data for one.
+            # `fit` refuses below its minimum rather than memorising the split.
+            iso_ok, iso_ece, mapped = False, float("nan"), None
+            if len(fit_rows) >= MIN_ISOTONIC_SAMPLES:
+                candidate = IsotonicCalibrator()
+                fit_probs = [_scaled(x, 1.0) for x, _ in fit_rows]
+                candidate.fit(
+                    primitive,
+                    [max(p) for p in fit_probs],
+                    [
+                        int(max(range(len(p)), key=lambda i: p[i]) == y)
+                        for p, (_, y) in zip(fit_probs, fit_rows, strict=True)
+                    ],
+                )
+                mapped = [candidate.apply(primitive, p) for p in unscaled]
+                iso_ece = calibration_report(mapped, labels, simulate_floor=False).ece
+                iso_ok = _help_is_real(unscaled, mapped, labels)
+
+            # Prefer whichever helps more, among those that demonstrably help.
+            if iso_ok and (not warm_ok or iso_ece < warm_ece):
+                isotonic.knots[primitive] = candidate.knots[primitive]
+                isotonic.fitted_on[primitive] = candidate.fitted_on[primitive]
                 scaler.primitive.pop(primitive, None)
                 scaler.fitted_on.pop(primitive, None)
+                chosen[primitive] = f"isotonic ({baseline:.4f} -> {iso_ece:.4f})"
+            elif warm_ok:
+                chosen[primitive] = f"temperature T={value:.4f} ({baseline:.4f} -> {warm_ece:.4f})"
+            else:
+                # `fitted_on` is what a reader checks to see whether a
+                # primitive was calibrated at all, so a declined fit must not
+                # leave a count behind claiming it was.
+                scaler.primitive.pop(primitive, None)
+                scaler.fitted_on.pop(primitive, None)
+                best = warm_ece if math.isnan(iso_ece) else min(warm_ece, iso_ece)
+                chosen[primitive] = f"none -- unscaled is {baseline:.4f}, the best fit {best:.4f}"
 
-    print(f"  temperatures: {scaler.primitive}", file=sys.stderr)
-    for primitive, (value, before, after) in sorted(declined.items()):
-        if math.isnan(value):
-            print(
-                f"  {primitive}: declined -- too few calibration answers to check the fit "
-                f"on data it was not fitted on; serving unscaled",
-                file=sys.stderr,
-            )
-        else:
-            print(
-                f"  {primitive}: declined T={value:.4f} -- it raises held-out ECE from "
-                f"{before:.4f} to {after:.4f}; serving unscaled",
-                file=sys.stderr,
-            )
-    return scaler
+    for primitive, verdict in sorted(chosen.items()):
+        print(f"  {primitive}: {verdict}", file=sys.stderr)
+    return scaler, isotonic
 
 
 def cmd_fit(args: argparse.Namespace) -> int:

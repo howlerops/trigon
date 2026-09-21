@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 
 from .backends.base import Backend, QuestionOutput, estimator_of, validate_output
 from .calibration.conformal import ConformalPredictor
+from .calibration.isotonic import IsotonicCalibrator
 from .calibration.temperature import TemperatureScaler
 from .confidence import ConfidenceMethod, choice_confidence, score_confidence
 from .limits import DEFAULT_BUDGET, RETRIEVAL_SHORTLIST_SIZE, Budget
@@ -70,6 +71,7 @@ class Engine:
         *,
         compiler: SchemaCompiler | None = None,
         scaler: TemperatureScaler | None = None,
+        isotonic: IsotonicCalibrator | None = None,
         conformal: dict[str, ConformalPredictor] | None = None,
         shortlister: Shortlister | None = None,
         config: EngineConfig | None = None,
@@ -83,6 +85,18 @@ class Engine:
             budget=self.config.budget, estimator=estimator_of(backend)
         )
         self.scaler = scaler or TemperatureScaler()
+        # Two calibrators, selected per primitive at fit time, because neither
+        # wins everywhere: a temperature takes a uniformly overconfident head
+        # from ECE 0.2135 to 0.0247 and an isotonic map cannot beat that, while
+        # a *tilted* head -- overconfident where it is confident, under where
+        # it is not -- has no correct temperature at all and isotonic scores
+        # 0.0227 against 0.1232. `docs/decisions.md`, "Neither calibrator wins".
+        #
+        # Both are applied when both are present, temperature first: the
+        # temperature reshapes the logits and the isotonic map then corrects
+        # the top-1 confidence, which is the order they were fitted in. In
+        # practice `trigon train` stores at most one per primitive.
+        self.isotonic = isotonic or IsotonicCalibrator()
         self.conformal = conformal or {}
         self.shortlister = shortlister or LexicalShortlister()
 
@@ -169,13 +183,21 @@ class Engine:
 
         if isinstance(question, NoulQuestion):
             logit = output.logits[0]
+            # A Noul is one probability, so the isotonic map is applied to it
+            # directly rather than through a distribution. `apply` would see a
+            # two-element vector and rescale the complement, which is the same
+            # arithmetic spelled less clearly.
             return NoulAnswer(
-                probability=self.scaler.apply_binary(logit, domain),
+                probability=self.isotonic.confidence(
+                    "noul", self.scaler.apply_binary(logit, domain)
+                ),
                 raw_probability=_sigmoid_raw(logit) if opts.include_raw_probabilities else None,
             )
 
         primitive = "choice" if isinstance(question, ChoiceQuestion) else "score"
-        scaled = self.scaler.apply(list(output.logits), primitive, domain)
+        scaled = self.isotonic.apply(
+            primitive, self.scaler.apply(list(output.logits), primitive, domain)
+        )
         names = question.names
         probs = _expand(scaled, shortlist, len(names))
         raw = (

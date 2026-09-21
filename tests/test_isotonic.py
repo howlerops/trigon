@@ -146,3 +146,81 @@ def test_it_round_trips_through_a_file(tmp_path):
     assert reloaded.fitted_on == {"choice": 1000}
     for value in (0.0, 0.3, 0.61, 0.9, 1.0):
         assert reloaded.confidence("choice", value) == calibrator.confidence("choice", value)
+
+
+def test_the_gateway_serves_the_isotonic_map_it_was_given(tmp_path):
+    """Fitted but not served is this repository's signature failure.
+
+    It has happened twice: a torch backend that compiled with one tokenizer
+    and ran tensors built by another, and a seed sweep reading a report its own
+    command never wrote. Both were green in every unit test. `trigon train`
+    now picks a calibrator per primitive and writes whichever it chose, so a
+    deployment handed only the temperatures would serve any isotonic-calibrated
+    primitive raw — and nothing else in the suite would notice.
+    """
+    from fastapi.testclient import TestClient
+
+    from trigon.server.app import build_app
+    from trigon.server.config import ServerConfig
+
+    # A map that drives every confidence to a constant, so its effect on the
+    # served numbers is unmistakable rather than a matter of decimal places.
+    calibrator = IsotonicCalibrator()
+    calibrator.knots["choice"] = [(1.0, 0.42)]
+    calibrator.fitted_on["choice"] = 1000
+    path = tmp_path / "isotonic.json"
+    calibrator.save(path)
+
+    # A state that names one option, so the backend has a clear winner. With
+    # a three-way tie the "decision is unchanged" assertion below would be
+    # testing tie-breaking, which is arbitrary in both paths.
+    request = {
+        "state": "the customer was billed twice for the same subscription",
+        "questions": {
+            "intent": {
+                "type": "choice",
+                "instructions": "Route this ticket.",
+                "options": [{"name": n} for n in ("billed", "shipping", "account")],
+            }
+        },
+    }
+
+    plain = TestClient(build_app(ServerConfig())).post("/v1/systemone", json=request).json()
+    mapped_app = build_app(ServerConfig(isotonic_path=str(path)))
+    mapped = TestClient(mapped_app).post("/v1/systemone", json=request).json()
+
+    top = mapped["answers"]["intent"]["selected"]
+    assert mapped["answers"]["intent"]["probabilities"][top] == pytest.approx(0.42, abs=1e-6)
+    assert sum(mapped["answers"]["intent"]["probabilities"].values()) == pytest.approx(1.0)
+    # The decision is unchanged: this calibrates the confidence, not the answer.
+    assert top == plain["answers"]["intent"]["selected"]
+    assert plain["answers"]["intent"]["probabilities"][top] != pytest.approx(0.42, abs=1e-6)
+
+    # And a deployment carrying only an isotonic map still reports itself
+    # calibrated, because it is — `is_calibrated` read the temperature path
+    # alone, which would have called this deployment uncalibrated.
+    assert TestClient(mapped_app).get("/healthz").json()["calibrated"] is True
+
+
+def test_an_exact_tie_is_broken_by_position_and_that_is_visible():
+    """On a tie, `apply` promotes the first option — and it has to promote one.
+
+    Found by a test that asserted the served decision is unchanged and failed
+    on a three-way tie: the lexical floor returns 0.3333… for every option, and
+    the calibrated and uncalibrated paths resolved that differently. Neither is
+    wrong, because on an exact tie there is no decision to preserve. It is
+    pinned here so the next person meets it as a documented property rather
+    than as a mystery in an unrelated test.
+    """
+    calibrator = IsotonicCalibrator()
+    calibrator.knots["choice"] = [(1.0, 0.5)]
+
+    mapped = calibrator.apply("choice", [0.25, 0.25, 0.25, 0.25])
+    assert mapped[0] == pytest.approx(0.5)
+    assert sum(mapped) == pytest.approx(1.0)
+    assert mapped[1] == mapped[2] == mapped[3]
+
+    # A clear winner is never displaced, which is the property that matters.
+    for leader in ([0.4, 0.35, 0.25], [0.9, 0.05, 0.05], [0.34, 0.33, 0.33]):
+        after = calibrator.apply("choice", leader)
+        assert after.index(max(after)) == leader.index(max(leader))

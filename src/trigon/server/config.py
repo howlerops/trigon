@@ -10,6 +10,7 @@ import os
 from dataclasses import dataclass
 
 from ..calibration.conformal import ConformalPredictor
+from ..calibration.isotonic import IsotonicCalibrator
 from ..calibration.temperature import TemperatureScaler
 
 __all__ = ["ServerConfig"]
@@ -25,6 +26,10 @@ class ServerConfig:
     domain: str | None = None
     # Paths to fitted artifacts. Absent means "serve uncalibrated and say so".
     temperature_path: str | None = None
+    # `trigon train` picks a calibrator per primitive and writes whichever
+    # it chose. A deployment given only the temperatures would silently
+    # serve any isotonic-calibrated primitive raw.
+    isotonic_path: str | None = None
     conformal_dir: str | None = None
     premium_backend: str | None = None
     premium_weights: str | None = None
@@ -38,6 +43,7 @@ class ServerConfig:
             weights=source.get("TRIGON_WEIGHTS") or None,
             domain=source.get("TRIGON_DOMAIN") or None,
             temperature_path=source.get("TRIGON_TEMPERATURE_PATH") or None,
+            isotonic_path=source.get("TRIGON_ISOTONIC_PATH") or None,
             conformal_dir=source.get("TRIGON_CONFORMAL_DIR") or None,
             premium_backend=source.get("TRIGON_PREMIUM_BACKEND") or None,
             premium_weights=source.get("TRIGON_PREMIUM_WEIGHTS") or None,
@@ -48,6 +54,11 @@ class ServerConfig:
         if not self.temperature_path:
             return TemperatureScaler()
         return TemperatureScaler.load(self.temperature_path)
+
+    def load_isotonic(self) -> IsotonicCalibrator:
+        if not self.isotonic_path:
+            return IsotonicCalibrator()
+        return IsotonicCalibrator.load(self.isotonic_path)
 
     def load_conformal(self) -> dict[str, ConformalPredictor]:
         if not self.conformal_dir:
@@ -62,7 +73,7 @@ class ServerConfig:
     @property
     def is_calibrated(self) -> bool:
         """Surfaced on /healthz: serving uncalibrated is allowed, hiding it is not."""
-        return bool(self.temperature_path)
+        return bool(self.temperature_path or self.isotonic_path)
 
     @property
     def is_trained(self) -> bool:
