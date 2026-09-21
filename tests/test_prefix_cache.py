@@ -206,20 +206,30 @@ def test_the_cache_is_bounded():
     assert len(backend._prefix_cache) <= 64
 
 
-def test_the_cache_costs_exact_independence_and_that_is_why_it_is_opt_in():
+def test_the_cache_adds_error_on_top_of_whatever_the_hardware_already_does():
     """The trade, measured, on the path a caller actually uses.
 
-    Adding questions must not move the answers to the others. Without the
-    cache that holds to exact equality — it is a property of the block mask
-    and `tests/test_independence.py` is its specification. With the cache the
-    saving requires attending with only the non-schema positions as queries,
-    which changes the GEMM shape, so float32 rounds differently and the
-    guarantee becomes a tolerance.
+    Adding questions must not move the answers to the others. That is a
+    property of the block mask: there is no path from one question's tokens to
+    another's, and `tests/test_independence.py` asserts the consequence to
+    exact equality on the direct engine path.
 
-    4.6e-08 is far below anything a caller could act on. It is still the
-    difference between "this cannot happen" and "this is small", and a promise
-    stated as the first should not quietly become the second to save compute.
-    So the gateway defaults it off and an operator opts in.
+    **Exact equality on the *served* path is not portable, and this test used
+    to claim it was.** It asserted `spread(False) == 0.0`, which holds on every
+    sequence length tried on the development machine — 1 to 40 extra questions,
+    all exactly zero — and fails on GitHub's runners at 2.4e-08. Same code,
+    same mask, different CPU: sequence length changes which GEMM kernel torch
+    selects, and a different reduction order rounds differently. The structural
+    claim is untouched. The numerical restatement of it was stronger than the
+    evidence, and CI is where that showed up, because CI was the second machine
+    this had ever run on.
+
+    So what is asserted here is what is true anywhere: the cache's error is
+    *additional*, both are far below anything a caller could act on, and the
+    honest reason to default the cache off is that it adds error on every
+    machine while its wall-clock saving is still unmeasured — not that it
+    turns an exact answer into an approximate one, which on some hardware it
+    does not.
     """
     from fastapi.testclient import TestClient
 
@@ -246,8 +256,16 @@ def test_the_cache_costs_exact_independence_and_that_is_why_it_is_opt_in():
             for k in alone["probabilities"]
         )
 
-    assert spread(False) == 0.0, "independence without the cache is exact, not approximate"
-    assert 0.0 < spread(True) < 1e-6, "with the cache it is a tolerance, and a tiny one"
+    without, with_cache = spread(False), spread(True)
+    # float32 has ~1.2e-07 of relative precision, so anything at or below that
+    # scale is the arithmetic rather than a leak. A real failure of the mask
+    # would move a probability by a visible amount, not by an ulp.
+    assert without < 1e-6, f"without the cache the drift is {without:.3e}, far above rounding"
+    assert 0.0 < with_cache < 1e-6, f"with the cache the drift is {with_cache:.3e}"
+    assert with_cache > without, (
+        "the cache is supposed to cost accuracy, not save it; if it ever stops "
+        "costing any, the reason it is off by default has gone away"
+    )
 
 
 def test_the_gateway_defaults_the_cache_off():

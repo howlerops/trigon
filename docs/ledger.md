@@ -110,7 +110,8 @@ twenty-two runs** — the investigation is closed and the evidence is in
 | Retrieval recall at the shortlist | 1.0000 at 2,048 across every difficulty probed |
 | Quantization ECE delta (int8) | 0.0002 |
 | Conformal coverage | 0.9027 against a 0.90 target, clears its floor |
-| Per-question independence | Exact, to floating-point equality, at 20 extra questions |
+| Per-question independence (direct engine path) | Exact, to floating-point equality, at 20 extra questions |
+| Per-question independence (served path, GitHub's CPUs) | 2.4e-08 — exactness is not portable |
 | Per-question independence *with the KV cache on* | 4.6e-08 — a tolerance, not a guarantee |
 | Schema share of a typical request | 77%; the cache skips 53 of 69 positions |
 | Compat path vs native path | Identical answers through one process, asserted per primitive |
@@ -139,6 +140,7 @@ The most useful section. Each of these was argued for before it was measured.
 | One readout slot carrying two bits is the bottleneck | A slot per level: median −0.0095. The last structural hypothesis, dead. |
 | Stage 4.1 is blocked on the incumbent's wire format | It is published. `decisions.md` had already cited that source. |
 | Stage 2.1 is blocked on data | Banking77 is reachable, green, and was cleared by our own audit. |
+| The served path is exact to floating-point equality | On this machine. On GitHub's it drifts 2.4e-08 with no cache at all. |
 | The distribution corpora need a Parquet reader | HelpSteer2 is gzipped JSONL. Three of four do; it does not. |
 | "ECE ≤ 0.05 per corpus" is a reachable done-condition | Not on a corpus whose test split is below the 5,000-sample floor. |
 
@@ -186,6 +188,14 @@ Errors that flattered the project, found by re-measuring rather than by review:
 - **The migration harness could not reach the incumbent at all**, because it
   sent our body shape to a service that speaks theirs. The artifact the plan
   calls its most persuasive one answered 422 on every request.
+- **"Exact, to floating-point equality" was published on one machine's
+  evidence.** The served path drifts 2.4e-08 on GitHub's runners with the KV
+  cache *off* — sequence length selects a different GEMM kernel and the
+  reduction order changes. The structural claim is untouched; the numerical
+  restatement of it was stronger than the evidence, and it also weakens the
+  stated reason the cache is off by default, which was that the cache turns an
+  exact answer into an approximate one. On that hardware it was already
+  approximate.
 - **The first real-corpus evaluation set was a single intent.** Banking77's
   test split is ordered by label and the loader sliced `[:eval_n]`; the
   marginal predictor scored 1.0000 and `accuracy_over_baseline` read −1.0000.
@@ -230,4 +240,11 @@ what order, and how each step is known to be done.
   for them would put a compiled dependency in the import path of the
   calibration math and the drift tests. They get converted in `scripts/`
   first, or not at all.
+- **The certified configuration does not certify on GitHub's hardware.** Its
+  first CI run reported per-primitive choice ECE 0.1076 (adaptive 0.1447)
+  against a 0.05 limit, where the four certified runs read 0.0084–0.0247 on
+  the same flags. Accuracy was in range, so it is the calibration layer rather
+  than the training. Undiagnosed. The CI job publishes the failure into its
+  summary instead of blocking the build on a difference nobody understands
+  yet; when it is understood it goes back to blocking.
 - **CC BY-SA on a derived model** — counsel opinion requested, unresolved.

@@ -59,6 +59,21 @@ def test_the_ledger_exists_and_says_when_it_is_binding():
 
 def test_the_commit_count_is_roughly_current():
     """Within 25 commits. Exact would fail on every commit and be deleted."""
+    # A shallow clone answers "1" to this question and means "I only fetched
+    # one". CI's default checkout is depth 1, so this test failed claiming the
+    # ledger had drifted by 104 commits when the ledger was correct and the
+    # checkout was partial. The workflow now fetches full history; this skip
+    # is so the test says what it does not know instead of asserting from a
+    # number that does not mean what it looks like.
+    shallow = subprocess.run(
+        ["git", "rev-parse", "--is-shallow-repository"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    if shallow == "true":
+        pytest.skip("shallow checkout: the commit count here is the fetch depth, not the history")
     actual = int(
         subprocess.run(
             ["git", "rev-list", "--count", "HEAD"],
