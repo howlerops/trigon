@@ -48,4 +48,42 @@ its input guesses; a head whose keys have converged says one thing forever.
 The residual was scoped to Choice on the strength of one measurement that read
 the *pooled* run metric on a single seed, and so could not see what the Score
 question itself did. That comment ends "measure it on Score before extending it
-there", and `--score-residual` is that measurement. *Running.*
+there". Measured:
+
+| Arm | `size` seed 0 | `size` seed 1 |
+| --- | ---: | ---: |
+| no Score residual (control) | −0.0055 | −0.0112 |
+| **`--score-residual`** | +0.0002 | **+0.2425** |
+
+**Seed 1 is the first time `size` has ever been above its marginal**, on any
+seed of any configuration this project has trained — and it is not a nudge.
+0.5008 against a 0.2582 marginal closes 41% of the distance to the 0.85 a
+perfect answer scores at this noise level.
+
+Seed 0 does not reproduce it, and that seed's `plan` also collapsed to chance,
+so it is a bad draw rather than a clean refutation. What the pair establishes
+is that the head **can** learn this question, which eight prior measurements
+said it could not. How reliably is the next question, and it is the one this
+project keeps having to ask: a fix that works on some draws is the same shape
+of non-result as a configuration that certifies on some seeds.
+
+## Which repair
+
+Two candidates, and they differ in kind.
+
+`--score-residual` makes collapse *less likely* by carrying each level's own
+input embedding past the encoder, so the keys start distinct. The failure mode
+still exists; descent is merely pushed away from it.
+
+`--score-head linear` **removes the failure mode**. It reads every level off
+one readout slot through a fixed-width head, the shape `max_levels` was
+declared for and never used. The dot-product head is already a linear readout
+of one vector through fixed directions — the schema half of the sequence
+encodes identically regardless of state, which is the cacheability claim
+`tests/test_independence.py` asserts, so the pooled level states it scores
+against carry no state information at all. The linear head computes the same
+function without the indirection that lets those directions converge.
+
+Given that seed variance is the recurring finding of this whole project, a
+repair that removes the failure mode should beat one that makes it rarer. That
+is a prediction, and both arms are running against it.
