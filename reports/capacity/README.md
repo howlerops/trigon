@@ -23,7 +23,12 @@ marginal predictor.
 | --- | ---: | ---: |
 | 128×2 (reference shape) | −0.0055 | −0.0112 |
 | 128×4 (twice the depth) | −0.0025 | −0.0182 |
-| 256×4 | *running* | *running* |
+| 256×4 (four times the parameters) | *running* | −0.0070 |
+
+**Capacity is not the constraint.** Four times the parameters leaves `size`
+exactly where it was. That is the useful shape of this result: a question the
+model could compute but was short of capacity for would improve *somewhere*
+along that row, and this does not move at all.
 
 Doubling depth does nothing. It also made `plan` worse — 0.6112 and 0.4562,
 against 0.848 and 0.646 at 128×2 — which is its own small finding: more layers
