@@ -55,6 +55,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("corpus", help="a corpus name from trigon.evals.corpora")
     parser.add_argument("--out", default=None, help="write the report here")
     parser.add_argument("--save-model", default=None)
+    parser.add_argument(
+        "--weights",
+        default=None,
+        help=(
+            "re-calibrate and re-gate an existing checkpoint instead of training. "
+            "The corpus analogue of scripts/regate.py: the splits are derived from "
+            "--seed and the corpus, so a re-run with the same flags reads the same "
+            "data the training run held out"
+        ),
+    )
     parser.add_argument("-n", type=int, default=4000, help="training cases (0 = all)")
     parser.add_argument("--calibration-n", type=int, default=1000)
     parser.add_argument(
@@ -242,9 +252,12 @@ def main(argv: list[str] | None = None) -> int:
     from trigon.training import train as run_training
 
     spec = corpus(args.corpus)
-    backend = TorchReadoutBackend(
-        config=ReadoutConfig(d_model=args.d_model, n_layers=args.layers), seed=args.seed
-    )
+    if args.weights:
+        backend = TorchReadoutBackend.load(args.weights)
+    else:
+        backend = TorchReadoutBackend(
+            config=ReadoutConfig(d_model=args.d_model, n_layers=args.layers), seed=args.seed
+        )
     compiler = backend.make_compiler(option_scoring=OptionScoring(args.option_scoring))
     train, calibration, evaluation, topped_up = splits(spec, args)
     marginal = baseline_accuracy(train, evaluation)
@@ -254,19 +267,21 @@ def main(argv: list[str] | None = None) -> int:
         f"{len(evaluation)} eval; marginals {summary}",
         file=sys.stderr,
     )
-    report = run_training(
-        backend,
-        train,
-        TrainingConfig(
-            epochs=args.epochs,
-            learning_rate=args.lr,
-            accumulate=args.accumulate,
-            seed=args.seed,
-            log_every=args.log_every,
-            validation_fraction=args.validation_fraction,
-        ),
-        compiler=compiler,
-    )
+    report = None
+    if not args.weights:
+        report = run_training(
+            backend,
+            train,
+            TrainingConfig(
+                epochs=args.epochs,
+                learning_rate=args.lr,
+                accumulate=args.accumulate,
+                seed=args.seed,
+                log_every=args.log_every,
+                validation_fraction=args.validation_fraction,
+            ),
+            compiler=compiler,
+        )
     engine = Engine(backend, compiler=compiler)
     before, _ = run_calibration_suite(
         engine, evaluation, suite=f"{spec.name}/uncalibrated", floor_trials=args.floor_trials
@@ -279,19 +294,22 @@ def main(argv: list[str] | None = None) -> int:
     gates = check_gates(after, slices=slices)
     markdown = header(
         spec, args, train, calibration, evaluation, marginal, topped_up
-    ) + render_markdown([before, after], gates, slices)
+    ) + render_markdown([before, after], gates, slices, gated=after)
     print(markdown)
 
     if args.out:
         out = pathlib.Path(args.out)
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(markdown)
-        out.with_suffix(".json").write_text(render_json([before, after], gates, slices))
+        out.with_suffix(".json").write_text(
+            render_json([before, after], gates, slices, gated=after)
+        )
         stem = out.with_suffix("")
         scaler.save(pathlib.Path(f"{stem}-temperatures.json"))
         if isotonic.knots:
             isotonic.save(pathlib.Path(f"{stem}-isotonic.json"))
-        pathlib.Path(f"{stem}-training.json").write_text(json.dumps(report.to_dict(), indent=2))
+        if report is not None:
+            pathlib.Path(f"{stem}-training.json").write_text(json.dumps(report.to_dict(), indent=2))
         if args.save_model:
             backend.save(pathlib.Path(args.save_model))
         print(f"\nwrote {out}", file=sys.stderr)

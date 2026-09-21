@@ -108,8 +108,10 @@ def main() -> int:
                 f"-n {args.n} --calibration-n {args.calibration_n} --eval-n {args.eval_n} "
                 f"--noise {args.noise} --floor-trials {args.floor_trials}\n```\n\n"
             )
-            out.write_text(header + render_markdown([before, after], gates, slices))
-            out.with_suffix(".json").write_text(render_json([before, after], gates, slices))
+            out.write_text(header + render_markdown([before, after], gates, slices, gated=after))
+            out.with_suffix(".json").write_text(
+                render_json([before, after], gates, slices, gated=after)
+            )
             scaler.save(out.with_name(f"{out.stem}-temperatures.json"))
             if isotonic.knots:
                 isotonic.save(out.with_name(f"{out.stem}-isotonic.json"))

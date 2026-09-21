@@ -49,8 +49,21 @@ def render_markdown(
     slices: dict[str, CalibrationReport] | None = None,
     cardinality: Sequence = (),
     workflows: Sequence = (),
+    gated: SuiteResult | None = None,
 ) -> str:
-    """The release report."""
+    """The release report.
+
+    ``gated`` is the suite the gates were computed from, and passing it is how
+    the per-question table stops disagreeing with the gate above it. It used
+    to take the first result carrying a breakdown, which is the *uncalibrated*
+    run -- so on Banking77 seed 2 the gate said `intent` scored 0.7126 and the
+    table three sections below said 0.7194, both true, neither labelled.
+
+    Nobody noticed for as long as calibration never changed a decision. An
+    isotonic map is monotone per class and not jointly, so it can reorder two
+    classes and move the argmax; on the synthetic corpus it did not, and on a
+    77-way choice it did.
+    """
     out: list[str] = ["# Eval report", ""]
     models = sorted({r.model for r in results} | {w.model for w in workflows})
     out.append(f"Model(s): {', '.join(models)}")
@@ -109,7 +122,13 @@ def render_markdown(
             )
         out.append("")
 
-    per_question = next((r.per_question for r in results if r.per_question), None)
+    # The gated suite when the caller says which it is, and otherwise the
+    # first with a breakdown -- the old behaviour, kept so `trigon eval`'s
+    # single-suite calls are unaffected.
+    source = gated if gated is not None and gated.per_question else None
+    per_question = source.per_question if source else None
+    if per_question is None:
+        per_question = next((r.per_question for r in results if r.per_question), None)
     if per_question:
         out.append("## Accuracy per question")
         out.append("")
@@ -118,6 +137,14 @@ def render_markdown(
             "one question and answers the rest by rote clears a pooled gate, so the "
             "breakdown is printed whether or not it is gated on."
         )
+        if source is not None:
+            out.append("")
+            out.append(
+                f"Measured on `{source.suite}`, the same run the gates read. "
+                "Calibration can move a decision -- an isotonic map is monotone "
+                "per class and not jointly -- so this can differ from the "
+                "uncalibrated accuracy in the suites table above."
+            )
         out.append("")
         out.append("| Question | n | Accuracy | Its marginal predictor | Lift |")
         out.append("| --- | ---: | ---: | ---: | ---: |")
@@ -205,13 +232,20 @@ def render_json(
     slices: dict[str, CalibrationReport] | None = None,
     cardinality: Sequence = (),
     workflows: Sequence = (),
+    gated: SuiteResult | None = None,
 ) -> str:
     """The same run as ``render_markdown``, machine-readable.
 
-    It takes the same five arguments for a reason: a report and its ``.json``
-    sibling that disagree about which suites ran is worse than having only one
-    of them. ``passed`` is the CLI's own exit condition, so a consumer reading
-    this file reaches the same verdict the command did.
+    It takes the same arguments for a reason, and a test pins that: a report
+    and its ``.json`` sibling that disagree about which suites ran is worse
+    than having only one of them. ``gated`` is emitted as a name rather than
+    used to filter, because this file carries every suite in full and a
+    consumer comparing two of them needs to know which one the verdict came
+    from -- the uncalibrated and calibrated runs can differ in *accuracy*, not
+    only in ECE, when a calibrator reorders two classes.
+
+    ``passed`` is the CLI's own exit condition, so a consumer reading this file
+    reaches the same verdict the command did.
 
     Each gate carries ``advisory``, which the markdown has always printed and
     this file used to omit. That omission was not cosmetic: the top-level
@@ -234,6 +268,7 @@ def render_json(
                 }
                 for g in gates
             ],
+            "gated": gated.suite if gated is not None else None,
             "slices": {k: v.to_dict() for k, v in (slices or {}).items()},
             "cardinality": [c.to_dict() for c in cardinality],
             "workflows": [w.to_dict() for w in workflows],

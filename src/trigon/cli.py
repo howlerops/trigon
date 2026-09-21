@@ -336,7 +336,7 @@ def cmd_train(args: argparse.Namespace) -> int:
     # the row says what the quantized path actually scores, which is the thing
     # a reader deciding whether to deploy it needs.
     suites = [before, after] + ([quantized] if quantized is not None else [])
-    markdown = _training_section(report, args) + render_markdown(suites, gates, slices)
+    markdown = _training_section(report, args) + render_markdown(suites, gates, slices, gated=after)
 
     print(markdown)
     if args.out:
@@ -350,7 +350,7 @@ def cmd_train(args: argparse.Namespace) -> int:
         # it a training run can only be read by a person, and anything that
         # compares runs -- scripts/seed_sweep.py, a CI trend -- has to parse
         # markdown.
-        out.with_suffix(".json").write_text(render_json(suites, gates, slices))
+        out.with_suffix(".json").write_text(render_json(suites, gates, slices, gated=after))
         stem = out.with_suffix("")
         temperatures = pathlib.Path(f"{stem}-temperatures.json")
         training = pathlib.Path(f"{stem}-training.json")
