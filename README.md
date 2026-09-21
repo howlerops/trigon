@@ -224,6 +224,17 @@ achieves 0.9227 on held-out data with a mean set of 2.49 of 4 options — a
 singleton where the model is confident, a wider set where it genuinely cannot
 separate the options.
 
+**The command checks its own promise and fails if it is not kept.** Coverage
+is measured on a third split, and `trigon fit` exits non-zero when it falls
+more than three sigma of sampling noise below the target — a floor derived
+from the target and the held-out count rather than a fixed tolerance, which
+would be vacuous at a hundred labels and spuriously red at six thousand. A
+failing profile is still written, because a wrapper that under-covers is
+evidence about the model and you will want to look at it; it should not be
+served, since it makes a guarantee it does not keep. `docs/evals.md` has the
+gate's detection power at each sample size, which is the number that decides
+how many of your own labels you need.
+
 ## Layout
 
 ```
