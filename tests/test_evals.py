@@ -189,12 +189,36 @@ def test_baseline_is_the_per_question_majority_label():
     assert result.baseline_accuracy == pytest.approx(expected)
 
 
-def test_slice_reports_split_by_domain():
+def test_slice_reports_split_by_domain_and_by_primitive():
+    """Both cuts, and the keys cannot collide.
+
+    Per-primitive was documented from the first draft of `docs/evals.md` and
+    not implemented, which left the suite unable to say *where* a run is
+    miscalibrated. A temperature is fitted per primitive, so that is exactly
+    the unit at which a fit can go wrong -- and one did, at a fitted Score
+    temperature of 0.20 on a head that had learned nothing.
+    """
     engine = Engine(LexicalBackend())
     outcomes = run_cases(engine, synthetic_outcome_cases(n=20))
     slices = slice_reports(outcomes)
-    assert set(slices) == {"accounts"}
-    assert slices["accounts"].n > 0
+
+    assert set(slices) == {
+        "domain:accounts",
+        "primitive:choice",
+        "primitive:noul",
+        "primitive:score",
+    }
+    assert all(s.n > 0 for s in slices.values())
+    assert all(name == s.slice_name for name, s in slices.items())
+
+    # The two cuts partition the same answers, so they must agree on the total.
+    domain_total = sum(s.n for name, s in slices.items() if name.startswith("domain:"))
+    primitive_total = sum(s.n for name, s in slices.items() if name.startswith("primitive:"))
+    assert domain_total == primitive_total
+
+    # Prefixed keys, because a domain named `choice` would otherwise overwrite
+    # the primitive of that name and silently halve the table.
+    assert not any(name in {"choice", "noul", "score", "accounts"} for name in slices)
 
 
 def test_negation_coherence_scores_a_perfectly_incoherent_model():

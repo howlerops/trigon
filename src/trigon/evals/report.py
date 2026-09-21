@@ -129,12 +129,23 @@ def render_markdown(
             )
         out.append("")
 
-    if slices:
-        out.append("## Per-domain calibration")
+    # Two cuts, two tables. The per-primitive one exists because a temperature
+    # is fitted per primitive, so that is the unit at which a fit can go wrong,
+    # and the pooled number cannot name the part that failed.
+    for prefix, heading, label in (
+        ("domain:", "## Per-domain calibration", "Domain"),
+        ("primitive:", "## Per-primitive calibration", "Primitive"),
+    ):
+        rows = {
+            k.removeprefix(prefix): v for k, v in (slices or {}).items() if k.startswith(prefix)
+        }
+        if not rows:
+            continue
+        out.append(heading)
         out.append("")
-        out.append("| Domain | n | Accuracy | Mean confidence | Overconfidence | ECE |")
+        out.append(f"| {label} | n | Accuracy | Mean confidence | Overconfidence | ECE |")
         out.append("| --- | ---: | ---: | ---: | ---: | ---: |")
-        for name, rep in slices.items():
+        for name, rep in rows.items():
             out.append(
                 f"| {name} | {rep.n} | {rep.accuracy:.3f} | {rep.mean_confidence:.3f} | "
                 f"{rep.overconfidence:+.3f} | {rep.ece:.4f} |"

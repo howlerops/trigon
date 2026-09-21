@@ -23,6 +23,12 @@ trigon eval all -n 200 --out reports/run.md   # exits non-zero on a failed gate
 ECE, adaptive ECE, MCE, Brier, NLL and reliability diagrams, per primitive and
 per domain, plus conformal coverage checks.
 
+The per-primitive cut was claimed in this sentence from the first draft and
+not implemented until the run that needed it. A temperature is fitted *per
+primitive*, so a primitive is exactly the unit at which a fit can go wrong,
+and the pooled number cannot name the part that failed — the same argument
+that made `worst_question_over_baseline` advisory rather than absent.
+
 **Release gates**, from `trigon.limits`:
 
 | Gate | Limit | What it checks |

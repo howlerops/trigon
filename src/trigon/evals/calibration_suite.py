@@ -75,9 +75,27 @@ def run_calibration_suite(
 
 
 def slice_reports(outcomes: Sequence[CaseOutcome]) -> dict[str, CalibrationReport]:
-    """Per-domain reports. An aggregate ECE can hide a domain that is badly
-    miscalibrated, and per-domain is the granularity users actually deploy at."""
-    buckets: dict[str, list[tuple[tuple[float, ...], int]]] = {}
+    """Calibration broken out by domain **and** by primitive.
+
+    An aggregate ECE hides where the miscalibration is. Per-domain was here
+    from the start because that is the granularity users deploy at; per
+    primitive was documented from the start and never implemented, and the
+    absence had a cost.
+
+    A temperature is fitted per primitive, so a primitive is exactly the unit
+    at which a fit can go wrong -- and one did. On an 8,000-case run the Score
+    head drew a fitted temperature of 0.20, sharpening a head that had learned
+    nothing by five times, while Choice and Noul sat near 1.0. The pooled
+    number said "ECE 0.0516, gate is 0.05" and gave a reader nothing to act
+    on. It is the same argument that made `worst_question_over_baseline`
+    advisory rather than absent: a pooled figure that cannot name the part
+    that failed is a summary, not a measurement.
+
+    Keys are prefixed, because a domain called `choice` would otherwise
+    silently overwrite the primitive of that name.
+    """
+    by_domain: dict[str, list[tuple[tuple[float, ...], int]]] = {}
+    by_primitive: dict[str, list[tuple[tuple[float, ...], int]]] = {}
     for outcome in outcomes:
         domain = outcome.case.domain
         for question in outcome.questions.values():
@@ -86,17 +104,23 @@ def slice_reports(outcomes: Sequence[CaseOutcome]) -> dict[str, CalibrationRepor
             truth = question.expected.hard_label
             if truth is None:
                 continue
-            buckets.setdefault(domain, []).append((question.probabilities, truth))
-    return {
-        domain: report(
-            [p for p, _ in rows],
-            [y for _, y in rows],
-            slice_name=domain,
-            simulate_floor=False,
-        )
-        for domain, rows in sorted(buckets.items())
-        if rows
-    }
+            row = (question.probabilities, truth)
+            by_domain.setdefault(domain, []).append(row)
+            by_primitive.setdefault(question.primitive, []).append(row)
+
+    def build(buckets: dict[str, list], prefix: str) -> dict[str, CalibrationReport]:
+        return {
+            f"{prefix}{name}": report(
+                [p for p, _ in rows],
+                [y for _, y in rows],
+                slice_name=f"{prefix}{name}",
+                simulate_floor=False,
+            )
+            for name, rows in sorted(buckets.items())
+            if rows
+        }
+
+    return build(by_domain, "domain:") | build(by_primitive, "primitive:")
 
 
 def check_gates(
