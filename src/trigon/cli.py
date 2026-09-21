@@ -144,6 +144,47 @@ def cmd_eval(args: argparse.Namespace) -> int:
     return 0 if passed else 1
 
 
+#: Seed offsets for the three splits a training run needs. Offsets rather than
+#: derived seeds so that `--seed 0` and `--seed 1` cannot collide: a run's
+#: calibration split is 2000 away from its own training split and 1000 away
+#: from its own eval split, and no two runs within 1000 seeds of each other
+#: share one.
+SPLIT_SEED_OFFSETS = {"train": 0, "eval": 1_000, "calibration": 2_000}
+
+
+def training_splits(
+    *, n: int, calibration_n: int, eval_n: int, seed: int, noise: float
+) -> tuple[list, list, list]:
+    """The train, calibration and eval splits for one run, in that order.
+
+    Three splits, three seeds, none of them a reshuffle of another.
+
+    **The calibration split is the one that was missing.** A temperature is
+    fitted to close the gap between a model's confidence and its accuracy, and
+    on data the model trained on that gap is the *memorised* one -- so the fit
+    systematically under-corrects, by however much this particular draw
+    overfit. It was fitted on the training split until the first four-seed
+    sweep at 8,000 cases made the cost visible: temperature scaling *raised*
+    ECE on two seeds of four, on one of them from 0.0431 to 0.0677 and past
+    the gate, while lowering it on the other two. A calibration step that
+    makes calibration worse on half its draws is not a calibration step.
+
+    Separate from `cmd_train` so the property can be tested without training:
+    what has to hold is that no split is the same data as another, and that is
+    a fact about seeds, not about models. See `docs/decisions.md`, "The
+    temperature was fitted on the split the model trained on".
+    """
+    from .evals import synthetic_outcome_cases
+
+    return (
+        synthetic_outcome_cases(n=n, seed=seed + SPLIT_SEED_OFFSETS["train"], noise=noise),
+        synthetic_outcome_cases(
+            n=calibration_n, seed=seed + SPLIT_SEED_OFFSETS["calibration"], noise=noise
+        ),
+        synthetic_outcome_cases(n=eval_n, seed=seed + SPLIT_SEED_OFFSETS["eval"], noise=noise),
+    )
+
+
 def cmd_train(args: argparse.Namespace) -> int:
     """Train the reference model, then measure and calibrate it.
 
@@ -164,7 +205,6 @@ def cmd_train(args: argparse.Namespace) -> int:
         render_json,
         render_markdown,
         run_calibration_suite,
-        synthetic_outcome_cases,
     )
     from .schema import OptionScoring
     from .training import TrainingConfig
@@ -187,10 +227,13 @@ def cmd_train(args: argparse.Namespace) -> int:
     )
     compiler = backend.make_compiler(option_scoring=OptionScoring(args.option_scoring))
 
-    train_cases = synthetic_outcome_cases(n=args.n, seed=args.seed, noise=args.noise)
-    # A separate seed, so the held-out split is genuinely unseen rather than a
-    # reshuffle of the same generated records.
-    eval_cases = synthetic_outcome_cases(n=args.eval_n, seed=args.seed + 1000, noise=args.noise)
+    train_cases, calibration_cases, eval_cases = training_splits(
+        n=args.n,
+        calibration_n=args.calibration_n,
+        eval_n=args.eval_n,
+        seed=args.seed,
+        noise=args.noise,
+    )
 
     print(f"training on {len(train_cases)} cases, {args.epochs} epochs", file=sys.stderr)
     report = run_training(
@@ -211,10 +254,12 @@ def cmd_train(args: argparse.Namespace) -> int:
         engine, eval_cases, suite="calibration/uncalibrated", floor_trials=args.floor_trials
     )
 
-    # Fit the temperature on the training split, never on the split the gates
-    # are read from -- fitting and reporting on the same data is how a
-    # calibration number stops meaning anything.
-    scaler = _fit_temperatures(engine, train_cases)
+    # Fit on a split the model has never seen and the gates never read. Both
+    # halves matter and only the second was observed before: fitting and
+    # reporting on the same data is how a calibration number stops meaning
+    # anything, and fitting on the training split is how it stops being a
+    # calibration.
+    scaler = _fit_temperatures(engine, calibration_cases)
     calibrated = Engine(backend, compiler=compiler, scaler=scaler)
     after, slices = run_calibration_suite(
         calibrated,
@@ -299,7 +344,8 @@ def _training_section(report, args) -> str:
         f"trigon train -n {args.n} --eval-n {args.eval_n} --epochs {args.epochs} "
         f"--lr {args.lr} --accumulate {args.accumulate} --d-model {args.d_model} "
         f"--layers {args.layers} --noise {args.noise} --seed {args.seed} "
-        f"--floor-trials {args.floor_trials} --option-scoring {args.option_scoring}"
+        f"--floor-trials {args.floor_trials} --calibration-n {args.calibration_n} "
+        f"--option-scoring {args.option_scoring}"
         + (" --match-normalize" if args.match_normalize else "")
         + ("" if args.match_residual else " --no-match-residual")
         + (
@@ -537,6 +583,12 @@ def build_parser() -> argparse.ArgumentParser:
     tr.add_argument("--layers", type=int, default=3)
     tr.add_argument("--seed", type=int, default=0)
     tr.add_argument("--floor-trials", type=int, default=100)
+    tr.add_argument(
+        "--calibration-n",
+        type=int,
+        default=1000,
+        help="cases held out to fit the temperature; seen by neither training nor the gates",
+    )
     tr.add_argument(
         "--no-quantization-gate",
         action="store_true",

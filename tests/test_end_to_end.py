@@ -65,9 +65,13 @@ def trained(tmp_path_factory) -> dict:
         compiler=compiler,
     )
 
-    # Fit the temperature on a split the gates never read, as `trigon train` does.
+    # Fit the temperature on a split the model never trained on and the gates
+    # never read, as `trigon train` does. This said `seed=0` -- the same 240
+    # cases the model had just been fitted to -- which is the defect that made
+    # temperature scaling raise ECE on half the seeds of an 8,000-case sweep.
+    # The path under test has to be the path that ships.
     engine = Engine(backend, compiler=compiler)
-    fit_cases = synthetic_outcome_cases(n=240, seed=0, noise=0.2)
+    fit_cases = synthetic_outcome_cases(n=240, seed=2000, noise=0.2)
     scaler = TemperatureScaler()
     rows: dict[str, list] = {}
     for outcome in run_cases(engine, fit_cases):

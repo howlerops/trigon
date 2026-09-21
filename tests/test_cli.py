@@ -177,3 +177,54 @@ def test_train_writes_every_artifact_a_deployment_and_a_sweep_need(tmp_path, cap
     reloaded = TorchReadoutBackend.load(weights)
     assert not reloaded.model_version.endswith("-untrained")
     assert reloaded.model_version in printed or reloaded.model_version in out.read_text()
+
+
+def test_the_three_training_splits_are_three_different_datasets():
+    """The temperature must be fitted on data the model has never seen.
+
+    It was fitted on the training split. A temperature closes the gap between
+    a model's confidence and its accuracy, and on the training split that gap
+    is the memorised one, so the fit under-corrects by however much that draw
+    overfit. The first four-seed sweep at 8,000 cases made the cost visible:
+    temperature scaling *raised* ECE on two seeds of four, on one of them from
+    0.0431 to 0.0677 and past the gate. A calibration step that makes
+    calibration worse on half its draws is not one.
+
+    The property is about seeds, not models, so it is testable in
+    milliseconds. What it is not is a claim of exact disjointness -- the
+    generator draws from a finite record space, so two splits can coincide on
+    a record by chance, and asserting otherwise would be asserting something
+    false.
+    """
+    from trigon.cli import SPLIT_SEED_OFFSETS, training_splits
+
+    train, calibration, evaluation = training_splits(
+        n=120, calibration_n=60, eval_n=90, seed=0, noise=0.2
+    )
+    assert (len(train), len(calibration), len(evaluation)) == (120, 60, 90)
+
+    def fingerprint(cases):
+        return [tuple(sorted(c.request.state.items())) for c in cases]
+
+    # Not a reshuffle of one another: the overlap between any two splits is far
+    # below what a shared seed would produce, which is total.
+    for left, right in (
+        (train, calibration),
+        (train, evaluation),
+        (calibration, evaluation),
+    ):
+        shared = set(map(tuple, fingerprint(left))) & set(map(tuple, fingerprint(right)))
+        assert len(shared) < min(len(left), len(right)) // 2
+
+    # Offsets, not derived seeds, so `--seed 0` and `--seed 1` cannot collide:
+    # no two runs within 1,000 seeds of each other share a split.
+    assert len(set(SPLIT_SEED_OFFSETS.values())) == 3
+    assert (
+        min(
+            abs(a - b)
+            for a in SPLIT_SEED_OFFSETS.values()
+            for b in SPLIT_SEED_OFFSETS.values()
+            if a != b
+        )
+        >= 1000
+    )

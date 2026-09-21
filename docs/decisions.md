@@ -590,6 +590,65 @@ evidence about the ranking there.
 
 The risk is retired as a blocker and stays open as a measurement.
 
+### The temperature was fitted on the split the model trained on
+
+**Decision.** `trigon train` builds three splits, not two: training,
+calibration and evaluation, from three seeds 1,000 apart
+(`trigon.cli.training_splits`). The temperature is fitted on the calibration
+split, which the model never trained on and the gates never read.
+`--calibration-n` sizes it, defaulting to 1,000 cases.
+
+**It was fitted on the training split, and the code said so proudly.** The
+comment read: *"Fit the temperature on the training split, never on the split
+the gates are read from — fitting and reporting on the same data is how a
+calibration number stops meaning anything."* The second half of that is
+correct and was the rule being enforced. The first half is the bug, and
+stating it as the reason is why it survived: it reads as a discipline.
+
+A temperature closes the gap between a model's confidence and its accuracy.
+On the training split that gap is the *memorised* one — the model is more
+accurate there than on anything it has not seen — so the fit under-corrects,
+by however much this particular draw overfit. The correction is then applied
+to data where the true gap is larger.
+
+**What it cost, measured.** The first four-seed sweep at 8,000 cases
+(`reports/sweeps/`, `candidate-8k`) shows it directly, because the run reports
+ECE before and after scaling on the same held-out set:
+
+| Seed | ECE uncalibrated | ECE after scaling | |
+| ---: | ---: | ---: | --- |
+| 0 | 0.0303 | 0.0102 | helped |
+| 1 | 0.0431 | **0.0677** | **hurt, past the 0.05 gate** |
+| 2 | 0.0096 | 0.0067 | helped |
+| 3 | 0.0121 | **0.0190** | hurt |
+
+Temperature scaling made calibration *worse* on half the draws, and on seed 1
+it is the entire reason the configuration failed to certify: uncalibrated it
+would have passed at 0.0431. **A calibration step that makes calibration worse
+on half its draws is not a calibration step**, and the project's own first
+ground rule — calibration is the product — makes this the most expensive kind
+of defect it could have had.
+
+It also explains the seed-dependence rather than just correlating with it. How
+much a given draw overfits its training split is exactly the quantity that
+varies between draws, so the error the fit inherits varies with it. That is
+why the damage is not a constant offset but a coin flip.
+
+**Why nothing caught it.** `tests/test_temperature.py` asserts the fit is
+correct — it finds the NLL-minimising scalar, it warns on a degenerate fit, it
+is monotone. All true, and none of it is about *which data* it is fitted on.
+`tests/test_end_to_end.py` did assert the whole path end to end, and carried
+the same defect: it fitted on `seed=0`, the same 240 cases it had just trained
+on. A test that reproduces the production wiring faithfully reproduces its
+bugs faithfully.
+
+**What would change our mind.** A measurement showing the calibration split
+costs more in training data than it buys in calibration — at 8,000 training
+cases, 1,000 more generated ones are free, but on a real corpus they are
+carved out of something. If that trade ever bites, the answer is
+cross-validated temperature fitting, not fitting on the training split: the
+folds are more work and the property survives.
+
 ### A single-seed training run is not evidence
 
 The eval harness refuses to quote an ECE without simulating what a perfectly
