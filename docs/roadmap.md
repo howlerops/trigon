@@ -95,10 +95,14 @@ data plus green classification labels — a narrower claim than the plan assumes
 and one the calibration report has to state.
 
 **The Rust gateway does not survive measurement.** The plan budgets phase-3
-time to rewrite the gateway in Rust. Measured, the gateway's own work is 3.61 ms
-of a 150 ms p50 budget — 2.4% — and at 277 requests per second per core its CPU
-is a rounding error beside the GPU. A rewrite buys three milliseconds and costs
-a second implementation of the contract. Phase 3 keeps the load tests and drops
+time to rewrite the gateway in Rust. Measured, the gateway's own work is 2.28 ms
+of a 150 ms p50 budget — 1.5% — and at 438 requests per second per process its
+CPU is a rounding error beside the GPU. A rewrite buys two milliseconds and
+costs a second implementation of the contract. The tail check that would have
+overturned this has now been run, not just named: across a 32× range of
+concurrency, p99/p50 stays flat at 1.5–1.8× and latency tracks Little's law, so
+there is no GC or GIL pathology to rewrite away. Phase 3 keeps the load tests
+— they have been pulled forward and live in `scripts/load_test.py` — and drops
 the rewrite; the one function that would benefit, the tokenizer at ceiling-size
 states, arrives as a dependency in phase 1 rather than as a rewrite.
 

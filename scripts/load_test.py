@@ -10,11 +10,19 @@ median and says nothing about the tail. `docs/decisions.md` leans on that
 measurement to drop the planned Rust rewrite, and names its own falsifier:
 
 > p99 under real load showing GC or GIL pauses rather than model queueing.
-> The gateway's contribution to p99 is unmeasured — 3.61 ms is a median on an
-> idle box, and tail behaviour under contention is a different question.
+> The gateway's contribution to p99 is unmeasured — a median on an idle box,
+> and tail behaviour under contention is a different question.
 
 This is that measurement. It runs the real ASGI app over a real socket, so the
 event loop, the serialiser and the GIL are all in the path.
+
+**It has been run, and the falsifier did not fire** — see `docs/decisions.md`,
+"The tail falsifier was the real test". Read p99/p50 rather than p99: a GC or
+GIL pause widens the tail relative to the median as pressure rises, and here
+that ratio *narrows*, from 1.6× at one client to 1.5× at thirty-two, while
+latency tracks `concurrency / throughput` to within a millisecond. That is
+queueing, which the falsifier explicitly excluded. Re-run it after anything
+that touches the request path, and read the ratio.
 
 **What it does not measure.** A real deployment's p99 is dominated by the model
 server and by queueing in front of it, neither of which exists here — the

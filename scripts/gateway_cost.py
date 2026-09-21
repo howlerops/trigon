@@ -49,16 +49,57 @@ def _median_ms(fn, n: int) -> float:
     return statistics.median(samples)
 
 
-def main() -> int:
-    from fastapi.testclient import TestClient
+def _serve(port: int):
+    """The real app on a real socket, returned with a callable that drives it.
+
+    Not `TestClient`. It was, and that was measuring the wrong thing: httpx
+    costs about 1.35 ms per call here, so the published "whole request" figure
+    was 3.61 ms when the gateway's own share is 2.26 ms. Charging the test
+    client to the gateway made the case for rewriting it look stronger than
+    the evidence does -- the mistake was conservative, which is the kind that
+    survives review.
+    """
+    import json
+    import threading
+    import urllib.request
+
+    import uvicorn
 
     from trigon.server.app import build_app
     from trigon.server.config import ServerConfig
 
-    client = TestClient(build_app(ServerConfig(backend="lexical")))
-    client.post("/v1/systemone", json=TYPICAL)  # warm
+    server = uvicorn.Server(
+        uvicorn.Config(
+            build_app(ServerConfig(backend="lexical")),
+            host="127.0.0.1",
+            port=port,
+            log_level="error",
+        )
+    )
+    threading.Thread(target=server.run, daemon=True).start()
+    deadline = time.time() + 20
+    while not server.started and time.time() < deadline:
+        time.sleep(0.05)
+    if not server.started:
+        raise RuntimeError("the gateway did not come up")
 
-    whole = _median_ms(lambda: client.post("/v1/systemone", json=TYPICAL), 200)
+    url = f"http://127.0.0.1:{port}/v1/systemone"
+    payload = json.dumps(TYPICAL).encode()
+
+    def call() -> None:
+        request = urllib.request.Request(
+            url, data=payload, headers={"Content-Type": "application/json"}
+        )
+        with urllib.request.urlopen(request, timeout=30) as response:
+            response.read()
+
+    return server, call
+
+
+def main() -> int:
+    server, call = _serve(8970)
+    call()  # warm
+    whole = _median_ms(call, 200)
 
     compiler = SchemaCompiler()
     wide = SystemOneRequest.model_validate(
@@ -92,9 +133,12 @@ def main() -> int:
     per_ms = counted / _median_ms(lambda: tokenizer.encode(novel), 3)
     ceiling_ms = DEFAULT_BUDGET.state_tokens / per_ms
 
+    server.should_exit = True
+
     p50 = DEFAULT_LATENCY_TARGET.p50_ms
     print(
-        f"{'whole request, over HTTP':<44} {whole:>8.2f} ms   {1000 / whole:>7,.0f} req/s per core"
+        f"{'whole request, over a socket':<44} {whole:>8.2f} ms   "
+        f"{1000 / whole:>7,.0f} req/s per process"
     )
     print(f"{'compiling a 1,000-option schema':<44} {compile_wide:>8.2f} ms")
     print(
@@ -110,6 +154,9 @@ def main() -> int:
     else:
         print("\nRewriting it optimises the wrong thing. The tokenizer is the only")
         print("piece worth native code, and it arrives as a dependency in phase 1.")
+    print()
+    print("This is one request at a time. For the tail under concurrency -- the")
+    print("falsifier docs/decisions.md names -- run scripts/load_test.py.")
     return 0
 
 

@@ -674,28 +674,38 @@ holding:
 
 | | |
 | --- | ---: |
-| Whole request, end to end | **3.61 ms** (277 req/s per core) |
+| Whole request, end to end | **2.28 ms** (438 req/s per process) |
 | …of which the model | 0.16 ms |
-| Compiling a 1,000-option schema | 1.9 ms |
+| Compiling a 1,000-option schema | 1.8 ms |
 | Serialising a 206 KiB response (10,000 options) | 1.4 ms |
 | Tokenizing a state at the 65,536-token ceiling | **26 ms** |
 | p50 latency target | 150 ms |
 
-The gateway's own work is **2.4% of the p50 budget**. A gateway that cost
-literally nothing would move p50 by 3.6 ms. Rewriting it in Rust buys, at
-best, three milliseconds of a hundred and fifty — and costs a second
+The gateway's own work is **1.5% of the p50 budget**. A gateway that cost
+literally nothing would move p50 by 2.3 ms. Rewriting it in Rust buys, at
+best, two milliseconds of a hundred and fifty — and costs a second
 implementation of the contract, which is the failure mode this repository
 spends the most effort preventing. `spec/openapi.json`, the drift test and the
 generated SDKs all exist because one definition of the contract is worth more
 than any constant factor.
+
+**This figure was wrong in the conservative direction, which is why it
+survived.** It was published as 3.61 ms, measured through FastAPI's
+`TestClient`. That client is httpx, and httpx costs about 1.35 ms per call
+here — so a third of the "gateway cost" was the measuring instrument. Isolated
+three ways on one idle box: 3.61 ms through `TestClient`, 2.26 ms over a real
+socket, 0.16 ms in process with no HTTP at all. `scripts/gateway_cost.py` now
+drives a real uvicorn over a real socket. The error made the case for a rewrite
+look stronger than the evidence did, and an error that flatters the conclusion
+you are arguing against is the hardest kind to notice.
 
 It is also worth naming what "Python" means here: `pydantic-core` is Rust and
 the JSON encoder is C, so validation and serialisation — normally the
 expensive parts of a gateway — are already native. The Python is a thin
 orchestration layer over them.
 
-**The cost argument does not rescue Rust either.** At 277 req/s per core, a
-core-hour serves about a million requests. Gateway CPU is a rounding error
+**The cost argument does not rescue Rust either.** At 438 req/s per process, a
+process-hour serves about 1.6 million requests. Gateway CPU is a rounding error
 beside the GPU the model runs on, whatever the model costs. The gateway is not
 on the critical path for latency or for spend.
 
@@ -719,17 +729,62 @@ it scales by process count and the GIL never binds. Choosing Go would trade
 the ecosystem that the product's differentiator is written in for a
 concurrency model the design does not need.
 
-**What would change our mind.** Three measurements, none of which we have:
+### The tail falsifier was the real test, and it has now been run
 
-1. p99 under real load showing GC or GIL pauses rather than model queueing.
-   The gateway's contribution to p99 is unmeasured — 3.61 ms is a median on an
-   idle box, and tail behaviour under contention is a different question.
-2. A traffic mix where ceiling-size states are common rather than theoretical,
+The first version of this decision named three measurements that would change
+our mind, and admitted we had none of them. The first was the one that
+mattered:
+
+> p99 under real load showing GC or GIL pauses rather than model queueing. The
+> gateway's contribution to p99 is unmeasured — a median on an idle box, and
+> tail behaviour under contention is a different question.
+
+`scripts/load_test.py` is that measurement: the real ASGI app, a real socket, N
+concurrent clients, one uvicorn process on a 4-core box.
+
+| Concurrency | Throughput | p50 | p90 | p99 | p99 / p50 |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 393/s | 2.45 ms | 2.90 ms | 3.91 ms | 1.6× |
+| 4 | 395/s | 9.71 ms | 12.71 ms | 17.53 ms | 1.8× |
+| 8 | 408/s | 19.09 ms | 24.22 ms | 35.01 ms | 1.8× |
+| 16 | 426/s | 36.64 ms | 45.45 ms | 62.68 ms | 1.7× |
+| 32 | 430/s | 73.11 ms | 90.04 ms | 107.84 ms | 1.5× |
+
+Zero errors throughout. **The falsifier did not fire, and the shape of the
+data is why.**
+
+A GC or GIL pause shows up as a *tail that grows faster than the median* —
+p99/p50 widening as pressure rises. It does the opposite here: 1.6× at one
+client, 1.5× at thirty-two. Latency instead tracks `concurrency / throughput`
+almost exactly (32 / 430 = 74 ms against 73.11 ms measured), which is Little's
+law and nothing else. Every millisecond above the 2.45 ms floor is a request
+waiting its turn, which is precisely the "model queueing" the falsifier
+excluded.
+
+**What it does establish is a capacity number, not a latency problem.** One
+process saturates at about 430 req/s no matter how many clients push at it,
+because one Python process is one event loop. That is a sizing fact: run a
+process per core and keep per-process concurrency around 8, where p50 is 19 ms
+— 13% of the budget — rather than 32, where p50 is 73 ms and half the budget
+is gone to self-inflicted queueing. It is not an argument for a different
+language, because a Rust gateway at 32-deep concurrency would queue too; it
+would just queue on a smaller constant.
+
+Two caveats worth stating. The lexical backend answers in microseconds, so
+there is no model server in front of this — a production p99 is dominated by
+that and by the queue ahead of it, neither of which exists here. And this is a
+4-core box under a load generator sharing it, so the throughput ceiling is a
+floor on the real one.
+
+**What would still change our mind.** Two measurements, neither of which we
+have:
+
+1. A traffic mix where ceiling-size states are common rather than theoretical,
    which would make the 26 ms tokenizer the headline instead of a footnote.
-3. Gateway CPU appearing in the bill at all, which at a million requests per
-   core-hour would take a traffic scale this project does not have.
+2. Gateway CPU appearing in the bill at all, which at 1.6 million requests per
+   process-hour would take a traffic scale this project does not have.
 
-If (1) or (2) lands, the response is still not a rewrite: it is moving that
+If either lands, the response is still not a rewrite: it is moving that
 function behind the seam that already exists, which is how the tokenizer is
 already structured.
 
