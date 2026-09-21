@@ -20,3 +20,15 @@ artifacts/
 # progress is indistinguishable from a hung one. The results are the committed
 # .md and .json reports beside them; a progress log is not evidence.
 reports/sweeps/*.log
+
+# Training output for the iso-8k sweep. The checkpoints are weights (already
+# ignored above) and the reports written by the training run reflect the
+# calibration rule that ran at the time. `scripts/regate.py` writes the
+# `-regated.md` reports beside them from the current rule, and those are the
+# committed evidence.
+reports/iso/*.log
+reports/iso/iso-seed?.md
+reports/iso/iso-seed?.json
+reports/iso/iso-seed?-training.json
+reports/iso/iso-seed?-temperatures.json
+reports/iso/iso-seed?-isotonic.json

@@ -292,3 +292,61 @@ seeds with no ground truth about which decision was correct is weaker evidence
 than 280 trials with it, so `strict` ships — but the disagreement is recorded
 rather than smoothed over, and `bare` is the thing to try first if `strict`
 ever looks wrong in production.
+
+## `iso-8k` — the first configuration that certifies on every seed
+
+Same 8,000-case configuration, with the calibrator selected per primitive
+rather than fixed (`docs/decisions.md`, "Neither calibrator wins"). Checkpoints
+are kept under `reports/iso/`, so the calibration layer can be refitted and
+re-gated in minutes rather than by retraining.
+
+| Seed | ECE | Adaptive ECE | Lift over baseline | Certified | Blocked on |
+| ---: | ---: | ---: | ---: | --- | --- |
+| 0 | 0.0247 | 0.0289 | +0.1614 | **yes** | — |
+| 1 | 0.0235 | 0.0262 | +0.2203 | **yes** | — |
+| 2 | 0.0084 | 0.0162 | +0.2277 | **yes** | — |
+| 3 | 0.0087 | 0.0153 | +0.2141 | **yes** | — |
+
+**Four of four.** ECE range 0.0084–0.0247 against a 0.05 gate; adaptive
+0.0153–0.0289; every seed clears `accuracy_over_baseline` by three to four
+times. The first configuration in this project whose outcome does not depend
+on the draw, and the spread that made it a coin flip is gone: 0.0433 at the
+first 8,000-case sweep, 0.0163 here.
+
+Three changes got it there, and the last two were found only by measuring the
+serving path rather than the library.
+
+**The calibrator is chosen per primitive.** Seed 1's `choice` head sat at ECE
+0.0879 under four successive rules about whether to apply a *temperature*,
+because it is tilted and no temperature was ever going to move it. The
+selection picks isotonic for that head and reports `0.1064 -> 0.0140` on its
+own check; measured on the eval split it is **0.0240**, against 0.0879 for
+every temperature-only variant.
+
+**The selection scores on the estimator the gates bind on.** It minimised
+plain ECE, and plain ECE could not see the problem: seed 1's `noul` head read
+0.0251 by equal-width bins and **0.1625** by equal-mass bins on the same 6,000
+answers — a binary head's confidences cluster, and equal-width bins average the
+cluster into one number. The selection therefore declined every candidate for
+that head at a plain ECE of 0.0184 while the adaptive gate failed the run at
+0.0604. It now minimises the worse of the two, which is what a run has to pass.
+
+**And the Noul map was fitted on the wrong quantity.** It was fitted on
+`max(p)` against correctness, which lives in [0.5, 1], and applied at serving
+time to P(yes), which lives in [0, 1]. Every answer below even odds fell off
+the left end of the fitted range and took the leftmost knot. The head measured
+at ECE 0.3313 against 0.0251 with no calibration at all — and the check split
+*approved* the fit, because the check applied it the same wrong way. Fitting on
+P(yes) puts it at 0.0467.
+
+A fourth defect turned up in the same hour: `_pav` did not pool tied x values,
+so four thousand answers at four distinct confidences produced thousands of
+knots sharing four x values and a lookup returned the lowest of them —
+`confidence(0.1) == 0.0` on a head whose observed rate at 0.1 was 0.26. Model
+confidences repeat; this would have fired on real data immediately.
+
+**What this does not say.** It is still a 128-wide two-layer spike on one
+synthetic generator. `worst_question_over_baseline` remains advisory and still
+fails on every seed: the model answers `plan` well and sits near the marginal
+on the other two. Certifying on four seeds means the configuration's
+*calibration* is reproducible, not that the model is good.

@@ -224,3 +224,99 @@ def test_an_exact_tie_is_broken_by_position_and_that_is_visible():
     for leader in ([0.4, 0.35, 0.25], [0.9, 0.05, 0.05], [0.34, 0.33, 0.33]):
         after = calibrator.apply("choice", leader)
         assert after.index(max(after)) == leader.index(max(leader))
+
+
+def test_a_noul_map_is_fitted_on_the_quantity_it_is_applied_to():
+    """Fitted on one range, applied to another, costs a factor of thirteen.
+
+    The Noul isotonic map was fitted on `max(p)` against correctness, which
+    lives in [0.5, 1], and applied at serving time to P(yes), which lives in
+    [0, 1]. Every answer below even odds fell off the left end of the fitted
+    range and took the leftmost knot. It measured as a head at ECE 0.3313
+    against 0.0251 with no calibration at all — and the check split said the
+    fit was an improvement, because the check applied it the same wrong way.
+
+    This is the repository's recurring defect in miniature: two halves of a
+    pipeline agreeing on a name and disagreeing on a quantity.
+    """
+    import random
+
+    rng = random.Random(11)
+    # A binary head that is overconfident in both directions: when it says
+    # 0.9 it is right 0.75 of the time, when it says 0.1 it is wrong 0.25.
+    p_yes, happened = [], []
+    for _ in range(4000):
+        stated = rng.choice([0.1, 0.3, 0.7, 0.9])
+        true_rate = 0.5 + (stated - 0.5) * 0.6
+        p_yes.append(stated)
+        happened.append(1 if rng.random() < true_rate else 0)
+
+    calibrator = IsotonicCalibrator()
+    calibrator.fit("noul", p_yes, happened)
+
+    # Fitted across the whole [0, 1] range, so a confident "no" is mapped by
+    # evidence rather than by the leftmost knot.
+    assert calibrator.confidence("noul", 0.1) > 0.1
+    assert calibrator.confidence("noul", 0.9) < 0.9
+    assert calibrator.confidence("noul", 0.1) < calibrator.confidence("noul", 0.9)
+
+    # The map moves P(yes) toward the observed rate at both ends, which is the
+    # correction a single temperature cannot make.
+    assert calibrator.confidence("noul", 0.1) == pytest.approx(0.5 - 0.4 * 0.6, abs=0.05)
+    assert calibrator.confidence("noul", 0.9) == pytest.approx(0.5 + 0.4 * 0.6, abs=0.05)
+
+
+def test_the_engine_maps_a_noul_probability_not_its_confidence():
+    """The serving half of the same contract.
+
+    A Noul has no confidence field by design — the contract says so — so there
+    is no max(p) for a Noul to be calibrated on. The engine maps P(yes), and
+    the fit has to be on P(yes) for that to mean anything.
+    """
+    from fastapi.testclient import TestClient
+
+    from trigon.server.app import build_app
+    from trigon.server.config import ServerConfig
+
+    calibrator = IsotonicCalibrator()
+    # Everything maps to 0.30, so the served number is unmistakable.
+    calibrator.knots["noul"] = [(1.0, 0.30)]
+
+    import json
+    import tempfile
+
+    path = tempfile.NamedTemporaryFile(suffix=".json", delete=False, mode="w")
+    json.dump(calibrator.to_dict(), path)
+    path.close()
+
+    request = {
+        "state": "the customer was billed twice",
+        "questions": {"urgent": {"type": "noul", "instructions": "Needs a human?"}},
+    }
+    served = (
+        TestClient(build_app(ServerConfig(isotonic_path=path.name)))
+        .post("/v1/systemone", json=request)
+        .json()
+    )
+    assert served["answers"]["urgent"]["probability"] == pytest.approx(0.30, abs=1e-6)
+    # And still no confidence field anywhere on the path.
+    assert "confidence" not in served["answers"]["urgent"]
+
+
+def test_tied_confidences_are_pooled_into_one_knot():
+    """A model's confidences repeat, and unpooled ties break the lookup.
+
+    Without pooling, 4,000 answers at four distinct confidences produce
+    thousands of knots sharing four x values, and the scan returns whichever
+    it reaches first — the lowest. It measured as `confidence(0.1) == 0.0` on
+    a head whose observed rate at 0.1 was 0.26.
+    """
+    knots = _pav([0.2, 0.2, 0.2, 0.8, 0.8], [0.0, 1.0, 1.0, 1.0, 1.0])
+    assert [x for x, _ in knots] == [0.2, 0.8], "one knot per distinct x"
+    assert knots[0][1] == pytest.approx(2 / 3)
+    assert knots[1][1] == pytest.approx(1.0)
+
+    # Ties that violate monotonicity once pooled still merge.
+    merged = _pav([0.2, 0.2, 0.8], [1.0, 1.0, 0.0])
+    assert len(merged) == 1
+    assert merged[0][1] == pytest.approx(2 / 3)

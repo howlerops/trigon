@@ -41,20 +41,37 @@ MIN_ISOTONIC_SAMPLES = 400
 def _pav(xs: Sequence[float], ys: Sequence[float]) -> list[tuple[float, float]]:
     """Pool adjacent violators: the non-decreasing least-squares fit.
 
-    Returns ``(x, value)`` knots. Blocks are merged while the running mean
-    would decrease, which is the whole algorithm — the result is the unique
-    non-decreasing step function minimising squared error.
+    Returns ``(x, value)`` knots, one per distinct ``x``. Blocks are merged
+    while the running mean would decrease, which is the whole algorithm — the
+    result is the unique non-decreasing step function minimising squared
+    error.
+
+    **Tied x values are pooled before the merge**, and that is not a detail.
+    A model's confidences repeat: a Noul emits a handful of distinct
+    probabilities, and any discretised head repeats constantly. Without
+    pooling, four thousand answers at four distinct confidences produce
+    thousands of knots sharing four x values, and a lookup returns whichever
+    the scan reaches first — the *lowest* of them. It measured as
+    ``confidence(0.1) == 0.0`` on a head whose observed rate at 0.1 was 0.26.
     """
-    # (sum of y, count, largest x in the block)
-    blocks: list[list[float]] = []
+    # Pool ties into (x -> summed y, count), keeping x order.
+    pooled: dict[float, list[float]] = {}
     for x, y in zip(xs, ys, strict=True):
-        blocks.append([y, 1.0, x])
+        bucket = pooled.setdefault(x, [0.0, 0.0])
+        bucket[0] += y
+        bucket[1] += 1.0
+
+    # (sum of y, weight, x)
+    blocks: list[list[float]] = []
+    for x in sorted(pooled):
+        total, weight = pooled[x]
+        blocks.append([total, weight, x])
         while len(blocks) > 1 and blocks[-2][0] / blocks[-2][1] > blocks[-1][0] / blocks[-1][1]:
-            total, count, right = blocks.pop()
-            blocks[-1][0] += total
-            blocks[-1][1] += count
+            merged_total, merged_weight, right = blocks.pop()
+            blocks[-1][0] += merged_total
+            blocks[-1][1] += merged_weight
             blocks[-1][2] = right
-    return [(right, total / count) for total, count, right in blocks]
+    return [(right, total / weight) for total, weight, right in blocks]
 
 
 @dataclass

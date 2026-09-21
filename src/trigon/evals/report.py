@@ -143,12 +143,20 @@ def render_markdown(
             continue
         out.append(heading)
         out.append("")
-        out.append(f"| {label} | n | Accuracy | Mean confidence | Overconfidence | ECE |")
-        out.append("| --- | ---: | ---: | ---: | ---: | ---: |")
+        # Adaptive ECE beside ECE, because the two disagree and the run is
+        # gated on both. On one seed's Noul head they read 0.0251 and 0.1625
+        # over the same answers: a binary head's confidences cluster, and
+        # equal-width bins average the cluster into one number while
+        # equal-mass bins resolve it. A table carrying only the first says
+        # that head is fine while the adaptive gate fails the run.
+        out.append(
+            f"| {label} | n | Accuracy | Mean confidence | Overconfidence | ECE | Adaptive ECE |"
+        )
+        out.append("| --- | ---: | ---: | ---: | ---: | ---: | ---: |")
         for name, rep in rows.items():
             out.append(
                 f"| {name} | {rep.n} | {rep.accuracy:.3f} | {rep.mean_confidence:.3f} | "
-                f"{rep.overconfidence:+.3f} | {rep.ece:.4f} |"
+                f"{rep.overconfidence:+.3f} | {rep.ece:.4f} | {rep.adaptive_ece:.4f} |"
             )
         out.append("")
 

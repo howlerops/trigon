@@ -77,6 +77,22 @@ uncalibrated one is not (`/healthz` reports it). A degenerate temperature fit
 warns rather than returning a quiet number. Benchmarks that measure explicit
 non-goals are marked `non_goal = True` and published anyway.
 
+**A calibrator is a proposal, not a result.** There are two of them — a
+temperature and an isotonic map — and neither wins everywhere: a uniformly
+overconfident head goes from ECE 0.2135 to 0.0247 under a temperature, and a
+*tilted* head (overconfident where it is confident, under where it is not) has
+no correct temperature at all and takes isotonic from 0.1232 to 0.0227.
+`trigon train` and `trigon fit` therefore fit both per primitive, score them on
+a slice of the calibration split neither was fitted on, and apply whichever
+demonstrably helps — or neither. Do not add a third candidate without scoring
+it the same way: `scripts/decline_rule.py` and `scripts/calibrator_choice.py`
+construct heads whose true calibration is known, which a seed sweep cannot do.
+
+Score candidates on `max(ECE, adaptive ECE)`, never on ECE alone. The two
+estimators disagree — on one Noul head they read 0.0251 and 0.1625 over the
+same answers — and the run is gated on both, so optimising the blinder one
+declines the calibrator the gate is about to fail you for.
+
 ## Layout
 
 The core package is dependency-light on purpose — `pydantic` only. The
@@ -93,6 +109,7 @@ ruff check src tests scripts
 trigon eval all -n 200             # exits non-zero on a failed gate
 trigon train --out reports/run.md --save-model reports/run.pt   # train, calibrate, gate
 python scripts/seed_sweep.py --seeds 0 1 2 3 -n 8000 --epochs 8  # certify on the spread
+python scripts/regate.py reports/run.pt --out reports/          # recalibrate, no retrain
 trigon ask request.json --backend torch --weights reports/run.pt # one request
 trigon serve --backend torch --weights reports/run.pt            # behind the API
 python scripts/export_openapi.py   # after ANY change to the contract

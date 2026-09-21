@@ -498,6 +498,28 @@ def _harm_is_real(unscaled, rescaled, labels, *, resamples: int = 200, seed: int
     return worse >= ACCEPT_CONFIDENCE * resamples
 
 
+def _calibration_error(probs, labels) -> float:
+    """The statistic the calibrator selection minimises: the worse estimator.
+
+    ECE bins confidence at equal *width*; adaptive ECE bins at equal *mass*.
+    They disagree, and not by a little: on one seed's Noul head they read
+    0.0251 and 0.1625 on the same 6,000 answers, because a binary head's
+    confidences cluster tightly and equal-width bins average that cluster into
+    one number while equal-mass bins resolve it.
+
+    Both are release gates, so a run must pass both, and the selection used to
+    score candidates on the plain one alone. That is optimising the estimator
+    that cannot see the problem: it declined every calibrator for that head at
+    a plain ECE of 0.0184 while the adaptive gate failed the run at 0.0604.
+    Taking the worse of the two makes what the selection optimises the same
+    thing the gates measure.
+    """
+    from .calibration.metrics import report as calibration_report
+
+    measured = calibration_report(probs, labels, simulate_floor=False)
+    return max(measured.ece, measured.adaptive_ece)
+
+
 def _help_is_real(unscaled, rescaled, labels, *, resamples: int = 200, seed: int = 4919) -> bool:
     """Does this temperature *lower* ECE by more than sampling noise?
 
@@ -536,8 +558,6 @@ def _help_is_real(unscaled, rescaled, labels, *, resamples: int = 200, seed: int
     """
     import random
 
-    from .calibration.metrics import report as calibration_report
-
     rng = random.Random(seed)
     n = len(labels)
     if n < 2:
@@ -549,8 +569,8 @@ def _help_is_real(unscaled, rescaled, labels, *, resamples: int = 200, seed: int
         pick_labels = [labels[i] for i in picks]
         if len(set(pick_labels)) < 2:
             continue
-        a = calibration_report([unscaled[i] for i in picks], pick_labels, simulate_floor=False).ece
-        b = calibration_report([rescaled[i] for i in picks], pick_labels, simulate_floor=False).ece
+        a = _calibration_error([unscaled[i] for i in picks], pick_labels)
+        b = _calibration_error([rescaled[i] for i in picks], pick_labels)
         better += b < a
         counted += 1
     return counted > 0 and better >= ACCEPT_CONFIDENCE * counted
@@ -594,7 +614,6 @@ def _fit_calibration(engine, cases):
     import warnings
 
     from .calibration.isotonic import MIN_ISOTONIC_SAMPLES, IsotonicCalibrator
-    from .calibration.metrics import report as calibration_report
     from .calibration.temperature import CalibrationWarning, TemperatureScaler
     from .evals import run_cases
 
@@ -630,7 +649,7 @@ def _fit_calibration(engine, cases):
 
             labels = [y for _, y in check_rows]
             unscaled = [_scaled(x, 1.0) for x, _ in check_rows]
-            baseline = calibration_report(unscaled, labels, simulate_floor=False).ece
+            baseline = _calibration_error(unscaled, labels)
 
             # Candidate 1: a temperature.
             if primitive == "noul":
@@ -640,7 +659,7 @@ def _fit_calibration(engine, cases):
             else:
                 value = scaler.fit(primitive, [x for x, _ in fit_rows], [y for _, y in fit_rows])
             warmed = [_scaled(x, value) for x, _ in check_rows]
-            warm_ece = calibration_report(warmed, labels, simulate_floor=False).ece
+            warm_ece = _calibration_error(warmed, labels)
             warm_ok = _help_is_real(unscaled, warmed, labels)
 
             # Candidate 2: an isotonic map, where there is enough data for one.
@@ -649,16 +668,45 @@ def _fit_calibration(engine, cases):
             if len(fit_rows) >= MIN_ISOTONIC_SAMPLES:
                 candidate = IsotonicCalibrator()
                 fit_probs = [_scaled(x, 1.0) for x, _ in fit_rows]
-                candidate.fit(
-                    primitive,
-                    [max(p) for p in fit_probs],
+                if primitive == "noul":
+                    # A Noul is calibrated on P(yes) against whether yes
+                    # happened -- the standard binary calibration, and the
+                    # quantity the engine actually maps at serving time.
+                    #
+                    # It was fitted on max(p) against correctness, which lives
+                    # in [0.5, 1], and applied to P(yes), which lives in
+                    # [0, 1]. Every answer below even odds fell off the left
+                    # end of the fitted range and took the leftmost knot. That
+                    # is the same shape of defect as compiling with one
+                    # tokenizer and running tensors built by another, and it
+                    # cost a factor of thirteen: this head's ECE read 0.3313
+                    # against 0.0251 unscaled.
+                    candidate.fit(
+                        primitive,
+                        [p[1] for p in fit_probs],
+                        [int(y == 1) for _, y in fit_rows],
+                    )
+                else:
+                    candidate.fit(
+                        primitive,
+                        [max(p) for p in fit_probs],
+                        [
+                            int(max(range(len(p)), key=lambda i: p[i]) == y)
+                            for p, (_, y) in zip(fit_probs, fit_rows, strict=True)
+                        ],
+                    )
+                mapped = (
                     [
-                        int(max(range(len(p)), key=lambda i: p[i]) == y)
-                        for p, (_, y) in zip(fit_probs, fit_rows, strict=True)
-                    ],
+                        [
+                            1.0 - candidate.confidence(primitive, p[1]),
+                            candidate.confidence(primitive, p[1]),
+                        ]
+                        for p in unscaled
+                    ]
+                    if primitive == "noul"
+                    else [candidate.apply(primitive, p) for p in unscaled]
                 )
-                mapped = [candidate.apply(primitive, p) for p in unscaled]
-                iso_ece = calibration_report(mapped, labels, simulate_floor=False).ece
+                iso_ece = _calibration_error(mapped, labels)
                 iso_ok = _help_is_real(unscaled, mapped, labels)
 
             # Prefer whichever helps more, among those that demonstrably help.
