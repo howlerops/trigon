@@ -246,3 +246,49 @@ untouched by any of this** — 0.0879 before and 0.0879 after, because that
 head's temperature was accepted both times. No calibration change fixes it.
 That is the remaining question about this configuration, and it is a question
 about the model rather than about the calibration layer.
+
+## `strict-8k` — and the point at which calibration stops being the problem
+
+Same configuration, with the shipped accept/decline rule: a temperature is
+applied only where it demonstrably lowers held-out ECE.
+
+| Seed | Apply always | Bare decline | **Strict** | Certified |
+| ---: | ---: | ---: | ---: | --- |
+| 0 | 0.0128 | 0.0219 | 0.0297 | **yes** |
+| 1 | 0.0516 ❌ | 0.0393 | 0.0393 ❌ | no |
+| 2 | 0.0083 | 0.0077 | 0.0096 | **yes** |
+| 3 | 0.0157 | 0.0121 | 0.0121 | **yes** |
+| | worst 0.0516 | worst 0.0393 | worst 0.0393 | |
+| | range 0.0433 | range 0.0316 | range 0.0297 | |
+
+**Three of four, for the fourth time.** The accept/decline work lowered the
+worst seed's ECE from 0.0516 to 0.0393 and narrowed the range from 0.0433 to
+0.0297, which is real, and it did not change the verdict. Seed 1 now fails
+`workhorse_adaptive_ece` rather than `workhorse_ece`.
+
+**Where it stops.** Seed 1's `choice` head scores **0.0879 in every variant** —
+apply-always, bare, bootstrap and strict alike. Four different rules about
+whether to apply a temperature, and the head does not move, because the thing
+they are deciding about cannot help it. It is underconfident by 0.055 while
+being *as accurate as the seeds that certify* (0.847, against seed 2's 0.849).
+
+That is the "tilted" shape from `scripts/decline_rule.py`: miscalibrated in
+one direction where it is confident and the other where it is not. Temperature
+scaling sharpens or flattens everywhere at once, so no member of that family
+fixes it — the study puts the best achievable worst-case ECE for such a head
+at 0.06 to 0.12, which is what this head scores.
+
+**So the remaining blocker is not a calibration-layer problem, and no further
+tuning of the calibration layer will move it.** Two things would: a calibrator
+that is not one-parameter (vector or Dirichlet scaling, isotonic regression
+per primitive), or a model whose confidence tracks its accuracy without
+post-hoc help. The first is cheap and testable against the same harness.
+
+**A note on the rule choice, since the two sources disagree.** On these four
+seeds `bare` has a better median than `strict` (0.0171 against 0.0209) and an
+identical worst case, so the sweep cannot separate them where it matters. The
+constructed study can, and puts `strict` ahead on six shapes of seven. Four
+seeds with no ground truth about which decision was correct is weaker evidence
+than 280 trials with it, so `strict` ships — but the disagreement is recorded
+rather than smoothed over, and `bare` is the thing to try first if `strict`
+ever looks wrong in production.
