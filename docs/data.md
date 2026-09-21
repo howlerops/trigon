@@ -87,6 +87,28 @@ Rows marked *unchecked* keep the plan's assumption and are still blockers.
 | Home Credit; IEEE-CIS fraud | Noul on structured state | Kaggle competition terms | **dropped** | not pursued; see sign-off Q18 |
 | Autocast | Noul/Choice | **code MIT; dataset hosted "with permission from Metaculus for research purposes only"** | **red** | `andyzoujm/autocast` |
 
+### Green is a licence, not a format
+
+Cleared and *loadable* are different facts, and the second one cost a check
+worth recording. `trigon.evals.corpora` reads plain files with the standard
+library only, because it is imported by the gateway's budgeting path and by
+the drift tests, neither of which has a GPU stack — a Parquet reader here puts
+`pyarrow` in all of them.
+
+| Corpus | Format | Loadable today |
+| --- | --- | --- |
+| Banking77 | CSV over HTTP | ✅ built |
+| HelpSteer2 | gzipped JSONL | ✅ built |
+| GoEmotions | Parquet only | needs a conversion step in `scripts/` |
+| measuring_hate_speech | Parquet only | needs a conversion step in `scripts/` |
+| Circa | Parquet only | needs a conversion step in `scripts/` |
+
+**HelpSteer2's main split is not the distribution stream.** It carries
+aggregated integer ratings, 0–4, across five attributes. The per-annotator
+disagreement data is in its `disagreements/` split and is a separate load.
+The row above clears the licence; it does not deliver the thing that makes
+annotator-distribution training different from hard-label training.
+
 Net movement: CLINC150 and measuring_hate_speech clear to **green**, DBpedia-14
 resolves to **amber**, AG News separates out as **red** (the two were one row in
 the plan and do not share a licence), and **Amazon ESCI drops from green to
