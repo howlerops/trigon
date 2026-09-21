@@ -129,6 +129,7 @@ def check_gates(
     quantized: SuiteResult | None = None,
     *,
     require_per_question: bool = False,
+    slices: dict[str, CalibrationReport] | None = None,
 ) -> list[GateResult]:
     """Apply the release gates from the build plan.
 
@@ -223,6 +224,47 @@ def check_gates(
     gates.append(
         GateResult(f"{tier}_adaptive_ece", cal.adaptive_ece, limit, cal.adaptive_ece <= limit)
     )
+    # Pooled ECE cancels. Within a confidence bin it averages the *signed*
+    # gaps before taking the absolute value, so an underconfident head and an
+    # overconfident one offset each other and the pooled figure comes out
+    # below either of them. Constructed: heads at ECE 0.0574 and 0.0279,
+    # erring in opposite directions over shared bins, pool to 0.0148. The same
+    # two magnitudes erring in the *same* direction pool to 0.0473, between
+    # them, which is what a reader assumes pooling does.
+    #
+    # It is not hypothetical. Seed 1 of the 8,000-case sweep reports pooled
+    # ECE 0.0516 against a 0.05 gate while its Choice head sits at 0.0885 and
+    # its Noul head at 0.0928 -- both nearly double the limit, in opposite
+    # directions. A gate reading only the pooled number can certify a model
+    # with no well-calibrated head in it.
+    #
+    # Exactly the argument that produced `worst_question_over_baseline`, and
+    # advisory for the same reason: at a 128-wide two-layer spike no
+    # per-primitive ECE gate passes, and a gate nothing can pass measures
+    # capacity rather than honesty. It flips with the same
+    # `require_per_question` switch, so the flip cannot be quietly skipped.
+    primitives = {
+        name.removeprefix("primitive:"): rep
+        for name, rep in (slices or {}).items()
+        if name.startswith("primitive:")
+    }
+    if primitives:
+        offender_name, offender = max(primitives.items(), key=lambda kv: kv[1].ece)
+        gates.append(
+            GateResult(
+                f"worst_primitive_{tier}_ece",
+                offender.ece,
+                limit,
+                offender.ece <= limit,
+                advisory=not require_per_question,
+                note=(
+                    f"worst is {offender_name!r} at ECE {offender.ece:.4f} "
+                    f"(overconfidence {offender.overconfidence:+.3f}); pooled ECE "
+                    f"cancels heads that err in opposite directions"
+                ),
+            )
+        )
+
     if quantized is not None:
         if quantized.calibration is None:
             raise ValueError("quantized run produced no scored questions")

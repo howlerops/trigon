@@ -40,6 +40,7 @@ that made `worst_question_over_baseline` advisory rather than absent.
 | Premium ECE | ≤ 0.03 | the model |
 | Quantized-vs-BF16 ECE delta | ≤ 0.01 | the serving path |
 | `conformal_coverage` | ≥ target − 3σ | the wrapper's only promise |
+| `worst_primitive_*_ece` | ≤ tier limit | advisory; the pooled ECE cancels |
 
 The first three gate the *measurement and the premise*, not the model, and they
 run first. Two of them exist because a run failed to catch something: see §4
@@ -71,6 +72,47 @@ int8-representable values — the standard way quantization error is measured,
 and identical to an int8 kernel up to accumulation order. It is deliberately
 not built on `torch.ao.quantization`, which is scheduled for removal in torch
 2.10; a gate on a deprecation clock is a gate that stops running.
+
+### Pooled ECE cancels, so the worst primitive is gated too
+
+ECE averages the *signed* confidence gap within each bin before taking the
+absolute value. Two heads sharing a bin and erring in opposite directions
+therefore offset each other, and the pooled figure comes out below either of
+them. Constructed, at 8,000 predictions per head over shared bins:
+
+| | Underconfident head | Overconfident head | Pooled |
+| --- | ---: | ---: | ---: |
+| Opposite directions | 0.0574 | 0.0279 | **0.0148** |
+| Same direction, same magnitudes | 0.0574 | 0.0372 | 0.0473 |
+
+The second row is what a reader assumes pooling does — the pooled number lands
+between its parts. The first row is what actually happens when the errors have
+opposite signs, and it lands below both.
+
+**This is not hypothetical.** Seed 1 of the 8,000-case sweep reports pooled ECE
+0.0516 against a 0.05 gate, and its parts are:
+
+| Primitive | n | Accuracy | Mean confidence | Overconfidence | ECE |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `choice` | 6,000 | 0.847 | 0.791 | −0.056 | 0.0885 |
+| `noul` | 6,000 | 0.669 | 0.701 | +0.033 | 0.0928 |
+| `score` | 6,000 | 0.245 | 0.264 | +0.019 | 0.0193 |
+
+Two heads at nearly double the limit, in opposite directions, pooling to a
+number that misses the gate by a whisker. A gate reading only the pooled
+figure can certify a model with no well-calibrated head in it.
+
+It also settles what had been a live hypothesis: `score`, the head whose
+fitted temperature swings by a factor of sixteen across seeds, has the *best*
+calibration of the three. The suspicious temperature was not the problem, and
+the per-primitive table is what said so — the pooled number could only report
+that something was wrong.
+
+`worst_primitive_<tier>_ece` reads the worst single primitive. It is advisory
+for exactly the reason `worst_question_over_baseline` is: at a 128-wide
+two-layer spike no per-primitive gate passes, and a gate nothing can pass
+measures capacity rather than honesty. Both flip with the same
+`require_per_question` switch, so they cannot drift apart.
 
 ### Conformal coverage is gated, and its power is stated
 

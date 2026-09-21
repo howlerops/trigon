@@ -556,3 +556,91 @@ def test_the_json_report_says_which_failures_block():
     blocked = _json.loads(render_json([], [GateResult("workhorse_ece", 0.9, 0.05, False)]))
     assert blocked["passed"] is False
     assert all(g["advisory"] is False for g in blocked["gates"])
+
+
+def _biased_head(rng, n: int, k: int, bias: float):
+    """A head whose confidence spans [0.55, 0.95] and whose accuracy is off by
+    `bias` at every level. Positive bias is underconfident: right more often
+    than it says."""
+    probs, labels = [], []
+    for _ in range(n):
+        confidence = rng.uniform(0.55, 0.95)
+        row = [(1.0 - confidence) / (k - 1)] * k
+        row[0] = confidence
+        true_rate = min(max(confidence + bias, 0.0), 1.0)
+        labels.append(0 if rng.random() < true_rate else rng.randrange(1, k))
+        probs.append(list(row))
+    return probs, labels
+
+
+def test_pooled_ece_cancels_heads_that_err_in_opposite_directions():
+    """The metric fact the `worst_primitive_*_ece` gate exists for.
+
+    Within a confidence bin, ECE averages the *signed* gaps before taking the
+    absolute value. Two heads sharing a bin and erring in opposite directions
+    therefore offset, and the pooled figure comes out below either of them —
+    which is not what a reader assumes pooling does.
+    """
+    import random
+
+    from trigon.calibration.metrics import report
+
+    def ece(probs, labels):
+        return report(probs, labels, simulate_floor=False).ece
+
+    rng = random.Random(11)
+    under_p, under_y = _biased_head(rng, 8000, 4, bias=+0.056)
+    over_p, over_y = _biased_head(rng, 8000, 2, bias=-0.033)
+    pooled = ece(under_p + over_p, under_y + over_y)
+
+    assert pooled < ece(under_p, under_y)
+    assert pooled < ece(over_p, over_y), "pooling must be shown to flatter, or the gate is noise"
+
+    # The control: identical magnitudes, same direction. Pooling then lands
+    # between the two, which is the behaviour the pooled gate is trusted for.
+    rng = random.Random(11)
+    a_p, a_y = _biased_head(rng, 8000, 4, bias=+0.056)
+    b_p, b_y = _biased_head(rng, 8000, 2, bias=+0.033)
+    same = ece(a_p + b_p, a_y + b_y)
+    assert min(ece(a_p, a_y), ece(b_p, b_y)) <= same <= max(ece(a_p, a_y), ece(b_p, b_y))
+
+
+def test_the_worst_primitive_gate_reads_the_worst_primitive():
+    """And it is advisory until a real backbone lands, like its sibling."""
+    import random
+
+    from trigon.calibration.metrics import report as calibration_report
+    from trigon.evals.calibration_suite import check_gates
+
+    result, _ = run_calibration_suite(
+        Engine(LexicalBackend()), synthetic_outcome_cases(n=200), floor_trials=5
+    )
+
+    # The slices are built outright rather than taken from a run, so the test
+    # asserts the gate's rule -- name the worst primitive -- instead of
+    # asserting which head the lexical floor happens to fumble today.
+    rng = random.Random(3)
+    slices = {}
+    for name, bias in (("choice", 0.02), ("noul", -0.05), ("score", 0.35)):
+        probs, labels = _biased_head(rng, 2000, 4, bias=bias)
+        slices[f"primitive:{name}"] = calibration_report(
+            probs, labels, slice_name=f"primitive:{name}", simulate_floor=False
+        )
+    # A domain slice too: it must not be considered, or the gate would report
+    # a pooled number under a name that promises a per-primitive one.
+    slices["domain:accounts"] = slices["primitive:choice"]
+
+    gates = {g.name: g for g in check_gates(result, slices=slices)}
+    worst = gates["worst_primitive_workhorse_ece"]
+    assert "score" in worst.note, worst.note
+    assert worst.value == pytest.approx(slices["primitive:score"].ece)
+    assert worst.passed is False
+    assert worst.advisory is True
+
+    # Blocking the moment the phase-1 switch is thrown -- the same switch, so
+    # the two per-part gates cannot drift apart.
+    strict = {g.name: g for g in check_gates(result, slices=slices, require_per_question=True)}
+    assert strict["worst_primitive_workhorse_ece"].advisory is False
+
+    # And absent rather than vacuous when nothing supplies the slices.
+    assert "worst_primitive_workhorse_ece" not in {g.name for g in check_gates(result)}

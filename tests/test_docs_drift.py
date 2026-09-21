@@ -109,6 +109,16 @@ def test_the_published_gate_limits_are_the_enforced_ones(pattern, expected):
     assert float(match.group(1).replace(",", "")) == pytest.approx(expected)
 
 
+def test_the_worst_primitive_gate_is_published_with_its_tier_limit():
+    """Published as "the tier limit", because it shares one with `workhorse_ece`.
+
+    A separate number here would be a second copy of `CALIBRATION_GATES` free
+    to drift from the one the gate actually reads.
+    """
+    text = (DOCS / "evals.md").read_text()
+    assert re.search(r"\| `worst_primitive_\*_ece` \| ≤ tier limit \|", text)
+
+
 def test_the_conformal_coverage_gate_is_published_as_it_is_enforced():
     """Stated as a sigma count, because the floor is derived from the run.
 

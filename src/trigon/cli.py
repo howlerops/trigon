@@ -295,7 +295,7 @@ def cmd_train(args: argparse.Namespace) -> int:
             suite="calibration/int8",
             floor_trials=args.floor_trials,
         )
-    gates = check_gates(after, quantized=quantized)
+    gates = check_gates(after, quantized=quantized, slices=slices)
     # The int8 run is published as a row of its own, not folded into a delta.
     # A delta says how far two numbers are apart and hides which one is which;
     # the row says what the quantized path actually scores, which is the thing
