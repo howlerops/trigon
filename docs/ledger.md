@@ -127,6 +127,9 @@ Errors that flattered the project, found by re-measuring rather than by review:
 
 ## Open
 
+`docs/plan.md` is the execution plan for closing these: what has to be true, in
+what order, and how each step is known to be done.
+
 - **`size` is unlearned** on every reproducible configuration. The diagnosis
   that survives: it is a Score, a Score ran the dot-product head without its
   documented repair, and it emits a near-constant answer (sd 0.019) rather than

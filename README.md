@@ -242,6 +242,18 @@ served, since it makes a guarantee it does not keep. `docs/evals.md` has the
 gate's detection power at each sample size, which is the number that decides
 how many of your own labels you need.
 
+## Where this is going
+
+`docs/ledger.md` is the running record — what is built, what is measured, what
+was believed and turned out to be wrong, and what is still open.
+`docs/plan.md` is how the open items close: five obligations a drop-in
+replacement has to meet, of which one is close to met, and the ordering
+argument for why the model comes before the serving stack.
+
+The shortest honest summary: the calibration layer is ahead of the model, the
+economic case rests on one unmeasured number, and a well-calibrated wrong
+answer is the worst thing this project could ship.
+
 ## Layout
 
 ```
