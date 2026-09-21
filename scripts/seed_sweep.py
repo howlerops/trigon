@@ -2,6 +2,12 @@
 """Train one configuration under several seeds, and report the spread.
 
     python scripts/seed_sweep.py --seeds 0 1 2 3 -n 2500 --epochs 6
+    python scripts/seed_sweep.py --seeds 0 1 2 3 --jobs 4 -n 8000 --epochs 8
+
+With ``--jobs`` each seed writes its own ``<name>-seed<N>.log`` beside its
+report, so a sweep in flight can be followed with ``tail -f``. Each training
+run is single-threaded by design, so ``--jobs`` is cores rather than
+oversubscription.
 
 **Why this exists.** The eval harness already refuses to quote an ECE without
 simulating what a perfectly calibrated model would score on the same run --
@@ -68,12 +74,20 @@ def main() -> int:
             str(report),
             *passthrough,
         ]
-        # A failed gate exits non-zero and is a result, not an error: a sweep
-        # that stopped at the first seed that did not certify would report only
-        # the seeds that worked, which is the bias this exists to remove.
-        result = subprocess.run(command, cwd=ROOT, capture_output=True, text=True, check=False)
+        # Each seed's output goes to its own log rather than the terminal,
+        # because several runs interleaving on stderr is unreadable. It has to
+        # go *somewhere*: a sweep is tens of minutes, and one with no visible
+        # progress is indistinguishable from a hung one -- the same reason the
+        # trainer prints per-epoch even when log_every is 0.
+        log = out_dir / f"{known.name}-seed{seed}.log"
+        with log.open("w") as sink:
+            # A failed gate exits non-zero and is a result, not an error: a
+            # sweep that stopped at the first seed that did not certify would
+            # report only the seeds that worked, which is the bias this exists
+            # to remove.
+            result = subprocess.run(command, cwd=ROOT, stdout=sink, stderr=sink, check=False)
         if result.returncode not in (0, 1):
-            raise RuntimeError(f"seed {seed} failed to run ({result.returncode})\n{result.stderr}")
+            raise RuntimeError(f"seed {seed} failed to run ({result.returncode}); see {log}")
 
         sidecar = json.loads(pathlib.Path(f"{report.with_suffix('')}-training.json").read_text())
         gates = json.loads(report.with_suffix(".json").read_text())["gates"]
@@ -81,7 +95,7 @@ def main() -> int:
         blocked = [g["name"] for g in gates if not g["passed"] and not g.get("advisory")]
         if not known.keep_reports:
             for extra in out_dir.glob(f"{known.name}-seed{seed}*"):
-                if extra.suffix == ".pt":
+                if extra.suffix in {".pt", ".log"}:
                     extra.unlink()
         return {
             "seed": seed,
