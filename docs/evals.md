@@ -33,6 +33,7 @@ per domain, plus conformal coverage checks.
 | Workhorse ECE (and adaptive ECE) | ≤ 0.05 | the model |
 | Premium ECE | ≤ 0.03 | the model |
 | Quantized-vs-BF16 ECE delta | ≤ 0.01 | the serving path |
+| `conformal_coverage` | ≥ target − 3σ | the wrapper's only promise |
 
 The first three gate the *measurement and the premise*, not the model, and they
 run first. Two of them exist because a run failed to catch something: see §4
@@ -64,6 +65,45 @@ int8-representable values — the standard way quantization error is measured,
 and identical to an int8 kernel up to accumulation order. It is deliberately
 not built on `torch.ao.quantization`, which is scheduled for removal in torch
 2.10; a gate on a deprecation clock is a gate that stops running.
+
+### Conformal coverage is gated, and its power is stated
+
+A conformal wrapper promises one thing: that its prediction set contains the
+truth at the target rate. `README.md` tells a user facing calibration transfer
+to fit one on their own labels and *read the coverage number rather than the
+ECE*. For most of phase 0 that number was computed, printed to stderr, and
+checked by nothing.
+
+`trigon fit --conformal-out` now measures coverage on a third split and exits
+non-zero if it falls below a floor — and the floor is derived, not chosen.
+Empirical coverage on *n* held-out points is Binomial(*n*, 1 − α)/*n* even for
+a perfect predictor, so its standard deviation is √(α(1−α)/*n*): 0.0077 at
+n = 1,500, but 0.030 at n = 100. A fixed tolerance would be vacuous at small
+*n* and spuriously red at large *n*, which is exactly the failure
+`gate_is_testable` exists to prevent for ECE.
+
+Three sigma, one-sided. The false-positive rate is then 0.135% at every *n*.
+The *power* is not constant, and stating it is the point:
+
+| n | floor | true 0.88 | true 0.87 | true 0.85 | true 0.80 |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 300 | 0.8480 | 4.4% | 12.9% | 46.2% | 98.1% |
+| 1,500 | 0.8768 | 35.0% | 78.2% | 99.8% | 100.0% |
+| 3,000 | 0.8836 | 72.6% | 98.6% | 100.0% | 100.0% |
+| 6,000 | 0.8884 | 97.7% | 100.0% | 100.0% | 100.0% |
+
+So it catches a broken wrapper almost anywhere and a two-point shortfall only
+with thousands of held-out answers. Read it as a floor against a wrapper that
+does not work, not as an assurance that one is exact — the same reading
+`accuracy_over_baseline` asks for. The first draft of the test asserted that a
+0.87-covering predictor is caught 95% of the time at n = 1,500; it is caught
+78% of the time, and that correction is why this table exists rather than a
+sentence.
+
+**The gate is one-sided on purpose.** A predictor that returns every option
+covers perfectly and says nothing, so `mean_set_size` is reported beside
+coverage — but over-covering is a utility problem, not a broken promise, and
+there is deliberately no ceiling to pair with the floor.
 
 ### The gate on the measurement comes first
 

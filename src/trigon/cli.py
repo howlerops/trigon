@@ -438,6 +438,7 @@ def cmd_fit(args: argparse.Namespace) -> int:
     from .calibration.conformal import ConformalMethod, fit_conformal
     from .calibration.temperature import TemperatureScaler
     from .evals import run_cases, synthetic_outcome_cases
+    from .limits import CONFORMAL_COVERAGE_SIGMAS, conformal_coverage_floor
 
     engine = _engine(args.backend, args.domain, weights=args.weights)
     # The same seed offset `trigon train` reserves for calibration, so that
@@ -510,6 +511,30 @@ def cmd_fit(args: argparse.Namespace) -> int:
             f"mean set {mean_set_size(sets):.2f} of 4 options",
             file=sys.stderr,
         )
+
+        # Gate it. Coverage is the only thing a conformal wrapper promises,
+        # and it was printed rather than checked -- a number a reader was
+        # trusted to notice. The floor is derived from the target and the
+        # held-out count, not configured, because empirical coverage on n
+        # points fluctuates even for a perfect predictor and a fixed
+        # tolerance is either vacuous at small n or spuriously red at large n.
+        floor = conformal_coverage_floor(predictor.target_coverage, len(held))
+        print(
+            f"{'PASS' if achieved >= floor else 'FAIL'} conformal_coverage: "
+            f"{achieved:.4f} (floor {floor:.4f} = target "
+            f"{predictor.target_coverage:.2f} less {CONFORMAL_COVERAGE_SIGMAS:g} sigma "
+            f"of sampling noise at n={len(held)})",
+            file=sys.stderr,
+        )
+        if achieved < floor:
+            print(
+                "\nThe profile was written anyway, because a wrapper that "
+                "under-covers is\nevidence about the model and you will want to "
+                "look at it. Do not serve it:\nit makes a guarantee it does not "
+                "keep, which is worse than making none.",
+                file=sys.stderr,
+            )
+            return 1
     return 0
 
 

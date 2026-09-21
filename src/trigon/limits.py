@@ -234,3 +234,56 @@ MAX_FLOOR_FRACTION_OF_GATE = 0.5
 # The margin is a floor against that degenerate case, not an accuracy target.
 # The real accuracy bar is the workflow suite.
 MIN_ACCURACY_OVER_BASELINE = 0.05
+
+
+# How far below its target a conformal predictor's measured coverage may fall
+# before the fit is rejected, in standard deviations of the sampling noise.
+#
+# Conformal's promise is a coverage guarantee, and it is the mitigation the
+# whole calibration-transfer risk rests on -- `README.md` tells a user to fit
+# one on their own labels and "read the coverage number rather than the ECE".
+# That number was computed, printed, and gated by nothing.
+#
+# It cannot be gated with a fixed margin. Empirical coverage on n held-out
+# points is Binomial(n, 1 - alpha) / n even for a perfect predictor, so its
+# standard deviation is sqrt(alpha * (1 - alpha) / n): about 0.0077 at
+# n = 1,500 and alpha = 0.1, but 0.0300 at n = 100. A fixed tolerance is
+# either vacuous at small n or spuriously red at large n, which is the same
+# mistake `gate_is_testable` exists to prevent for ECE -- a limit quoted
+# without the noise under it.
+#
+# Three sigma one-sided. The false-positive rate is 0.135% at every n, by
+# construction -- a correctly covering predictor is failed about once in 750
+# runs whatever the sample size.
+#
+# What DOES depend on n is the power to catch a real breach, and it is worth
+# stating rather than assuming. Probability of failing a predictor whose true
+# coverage is p, against a 0.90 target:
+#
+#       n     floor    p=0.88   p=0.87   p=0.85   p=0.80
+#     300    0.8480      4.4%    12.9%    46.2%    98.1%
+#   1,500    0.8768     35.0%    78.2%    99.8%   100.0%
+#   3,000    0.8836     72.6%    98.6%   100.0%   100.0%
+#   6,000    0.8884     97.7%   100.0%   100.0%   100.0%
+#
+# So this gate catches a gross breach almost anywhere and a two-point one only
+# with thousands of held-out answers. Read it as a floor against a wrapper
+# that is broken, not as an assurance that one is exact -- the same reading
+# `MIN_ACCURACY_OVER_BASELINE` asks for. `trigon fit -n 1500` sits in the row
+# where 0.85 is certain and 0.88 is a coin flip; raise n if the difference
+# between 0.88 and 0.90 matters to the deployment.
+CONFORMAL_COVERAGE_SIGMAS = 3.0
+
+
+def conformal_coverage_floor(target: float, n: int, sigmas: float = CONFORMAL_COVERAGE_SIGMAS):
+    """The lowest coverage at ``n`` points explicable by sampling alone.
+
+    Below this, a predictor is under-covering rather than unlucky. Derived
+    from ``target`` and ``n`` rather than configured, so it cannot drift away
+    from the run it is judging.
+    """
+    if not 0.0 < target < 1.0:
+        raise ValueError(f"coverage target must be in (0, 1), got {target}")
+    if n <= 0:
+        raise ValueError("no held-out points to measure coverage on")
+    return target - sigmas * ((target * (1.0 - target) / n) ** 0.5)

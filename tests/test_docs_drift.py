@@ -22,6 +22,7 @@ import pytest
 from trigon.limits import (
     CALIBRATION_GATES,
     COMPAT_BUDGET,
+    CONFORMAL_COVERAGE_SIGMAS,
     DEFAULT_BUDGET,
     MAX_FLOOR_FRACTION_OF_GATE,
     MIN_ACCURACY_OVER_BASELINE,
@@ -106,6 +107,17 @@ def test_the_published_gate_limits_are_the_enforced_ones(pattern, expected):
     match = re.search(pattern, text)
     assert match, f"the gate table row matching {pattern!r} was reworded or removed"
     assert float(match.group(1).replace(",", "")) == pytest.approx(expected)
+
+
+def test_the_conformal_coverage_gate_is_published_as_it_is_enforced():
+    """Stated as a sigma count, because the floor is derived from the run.
+
+    A fixed number here would be wrong at every sample size but one, which is
+    the whole argument of the section it appears in.
+    """
+    text = (DOCS / "evals.md").read_text()
+    assert re.search(r"\| `conformal_coverage` \| ≥ target − 3σ \|", text)
+    assert CONFORMAL_COVERAGE_SIGMAS == 3.0
 
 
 def test_the_testability_rule_is_stated_as_it_is_enforced():
