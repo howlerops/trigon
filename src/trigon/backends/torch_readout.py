@@ -824,6 +824,105 @@ class TorchReadoutBackend:
             diagnostics={"sequence_tokens": length},
         )
 
+    def infer_many(
+        self, batch: Sequence[tuple[CompiledRequest, SystemOneRequest]]
+    ) -> list[BackendOutput]:
+        """Several requests, one forward pass.
+
+        `docs/next.md` B.2. Continuous batching over a prefill-only model is
+        the easy case and this is why: there is no decode loop, no ragged
+        generation and no per-step scheduling — every request is exactly one
+        pass, so a batch is a pad and a stack.
+
+        **The answers must not depend on what else was in the batch.** That is
+        the same guarantee the block mask already gives *within* a request,
+        extended across them: padding attends to nothing and nothing attends
+        to padding, so sample `i`'s hidden states are a function of sample `i`
+        alone. `tests/test_batching.py` asserts it against the one-at-a-time
+        path, and it is the only property here worth testing, because a batcher
+        that quietly mixes two callers' states produces well-formed answers to
+        questions nobody asked.
+
+        Returns one `BackendOutput` per input, in order. Falls back to the
+        single path for a batch of one rather than paying to pad it.
+        """
+        if not batch:
+            return []
+        if len(batch) == 1:
+            return [self.infer(*batch[0])]
+
+        started = time.perf_counter()
+        was_training = self.model.training
+        self.model.eval()
+        try:
+            embedded = [self._embed(compiled) for compiled, _ in batch]
+            lengths = [int(e.shape[1]) for e, _ in embedded]
+            width = max(lengths)
+            d_model = self.config.d_model
+
+            padded = torch.zeros(len(batch), width, d_model)
+            positions = torch.zeros(len(batch), width, dtype=torch.long)
+            segments = torch.zeros(len(batch), width, dtype=torch.long)
+            masks = torch.zeros(len(batch), width, width, dtype=torch.bool)
+
+            for i, ((compiled, _), (embeddings, spans)) in enumerate(
+                zip(batch, embedded, strict=True)
+            ):
+                n = lengths[i]
+                padded[i, :n] = embeddings[0]
+                positions[i, :n] = spans.positions()
+                segments[i, :n] = spans.segment_types()
+                one = torch.tensor(materialize_mask(compiled), dtype=torch.bool)
+                if one.shape[0] != n:
+                    raise ValueError(
+                        f"mask is {one.shape[0]} tokens but the sequence is {n}; "
+                        "the compiler's estimator must be the backend's tokenizer"
+                    )
+                masks[i, :n, :n] = one
+                # A padding row that may attend to nothing is a softmax over an
+                # empty set, which is NaN, and one NaN in a batched attention
+                # poisons every sample sharing the tensor. Letting padding
+                # attend to itself keeps it finite and keeps it isolated: no
+                # real token attends *to* padding, so the value is never read.
+                for j in range(n, width):
+                    masks[i, j, j] = True
+
+            with torch.no_grad():
+                hidden = self.model(padded, masks, positions, segments)
+
+            results = []
+            for i, ((compiled, request), (_, spans)) in enumerate(
+                zip(batch, embedded, strict=True)
+            ):
+                raw = self._heads(compiled, request, hidden[i, : lengths[i]], spans)
+                results.append(
+                    BackendOutput(
+                        outputs={
+                            q.question_id: QuestionOutput(
+                                question_id=q.question_id,
+                                kind=q.kind,
+                                logits=tuple(float(x) for x in raw[q.question_id].tolist()),
+                            )
+                            for q in compiled.schema.questions
+                        },
+                        model_version=self._version,
+                        # The pass is shared, so its cost is too. Charging each
+                        # request the whole batch's wall clock would make a
+                        # batch of eight look eight times more expensive than
+                        # the same work unbatched.
+                        model_ms=(time.perf_counter() - started) * 1000.0 / len(batch),
+                        # The schema prefix cache is not used on this path: a
+                        # batch's samples can have different schemas and the
+                        # prefix is per-schema, so mixing them would need a
+                        # per-sample gather this does not do yet.
+                        cached_schema_tokens=0,
+                        diagnostics={"sequence_tokens": lengths[i], "batch": len(batch)},
+                    )
+                )
+            return results
+        finally:
+            self.model.train(was_training)
+
     # -- sequence construction -------------------------------------------
 
     def _embed(self, compiled: CompiledRequest) -> tuple[torch.Tensor, _Spans]:

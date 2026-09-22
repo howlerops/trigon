@@ -134,11 +134,25 @@ saving at the served shape is 6× the requests per GPU-second, which is the
 denominator of $/MTok. It does not replace the burn-in; it means the burn-in
 starts from a different place than the one the pricing model assumed.
 
-**B.2 The model server.** No batching across requests today. Continuous
-batching over a prefill-only model is the easy case — no decode loop, no
-ragged generation, one pass per request — and the gateway is already measured
-at 1.5% of the p50 budget, so the batching layer is where the latency story is
-won or lost. Blocker: none checked; the logic is testable on CPU.
+**B.2 The model server.** 🟡 **Built, measured, and it does not pay here.**
+`Engine.answer_many` coalesces requests into one forward pass and
+`tests/test_batching.py` asserts a batched answer is identical to the one the
+request would have got alone — the block mask's guarantee extended across
+requests, which is the only property worth testing, because a batcher that
+mixes two callers' states produces well-formed answers to questions nobody
+asked.
+
+On this hardware it is **30% slower**: 3.43 ms per request alone against 4.14
+ms in a batch of 16 (`reports/batching/README.md`). Not padding — the
+synthetic corpus wastes 1.02× on that — but that batching fills parallel
+capacity a small request leaves idle, and on one CPU thread there is none to
+fill. Everything defaults to serial; `batch_size > 1` opts in.
+
+**The throughput claim this item wanted needs the same GPU A.3 and B.1 need.**
+What is measured is that the batching layer costs 10–20% on CPU, which is
+worth knowing before building a scheduler on top of it. The remaining piece —
+a gateway queue that coalesces concurrent requests — is deliberately not built
+against a primitive that is currently a loss.
 
 **B.3 Measure the KV cache's wall clock.** ✅ **Done, and it changed the
 default.** 6× at the shape the certified Banking77 model serves and 23× at 256

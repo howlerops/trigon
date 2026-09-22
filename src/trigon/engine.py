@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import time
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 from .backends.base import Backend, QuestionOutput, estimator_of, validate_output
@@ -137,6 +138,92 @@ class Engine:
             ),
             tier=output.tier or self.config.tier,
         )
+
+    def answer_many(
+        self, requests: Sequence[SystemOneRequest], batch_size: int = 16
+    ) -> list[SystemOneResponse]:
+        """Answer several requests, coalescing the forward passes.
+
+        `docs/next.md` B.2. A prefill-only model makes this the easy case:
+        every request is exactly one pass, so a batch is a pad and a stack --
+        no decode loop, no ragged generation, no per-step scheduling.
+
+        **An answer must not depend on what else was in the batch.** That is
+        the block mask's guarantee extended across requests, and
+        `tests/test_batching.py` asserts it against this method's own
+        one-at-a-time path. A batcher that quietly mixes two callers' states
+        produces well-formed answers to questions nobody asked, which is the
+        failure this whole project is built against.
+
+        Backends without a batched path fall through to `answer`, so this is
+        always safe to call; it is faster only where the backend implements
+        one. Requests are batched in arrival order rather than sorted by
+        length: sorting would pad less and reorder results, and a caller
+        reading `responses[i]` as the answer to `requests[i]` is a contract
+        worth more than the padding.
+        """
+        infer_many = getattr(self.backend, "infer_many", None)
+        if infer_many is None or len(requests) < 2:
+            return [self.answer(request) for request in requests]
+
+        responses: list[SystemOneResponse] = []
+        for start in range(0, len(requests), max(1, batch_size)):
+            window = requests[start : start + max(1, batch_size)]
+            prepared = []
+            for request in window:
+                served, shortlists = self._apply_retrieval(request)
+                compile_started = time.perf_counter()
+                compiled = self.compiler.compile_request(served)
+                prepared.append(
+                    (
+                        request,
+                        served,
+                        shortlists,
+                        compiled,
+                        (time.perf_counter() - compile_started) * 1000.0,
+                    )
+                )
+
+            started = time.perf_counter()
+            outputs = infer_many([(compiled, served) for _, served, _, compiled, _ in prepared])
+            elapsed = (time.perf_counter() - started) * 1000.0
+
+            for (request, _, shortlists, compiled, compile_ms), output in zip(
+                prepared, outputs, strict=True
+            ):
+                validate_output(output, compiled)
+                answers = {
+                    qid: self._answer_one(
+                        qid, question, output.outputs[qid], shortlists.get(qid), request
+                    )
+                    for qid, question in request.questions.items()
+                }
+                responses.append(
+                    SystemOneResponse(
+                        id=f"so_{uuid.uuid4().hex[:24]}",
+                        model=output.model_version,
+                        answers=answers,
+                        usage=Usage(
+                            state_tokens=compiled.state_tokens,
+                            schema_tokens=compiled.schema_tokens,
+                            readout_tokens=compiled.readout_tokens,
+                            prefill_tokens=compiled.total_tokens,
+                            cached_schema_tokens=output.cached_schema_tokens,
+                        ),
+                        timing=Timing(
+                            # The batch's wall clock shared out, plus this
+                            # request's own compile. Reporting each request the
+                            # whole batch's time would make a batch of eight
+                            # look eight times more expensive than the same
+                            # work done one at a time.
+                            total_ms=elapsed / len(prepared) + compile_ms,
+                            model_ms=output.model_ms,
+                            compile_ms=compile_ms,
+                        ),
+                        tier=output.tier or self.config.tier,
+                    )
+                )
+        return responses
 
     # -- stages ----------------------------------------------------------
 

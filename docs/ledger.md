@@ -117,6 +117,7 @@ twenty-two runs** — the investigation is closed and the evidence is in
 | Schema share of a typical request | 77%; the cache skips 53 of 69 positions |
 | Compat path vs native path | Identical answers through one process, asserted per primitive |
 | Schema KV cache, 77 options | 91.8 ms → 15.3 ms p50, a **6× speedup**; 23× at 256 options |
+| Batching 16 requests into one pass, on CPU | 4.14 ms/request against 3.43 ms serial — a 20% loss |
 | Banking77, four seeds | 0.7126–0.7404 against a 1.6% marginal; ECE 0.0177–0.0361, floor 0.0153 |
 | `size`, across 7 interventions and 22 runs | Below its own marginal on every seed; median −0.0095 |
 | Banking77 accuracy (pilot, 2 seeds) | 0.4640 / 0.4193 against a 1.8% marginal — **it transfers** |
@@ -146,6 +147,8 @@ The most useful section. Each of these was argued for before it was measured.
 | The served path is exact to floating-point equality | On this machine. On GitHub's it drifts 2.4e-08 with no cache at all. |
 | A configuration certified on four seeds is certified | Four seeds on *one machine*. Hardware is a second axis of the same perturbation. |
 | The KV cache's saving is worth less than its exactness cost | 6× at the served shape, and the exactness cost was never the cache's. |
+| Batching across requests is where the latency story is won | 30% *slower* on CPU: 3.43 ms alone against 4.14 ms in a batch of 16. |
+| A 256-entry cache limit bounds a mask cache | It bounds a count. Masks are quadratic, and it cost three OOM-killed seeds. |
 | The distribution corpora need a Parquet reader | HelpSteer2 is gzipped JSONL. Three of four do; it does not. |
 | "ECE ≤ 0.05 per corpus" is a reachable done-condition | Not on a corpus whose test split is below the 5,000-sample floor. |
 
@@ -165,6 +168,10 @@ Errors that flattered the project, found by re-measuring rather than by review:
   at 0.0885 and 0.0928 in opposite directions pool to 0.0516.
 - **The seed sweep reported 0 of 4 certified when 3 of 4 had passed**, by
   filtering on a flag the report format never emitted.
+- **The batching benchmark was run twice under four training jobs** and
+  reported a 4.3× speedup where an idle machine shows a 30% loss. The same
+  mistake as the first KV-cache benchmark, made twice in one session; the
+  published numbers were taken with those jobs `kill -STOP`ped.
 - **The tokenizer was trained on `docs/*.md`.** The vocabulary moved 5,635 →
   4,712 → 6,392 → 4,776 across commits, driven by *documentation edits*. It
   destroyed the one positive `size` result by changing the thing that result

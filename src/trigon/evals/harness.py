@@ -211,8 +211,40 @@ class SuiteResult:
         }
 
 
-def run_cases(engine: Engine, cases: Iterable[Case]) -> list[CaseOutcome]:
-    """Run every case through one engine, recording answers and latency."""
+def run_cases(engine: Engine, cases: Iterable[Case], batch_size: int = 1) -> list[CaseOutcome]:
+    """Run every case through one engine, recording answers and latency.
+
+    **Serial by default, because batching is slower here.** It was written
+    expecting the opposite -- `docs/next.md` B.2 called the batching layer
+    "where the latency story is won or lost" -- and measurement on an idle
+    machine says the forward pass costs 3.43 ms per request alone and 4.14 ms
+    per request in a batch of 16. `reports/batching/README.md` has the numbers
+    and the reason: batching fills parallel capacity that a single small
+    request leaves idle, and on one CPU thread there is none to fill.
+
+    The batched path is kept, tested and correct because it is the right shape
+    for a GPU, which this project does not have. `batch_size > 1` opts in.
+
+    **The latency reported under batching is per request, not per batch.** A
+    batch's wall clock shared out is what a request cost when the work was
+    coalesced; it is not the p50 a caller sees on a gateway answering one
+    request, so mixing the two would understate serving latency.
+    """
+    cases = list(cases)
+    if batch_size > 1 and getattr(engine.backend, "infer_many", None) is not None:
+        started = time.perf_counter()
+        responses = engine.answer_many([case.request for case in cases], batch_size=batch_size)
+        shared = (time.perf_counter() - started) * 1000.0 / max(1, len(cases))
+        return [
+            CaseOutcome(
+                case=case,
+                response=response,
+                questions=_align(case, response),
+                latency_ms=shared,
+            )
+            for case, response in zip(cases, responses, strict=True)
+        ]
+
     outcomes: list[CaseOutcome] = []
     for case in cases:
         started = time.perf_counter()

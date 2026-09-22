@@ -1,0 +1,11 @@
+300 synthetic cases, 1 torch thread, 4-core Xeon @ 2.80GHz, idle machine
+
+ batch   seconds   cases/s  vs serial
+----------------------------------------
+     1      1.86     161.4      1.00x
+     2      2.78     107.8      0.67x
+     4      2.62     114.7      0.71x
+     8      2.50     119.8      0.74x
+    16      2.67     112.2      0.70x
+    32      2.54     118.3      0.73x
+    64      2.65     113.1      0.70x
