@@ -53,6 +53,16 @@ At $0.007 against $0.25/MTok the tool prints savings of 75–96×. Those are
 *your* inputs multiplied by *our* exact token counts. The token counts are
 trustworthy. The 0.007 is not, yet.
 
+**One input to that number has since been measured, and it moves the right
+way.** `$/MTok` is dollars per hour over tokens per second, and the schema KV
+cache multiplies the denominator: 6× at the shape the certified Banking77
+model serves, 23× at 256 options (`reports/cache/README.md`). That is a CPU
+measurement and the constant will differ on an L4, but the saving is
+algorithmic — it skips recomputing 97% of the sequence — so the burn-in starts
+somewhere better than the arithmetic above assumed. It does not make the
+0.007 trustworthy; it means the thing being measured has changed since the
+figure was inherited.
+
 **Two corrections this table has already survived.** The first draft compared a
 *cached* typed path against an *uncached* prompted one, because the prompted
 path's instruction block is equally cacheable on any provider with prompt

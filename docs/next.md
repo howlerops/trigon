@@ -163,7 +163,15 @@ reports it, and `TRIGON_CACHE_PREFIXES=0` turns it off.
 
 ## Stage C — Make it something a stranger can adopt
 
-**C.1 Publish weights — but not these.** Stage 4.3 of the last plan is
+**C.1 Publish weights — but not these.** The argument has weakened and still
+holds. When this was written the only weights were a spike whose accuracy was
+not a result. `reports/banking77/` now has four certified checkpoints at
+71–74% with ECE 0.0177–0.0361, which *are* a result, so the reason not to
+publish is no longer "it answers badly" — it is that a 128-wide two-layer
+model at 74% invites comparison with a fine-tuned BERT at 93% on a solved
+benchmark, and loses. What would make publishing worth doing is A.3.
+
+ Stage 4.3 of the last plan is
 deliberately not done. The reference model is a spike whose accuracy is not a
 result, said so from the first commit, and publishing its weights under the
 project's name would be the most misleading thing in the repository: a
