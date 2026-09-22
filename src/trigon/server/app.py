@@ -67,7 +67,7 @@ def create_router(config: ServerConfig | None = None) -> TieredRouter:
     )
 
 
-def _backend(name: str, weights: str | None = None, cache_prefixes: bool = False) -> Any:
+def _backend(name: str, weights: str | None = None, cache_prefixes: bool = True) -> Any:
     if name == "lexical":
         if weights:
             raise ValueError("the lexical backend has no weights to load")
@@ -146,6 +146,11 @@ def build_app(config: ServerConfig | None = None, router: TieredRouter | None = 
             # which is the worse failure and looks identical from outside.
             "calibrated": config.is_calibrated,
             "trained": config.is_trained,
+            # Reported for the same reason as the two above: the cache moves
+            # answers by ~5e-08 and wall clock by 6x, and an operator
+            # comparing two deployments should not have to guess which of
+            # them is running it.
+            "schema_cache": config.cache_prefixes,
             "context_tokens": DEFAULT_BUDGET.context_tokens,
             "latency_target_ms": {
                 "p50": DEFAULT_LATENCY_TARGET.p50_ms,

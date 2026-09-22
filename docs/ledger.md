@@ -116,6 +116,8 @@ twenty-two runs** — the investigation is closed and the evidence is in
 | The KV cache's cost in exactness | None that is portable: on GitHub's CPUs the *cached* path is the exact one |
 | Schema share of a typical request | 77%; the cache skips 53 of 69 positions |
 | Compat path vs native path | Identical answers through one process, asserted per primitive |
+| Schema KV cache, 77 options | 91.8 ms → 15.3 ms p50, a **6× speedup**; 23× at 256 options |
+| Banking77, four seeds | 0.7126–0.7404 against a 1.6% marginal; ECE 0.0177–0.0361, floor 0.0153 |
 | `size`, across 7 interventions and 22 runs | Below its own marginal on every seed; median −0.0095 |
 | Banking77 accuracy (pilot, 2 seeds) | 0.4640 / 0.4193 against a 1.8% marginal — **it transfers** |
 
@@ -143,6 +145,7 @@ The most useful section. Each of these was argued for before it was measured.
 | Stage 2.1 is blocked on data | Banking77 is reachable, green, and was cleared by our own audit. |
 | The served path is exact to floating-point equality | On this machine. On GitHub's it drifts 2.4e-08 with no cache at all. |
 | A configuration certified on four seeds is certified | Four seeds on *one machine*. Hardware is a second axis of the same perturbation. |
+| The KV cache's saving is worth less than its exactness cost | 6× at the served shape, and the exactness cost was never the cache's. |
 | The distribution corpora need a Parquet reader | HelpSteer2 is gzipped JSONL. Three of four do; it does not. |
 | "ECE ≤ 0.05 per corpus" is a reachable done-condition | Not on a corpus whose test split is below the 5,000-sample floor. |
 
@@ -231,11 +234,10 @@ what order, and how each step is known to be done.
   every finding here. Stage 1.3 is the experiment that settles it.
 - **$/MTok is unmeasured.** The whole cost argument beyond ~2× rests on it.
   Needs the L4 burn-in.
-- **The KV cache is off by default because nobody has timed it.** The
-  benchmark ran under four concurrent training jobs and is not publishable.
-  Until there is a number, an optimisation does not get to be the default —
-  and the exactness argument that used to justify it did not survive a second
-  machine.
+- ~~The KV cache is off by default because nobody has timed it.~~ **Closed.**
+  Timed on an idle machine: 6× at the served shape, 23× at 256 options
+  (`reports/cache/README.md`). It is on by default now and `/healthz` reports
+  it.
 - **Semantic compatibility is unmet.** The wire, envelope and status codes now
   line up (`docs/compat.md`); the model answers one question of three well. An
   adapter cannot fix that, and calibration makes a wrong answer credible.

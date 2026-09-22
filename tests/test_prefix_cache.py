@@ -265,10 +265,34 @@ def test_neither_path_lets_a_question_reach_another_and_neither_is_exact():
     assert with_cache < 1e-6, f"with the cache the drift is {with_cache:.3e}, not rounding"
 
 
-def test_the_gateway_defaults_the_cache_off():
-    """Nobody gets a weaker promise than the one they read about by accident."""
+def test_the_gateway_defaults_the_cache_on_and_says_so():
+    """Default flipped on measurement, and the flip is visible.
+
+    It was off for two reasons. The first -- that the cache traded exact
+    independence for compute -- turned out to be wrong: on GitHub's runners
+    the cached path is the exact one. The second -- that nobody had timed it
+    -- was honest, and `reports/cache/README.md` retired it: 6x at the shape
+    the certified Banking77 model serves, 23x at 256 options.
+
+    `/healthz` reports which way it is set for the same reason it reports
+    whether the deployment is calibrated. The cache moves answers by ~5e-08
+    and wall clock by 6x, and an operator comparing two deployments should not
+    have to guess which of them is running it.
+    """
     from trigon.server.config import ServerConfig
 
-    assert ServerConfig().cache_prefixes is False
-    assert ServerConfig.from_env({}).cache_prefixes is False
-    assert ServerConfig.from_env({"TRIGON_CACHE_PREFIXES": "1"}).cache_prefixes is True
+    assert ServerConfig().cache_prefixes is True
+    assert ServerConfig.from_env({}).cache_prefixes is True
+    assert ServerConfig.from_env({"TRIGON_CACHE_PREFIXES": "0"}).cache_prefixes is False
+    assert ServerConfig.from_env({"TRIGON_CACHE_PREFIXES": "false"}).cache_prefixes is False
+
+
+def test_healthz_reports_whether_the_cache_is_running():
+    from fastapi.testclient import TestClient
+
+    from trigon.server.app import build_app
+    from trigon.server.config import ServerConfig
+
+    for enabled in (True, False):
+        with TestClient(build_app(ServerConfig(backend="lexical", cache_prefixes=enabled))) as http:
+            assert http.get("/healthz").json()["schema_cache"] is enabled

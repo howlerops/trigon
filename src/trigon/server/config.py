@@ -28,21 +28,25 @@ class ServerConfig:
     # weights are fixed for a process's lifetime, which is what makes a prefix
     # safe to reuse at all.
     #
-    # **Off by default, because nobody has timed it.** The layout makes the
-    # schema prefix cacheable and this implements it; what has never been
-    # measured is what it saves in wall clock (docs/next.md B.3). An
-    # optimisation with no number under it does not get to be the default.
+    # **On by default, now that it has been timed.** At the shape the
+    # certified Banking77 model actually serves -- 77 options, 707 of 725
+    # tokens schema -- the cache is a 6x speedup: 91.8 ms to 15.3 ms p50. At
+    # 256 options it is 23x, and the uncached tail is twice its own median
+    # because it recomputes a 2,474-token self-attention whose answer cannot
+    # change. reports/cache/README.md has the table.
     #
-    # The reason this comment used to give was that the cache turns exact
-    # per-question independence into a 4.6e-08 tolerance. That is not the
-    # difference between the two paths. On GitHub's runners the cached path is
-    # exact and the uncached one drifts 2.4e-08 -- backwards from here --
-    # because what decides it is whether a sequence length lands on a kernel
-    # that reduces in the same order, not whether the cache is on. Neither
-    # path lets one question reach another; that is the mask, and it holds
-    # exactly. See tests/test_prefix_cache.py, which has been wrong about
-    # this twice.
-    cache_prefixes: bool = False
+    # It was off for two reasons and both are spent. The first, that the cache
+    # traded exact independence for compute, is wrong: on GitHub's runners the
+    # *cached* path is the exact one and the uncached drifts 2.4e-08, because
+    # what decides it is whether a sequence length lands on a kernel that
+    # reduces in the same order. The second, that nobody had timed it, was
+    # honest and is no longer true.
+    #
+    # Set TRIGON_CACHE_PREFIXES=0 to turn it off. /healthz reports which way
+    # it is set, for the same reason it reports whether the deployment is
+    # calibrated: an operator should not have to guess which numbers their
+    # gateway is producing.
+    cache_prefixes: bool = True
     # Paths to fitted artifacts. Absent means "serve uncalibrated and say so".
     temperature_path: str | None = None
     # `trigon train` picks a calibrator per primitive and writes whichever
@@ -61,7 +65,7 @@ class ServerConfig:
             backend=source.get("TRIGON_BACKEND", "lexical"),
             weights=source.get("TRIGON_WEIGHTS") or None,
             domain=source.get("TRIGON_DOMAIN") or None,
-            cache_prefixes=source.get("TRIGON_CACHE_PREFIXES", "0") not in ("0", "false"),
+            cache_prefixes=source.get("TRIGON_CACHE_PREFIXES", "1") not in ("0", "false"),
             temperature_path=source.get("TRIGON_TEMPERATURE_PATH") or None,
             isotonic_path=source.get("TRIGON_ISOTONIC_PATH") or None,
             conformal_dir=source.get("TRIGON_CONFORMAL_DIR") or None,

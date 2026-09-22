@@ -90,8 +90,9 @@ exactly what a caller needs to know.
 
 **A.3 Replace the spike.** Unchanged from the last plan and now the single
 highest-value item, because it is also the only remaining explanation for
-`size`. Prefix-LM conversion of a 0.5–1.5B open base. Blocker: a GPU
-(**assumed**, not checked — nothing in this session tried to find one).
+`size`. Prefix-LM conversion of a 0.5–1.5B open base. Blocker: a GPU — **checked
+now, and real**: `nvidia-smi` is absent, `torch.cuda.is_available()` is False,
+and the machine is a 4-core Xeon with 15 GB and no accelerator.
 
 **This invalidates every number in `reports/`.** Sequence it after A.1 and A.2
 so there is a real-data baseline to compare against, not only a synthetic one.
@@ -120,7 +121,13 @@ whose outcome does not depend on which machine trains it.
 number in the project: $/MTok decides whether the economic story is "an order
 of magnitude" or "about twice". The token-layout advantage is measured at
 ~1.6–2.9× break-even and everything beyond that is arithmetic over an
-unsourced input. Blocker: an L4 (**assumed**).
+unsourced input. Blocker: an L4 — **checked now, and real**: no GPU is present
+or reachable from this machine.
+
+B.3 moves this number, though, and in the right direction: a 6× wall-clock
+saving at the served shape is 6× the requests per GPU-second, which is the
+denominator of $/MTok. It does not replace the burn-in; it means the burn-in
+starts from a different place than the one the pricing model assumed.
 
 **B.2 The model server.** No batching across requests today. Continuous
 batching over a prefill-only model is the easy case — no decode loop, no
@@ -128,11 +135,10 @@ ragged generation, one pass per request — and the gateway is already measured
 at 1.5% of the p50 budget, so the batching layer is where the latency story is
 won or lost. Blocker: none checked; the logic is testable on CPU.
 
-**B.3 Measure the KV cache's wall clock.** It is built, it skips 53 of 69
-positions on a typical request, and its saving has never been timed on an idle
-machine. Until it is, "the schema is cacheable" is an architectural property
-with no number attached. Blocker: none — it needs a quiet machine, not a
-better one.
+**B.3 Measure the KV cache's wall clock.** ✅ **Done, and it changed the
+default.** 6× at the shape the certified Banking77 model serves and 23× at 256
+options; `reports/cache/README.md`. The cache is now on by default, `/healthz`
+reports it, and `TRIGON_CACHE_PREFIXES=0` turns it off.
 
 ---
 
@@ -163,9 +169,10 @@ could ship**, and calibration is now far ahead of accuracy. Serving a model
 whose numbers do not transfer faster, or cheaper, or behind a nicer adapter,
 is optimising the wrong thing three times over.
 
-The exception is **B.3**, the KV cache timing. It needs a quiet machine rather
-than a better one, it takes an afternoon, and it closes a claim that is
-currently published as a token count with no time under it.
+The exception was **B.3**, the KV cache timing, and it is done. It needed a
+quiet machine rather than a better one, and it closed a claim that had been
+published as a token count with no time under it — then turned the default
+around.
 
 ---
 

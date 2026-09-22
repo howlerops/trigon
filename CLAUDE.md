@@ -52,16 +52,19 @@ The KV prefix is the same class of thing and **is** cached now, behind a flag.
 block's outputs, keyed on `schema_hash`; `Usage.cached_schema_tokens` reports a
 hit rather than always 0.
 
-**It is off by default on the gateway, and the reason is that nobody has
-timed it.** An optimisation whose wall-clock saving has never been measured
-should not be on by default; `docs/next.md` B.3 is that measurement.
+**It is on by default on the gateway, now that it has been timed.** At the
+shape the certified Banking77 model serves — 77 options, 707 of 725 tokens
+schema — it is a 6× speedup, 91.8 ms to 15.3 ms p50; at 256 options, 23×.
+`reports/cache/README.md` has the table and the hardware.
 
-The reason it *used* to give was that the cache turns exact independence into
-a 4.6e-08 tolerance. That is not the difference between the two paths. On
-GitHub's runners the cached path is exact and the uncached one drifts
-2.4e-08 — the ordering is backwards there — because what actually decides it
-is whether a given sequence length lands on a kernel that reduces in the same
-order. Neither path leaks; neither is bit-reproducible across shapes.
+It was off for two reasons and both are spent. The first, that the cache
+traded exact independence for compute, is wrong: on GitHub's runners the
+*cached* path is exact and the uncached one drifts 2.4e-08, because what
+decides it is whether a sequence length lands on a kernel that reduces in the
+same order. Neither path leaks; neither is bit-reproducible across shapes. The
+second, that nobody had timed it, was honest and is no longer true.
+`TRIGON_CACHE_PREFIXES=0` turns it off and `/healthz` reports which way it is
+set.
 
 Never enable it during training: a prefix belongs to the weights that produced
 it, weights move every step, and nothing raises because the shapes all match.
