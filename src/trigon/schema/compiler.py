@@ -490,7 +490,8 @@ class SchemaCompiler:
 # them. 16M cells is ~64 MB of Python list-of-bool at 4 bytes a pointer, which
 # is 3,300 masks at the synthetic corpus's size and 4 at HelpSteer2's longest.
 _MASK_CACHE: dict[object, list[list[bool]]] = {}
-_MASK_CACHE_CELLS = 16_000_000
+MASK_CACHE_CELLS = 16_000_000
+_MASK_CACHE_CELLS = MASK_CACHE_CELLS  # the module-private alias the cache uses
 _cells_held = 0
 
 

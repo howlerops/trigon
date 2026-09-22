@@ -296,3 +296,28 @@ def test_healthz_reports_whether_the_cache_is_running():
     for enabled in (True, False):
         with TestClient(build_app(ServerConfig(backend="lexical", cache_prefixes=enabled))) as http:
             assert http.get("/healthz").json()["schema_cache"] is enabled
+
+
+def test_the_backends_mask_cache_is_bounded_by_cells_too():
+    """The same bug, in a second copy of the same cache.
+
+    `trigon.schema.compiler` holds masks as list-of-bool for the tests; the
+    torch backend holds them as bool tensors for the forward pass. Both were
+    capped at 256 entries and a mask is quadratic in sequence length, so
+    neither bound was a bound. Fixing one and not the other would have left
+    920 MB of tensors under a limit that reads as if it prevents them.
+    """
+    from trigon.schema.compiler import MASK_CACHE_CELLS
+    from trigon.types import NoulQuestion, SystemOneRequest
+
+    backend = TorchReadoutBackend(seed=0)
+    engine = Engine(backend, compiler=backend.make_compiler())
+    for words in range(10, 400, 7):
+        engine.answer(
+            SystemOneRequest(
+                state="word " * words, questions={"q": NoulQuestion(instructions="present?")}
+            )
+        )
+        assert backend._mask_cache_cells <= MASK_CACHE_CELLS
+    # And it is actually caching, not just staying empty.
+    assert backend._mask_cache

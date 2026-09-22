@@ -64,6 +64,7 @@ from ..schema import (
     mask_shape_key,
     materialize_mask,
 )
+from ..schema.compiler import MASK_CACHE_CELLS
 from ..schema.tokens import CallableEstimator
 from ..types import SystemOneRequest
 from .base import BackendOutput, QuestionOutput
@@ -405,7 +406,15 @@ class TorchReadoutBackend:
         self._version = version
         # Mask tensors are shape-keyed like the masks themselves: at spike
         # sizes building one costs more than the forward pass.
+        # Bounded in cells rather than entries, for the reason
+        # `trigon.schema.compiler` is: a mask is quadratic in sequence length,
+        # so a count-based limit bounds nothing. These are bool tensors, one
+        # byte a cell, and the compiler holds its own list-of-bool copy under
+        # its own budget -- two caches of the same thing in two
+        # representations, because the tests read one and torch needs the
+        # other.
         self._mask_cache: dict[object, torch.Tensor] = {}
+        self._mask_cache_cells = 0
         # The schema KV prefix, the thing the layout was designed to make
         # cacheable. Off by default: a prefix belongs to the weights that
         # produced it, and a gateway is the only place where the weights are
@@ -576,9 +585,13 @@ class TorchReadoutBackend:
         mask = self._mask_cache.get(key)
         if mask is None:
             mask = torch.tensor(materialize_mask(compiled), dtype=torch.bool)
-            if len(self._mask_cache) >= 256:
-                self._mask_cache.clear()
-            self._mask_cache[key] = mask
+            cells = mask.shape[0] * mask.shape[1]
+            if cells <= MASK_CACHE_CELLS:
+                if self._mask_cache_cells + cells > MASK_CACHE_CELLS:
+                    self._mask_cache.clear()
+                    self._mask_cache_cells = 0
+                self._mask_cache[key] = mask
+                self._mask_cache_cells += cells
         if mask.shape[0] != embeddings.shape[1]:
             raise ValueError(
                 f"mask is {mask.shape[0]} tokens but the sequence is "
