@@ -142,6 +142,37 @@ virtualenv at 1.5.5. So the HTTPS route is open and the client runs here.
 Then I write the Modal app, push the corpus and the training code to it, and
 drive A.3 and A.2-at-a-real-size from here.
 
+### Running it
+
+`scripts/modal_train.py` is written and waiting on a token.
+
+```bash
+modal run scripts/modal_train.py --corpus helpsteer2 --n 12000 --epochs 6
+modal run scripts/modal_train.py --corpus banking77 --gpu L4 --seeds 0,1,2,3
+```
+
+Each seed is its own container, so four seeds cost the wall clock of one
+rather than four-on-four-cores — which is why this does not reuse
+`scripts/seed_sweep.py`, whose parallelism is local processes. The reports
+come back as return values and land in `reports/<corpus>/`.
+
+Three things it records rather than assumes, in `modal-run.json` beside the
+reports: the **git SHA** the image was built from, the **GPU it actually
+got** (not the one requested), and the wall clock. A number from hardware
+nobody can name, at a commit nobody can identify, is a claim rather than a
+result — and that is the whole difference this project trades on.
+
+The corpus is downloaded inside the job rather than shipped from here: it is
+someone else's data under a licence that governs redistribution, and
+`trigon.evals.corpora` already fetches it to an ignored cache with the
+attribution attached.
+
+**Credentials reach a session through the cloud environment, not the
+repository.** Add `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET` as environment
+variables on the environment; they are kept outside the sandbox and attached
+after requests leave. They apply to **new** sessions, so the session that
+sets them will not see them.
+
 ### Where the other two still win
 
 **B.1, the L4 burn-in, does not need any of this.** It is one measurement on
