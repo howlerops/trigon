@@ -43,6 +43,19 @@ class TrainingConfig:
     weight_decay: float = 0.01
     # Requests per optimiser step. Accumulation, not padded batching.
     accumulate: int = 16
+    #: Chunks to draw from when bucketing by length. Each optimizer step pads
+    #: its cases to the longest one, and attention is quadratic, so a chunk of
+    #: mixed lengths wastes the difference. On the synthetic corpus that waste
+    #: is 1.02x and invisible; on HelpSteer2, whose requests compile to between
+    #: 253 and 3,647 tokens, it is **2.82x** at the default chunk.
+    #:
+    #: The epoch is still shuffled. This draws a window of
+    #: `accumulate * bucket_window` cases from that shuffled order, sorts the
+    #: window by compiled length, and cuts it into chunks -- so which cases
+    #: share a gradient step is no longer independent of their length, which is
+    #: a real change to the optimization and why this is a knob rather than the
+    #: only behaviour. 1 disables it.
+    bucket_window: int = 8
     grad_clip: float = 1.0
     seed: int = 0
     ordinal: OrdinalConfig = field(default_factory=OrdinalConfig)
@@ -154,6 +167,13 @@ def train(
     step = 0
 
     started = time.perf_counter()
+    # Compiled length per case, once. Used to bucket each optimizer step's
+    # chunk by length so it pads less; see `_chunks`.
+    lengths = (
+        {i: compiler.compile_request(case.request).total_tokens for i, case in enumerate(cases)}
+        if config.bucket_window > 1
+        else {}
+    )
     epoch_reports: list[EpochReport] = []
     counted_questions = 0
     best: tuple[float, int, dict] | None = None
@@ -170,8 +190,7 @@ def train(
         # `logits_batch` is asserted equal to `logits` to floating-point
         # equality -- but there is one backward pass instead of `accumulate` of
         # them, which is where the time goes.
-        for chunk_start in range(0, len(order), config.accumulate):
-            chunk = order[chunk_start : chunk_start + config.accumulate]
+        for chunk in _chunks(order, lengths, config):
             items = [
                 (compiler.compile_request(cases[index].request), cases[index].request)
                 for index in chunk
@@ -271,6 +290,38 @@ def train(
 
 
 @torch.no_grad()
+def _chunks(order, lengths, config):
+    """Optimizer-step chunks, bucketed by compiled length within a window.
+
+    Each step pads its cases to the longest one and attention is quadratic, so
+    a chunk of mixed lengths pays for the difference. Sorting a window of the
+    already-shuffled order before cutting it into chunks keeps the epoch
+    random at the scale of the window while making each chunk nearly uniform:
+    measured on HelpSteer2, 2.82x of wasted attention becomes 1.04x.
+
+    The window matters. Sorting the *whole* epoch would make every chunk
+    perfectly uniform and would also mean the model sees all its short cases
+    before any long one, which is a curriculum nobody chose. A window of
+    `accumulate * bucket_window` is a few hundred cases: long enough to bucket
+    well, short enough that the order stays shuffled where it counts.
+    """
+    step = config.accumulate
+    if config.bucket_window <= 1:
+        for start in range(0, len(order), step):
+            yield order[start : start + step]
+        return
+
+    window = step * config.bucket_window
+    for start in range(0, len(order), window):
+        block = order[start : start + window]
+        # `lengths` is computed once for the whole run rather than per epoch:
+        # a case's compiled length does not change, and compiling twice to
+        # sort by the result would cost more than the padding it saves.
+        block.sort(key=lengths.__getitem__)
+        for inner in range(0, len(block), step):
+            yield block[inner : inner + step]
+
+
 def _validation_loss(backend, compiler, holdout: Sequence[Case], config: TrainingConfig) -> float:
     """Mean loss on the held-out slice, in eval mode.
 

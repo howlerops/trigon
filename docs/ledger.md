@@ -265,9 +265,14 @@ what order, and how each step is known to be done.
   Sortish batching would fix it and changes which cases share a gradient step,
   so it is `docs/next.md` A.5 rather than a quiet edit mid-certification.
 - **HelpSteer2 is loaded and training has never finished.** Three attempts:
-  the first three seeds were OOM-killed by the mask cache, the next four were
-  on course for 45 hours before the mask build was vectorized. The Score
+  OOM-killed by the mask cache, then a 45-hour projection before the mask
+  build was vectorized, then a VM reclamation ninety minutes in. The Score
   primitive still has no result on real data.
+- **A run longer than a session's idle window cannot finish here.** The cloud
+  session docs are explicit — background work is not restored when the VM is
+  reclaimed — so this is a property of the environment rather than bad luck,
+  and it is why `docs/gpu-access.md` treats durability and hardware as one
+  question.
 - **CI has stopped executing.** Runs 26 and 27 failed with every job ending in
   three to five seconds, no steps recorded and logs 404 — the runner never
   reached checkout. Run 12 was green on substantially this workflow, and run

@@ -149,11 +149,19 @@ the default chunk of 8 a randomly ordered epoch wastes **2.82×** of the
 attention work on padding. Sorting within a shuffled epoch — sortish batching
 — brings it to 1.04×.
 
-Not done as part of this pass, deliberately. It changes which cases share a
-gradient step, which is a change to the optimization and not only to the
-clock, and making it in the middle of a certification run would invalidate
-the comparison it is meant to speed up. Blocker: none — it needs a before and
-after on the same seeds.
+🟡 **Implemented, measurement in flight.** `TrainingConfig.bucket_window`
+draws a window of `accumulate × bucket_window` cases from the already-shuffled
+epoch, sorts it by compiled length, and cuts it into chunks. The window is the
+point: sorting the whole epoch would make every chunk uniform *and* show the
+model all its short cases before any long one, which is a curriculum nobody
+chose.
+
+It was deferred the first time because it changes which cases share a gradient
+step, and making that change mid-certification would invalidate the comparison
+it exists to speed up. There is no certification in flight now — the three
+HelpSteer2 attempts all died — so the objection is spent.
+
+**The before-and-after is still owed** and this item is not closed without it.
 
 **Done when** a four-seed sweep at the same configuration certifies with the
 bucketing on, and the wall clock is published beside the unbucketed run.
