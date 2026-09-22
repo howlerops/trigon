@@ -92,7 +92,70 @@ The cost is a slow loop — every iteration goes through you — which is fine f
 B.1 (one burn-in, one number) and poor for A.3 (an experiment with several
 rounds).
 
+## Reachability, checked rather than assumed
+
+Tested from this session on 2026-09-22, since the whole question turns on what
+the egress proxy allows:
+
+| Host | Response |
+| --- | --- |
+| `api.modal.com` | **200** |
+| `api.replicate.com` | 200 |
+| `rest.runpod.io` | 301 |
+| `cloud.lambdalabs.com` | 301 |
+| `api.together.xyz` | 307 |
+
+`pip install modal` also works — the SDK is installed in this session's
+virtualenv at 1.5.5. So the HTTPS route is open and the client runs here.
+
 ## What I would actually suggest
+
+**Modal, for everything except B.1.** Five reasons, in the order they matter:
+
+1. **It survives the thing that has killed three runs.** The job executes on
+   Modal's infrastructure, so this VM being reclaimed costs nothing — I
+   collect the result on the next turn. Self-hosting does *not* automatically
+   fix this: a self-hosted runner still releases its session, and background
+   tasks get about sixty seconds of grace, so a long training run there needs
+   the same detach-and-collect pattern anyway.
+2. **No SSH, which this sandbox does not have.** Modal ships code over HTTPS
+   and returns results the same way. That is why Lambda and Vast, whose model
+   is "rent a box and log in", are the wrong shape here regardless of price.
+3. **I can iterate without you in the loop.** A.3 is an experiment — several
+   configurations, four seeds each, read the spread, adjust — not one command.
+   A route that round-trips through a human each cycle turns a day into a
+   week.
+4. **Setup is about ten minutes**, against building and maintaining a CUDA
+   runner image and keeping a fleet alive.
+5. **It is already reachable**, verified above.
+
+### What you would need to do
+
+1. Create a Modal account at modal.com. The free tier carries credits that
+   likely cover B.1 outright.
+2. Run `modal token new` locally; it prints a token id and secret.
+3. Add `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET` as **cloud environment
+   variables**, not repository secrets — Anthropic-hosted environments keep
+   those outside the sandbox and attach them after requests leave.
+4. Nothing else. `modal.com` already resolves through the proxy.
+
+Then I write the Modal app, push the corpus and the training code to it, and
+drive A.3 and A.2-at-a-real-size from here.
+
+### Where the other two still win
+
+**B.1, the L4 burn-in, does not need any of this.** It is one measurement on
+named hardware: rent an L4 for an hour, run one command I will write, commit
+the report. Doing it through Modal would work and would measure *Modal's*
+L4 under *Modal's* container, which is a fine number and a less direct one
+than the burn-in asks for. If you only ever do one of these, do this one.
+
+**Self-hosting wins if you are on Team or Enterprise, already run a GPU box,
+and want checkouts and artifacts to stay inside your network.** Then the
+session's GPU is simply the GPU and there is no remote-job plumbing at all.
+That is a compliance answer more than a convenience one.
+
+
 
 **For B.1, option 3.** It is one measurement on named hardware. Rent an L4 for
 an hour, run one command, commit the report. It closes the most load-bearing
