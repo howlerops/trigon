@@ -297,6 +297,15 @@ def cmd_train(args: argparse.Namespace) -> int:
         ),
         compiler=compiler,
     )
+    # **Evaluate the path we serve.** The gateway defaults the schema prefix
+    # cache on (reports/cache/README.md: 6x at 77 options), so a report
+    # measured with it off describes a deployment nobody runs. Safe here for
+    # the reason it is unsafe in training: the weights are fixed now, and
+    # `_prefix_for` refuses to cache while the model is in training mode
+    # anyway. It moves answers by ~5e-08, which is the same cross-shape
+    # float32 rounding already in the ledger and below any gate.
+    backend.cache_prefixes = True
+
     engine = Engine(backend, compiler=compiler)
     before, _ = run_calibration_suite(
         engine, eval_cases, suite="calibration/uncalibrated", floor_trials=args.floor_trials
@@ -324,6 +333,11 @@ def cmd_train(args: argparse.Namespace) -> int:
     quantized = None
     if not args.no_quantization_gate:
         twin = backend.quantized()
+        # Both arms of this gate must differ only in their weights. The twin
+        # is a fresh backend, so it neither inherits the flag nor -- more
+        # importantly -- the float model's prefixes, which would be exactly
+        # wrong: a prefix belongs to the weights that produced it.
+        twin.cache_prefixes = True
         quantized, _ = run_calibration_suite(
             Engine(twin, compiler=compiler, scaler=scaler, isotonic=isotonic),
             eval_cases,

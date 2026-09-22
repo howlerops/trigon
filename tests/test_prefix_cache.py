@@ -321,3 +321,27 @@ def test_the_backends_mask_cache_is_bounded_by_cells_too():
         assert backend._mask_cache_cells <= MASK_CACHE_CELLS
     # And it is actually caching, not just staying empty.
     assert backend._mask_cache
+
+
+def test_the_quantized_twin_never_inherits_the_float_models_prefixes():
+    """A prefix belongs to the weights that produced it.
+
+    The twin is built as a fresh backend, so today it starts with an empty
+    cache and the flag off. This pins that, because the failure it prevents is
+    silent: a twin serving the float model's schema block under int8 weights
+    would produce a well-formed answer, and `quantization_ece_delta` would
+    report the numerics as cheaper than they are -- flattering the project, in
+    the one gate that exists to catch a numerics change.
+    """
+    from trigon.types import NoulQuestion, SystemOneRequest
+
+    backend = TorchReadoutBackend(seed=0, cache_prefixes=True)
+    engine = Engine(backend, compiler=backend.make_compiler())
+    engine.answer(
+        SystemOneRequest(state="warm it", questions={"q": NoulQuestion(instructions="?")})
+    )
+    assert backend._prefix_cache, "the float model should have cached something"
+
+    twin = backend.quantized()
+    assert not twin._prefix_cache, "the twin inherited prefixes built from other weights"
+    assert twin.cache_prefixes is False, "the twin inherited the flag rather than being given it"
