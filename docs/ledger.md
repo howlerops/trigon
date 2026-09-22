@@ -14,10 +14,10 @@ narrative sections are a discipline, not a test.
 
 | | |
 | --- | ---: |
-| Commits | 105 |
-| Tests | 443 |
-| Python files (`src`, `tests`, `scripts`) | 93 |
-| Lines in `src/` | 10,178 |
+| Commits | 131 |
+| Tests | 491 |
+| Python files (`src`, `tests`, `scripts`) | 99 |
+| Lines in `src/` | 10,903 |
 | Release gates | 8 |
 | Green-tier corpora in the licence audit | 9 |
 | Committed use cases | 3 |
@@ -51,6 +51,12 @@ twenty-two runs** — the investigation is closed and the evidence is in
 - Generated Python and TypeScript SDKs, both dependency-free, both exercised
   against a live gateway in CI.
 - CLI: `ask`, `serve`, `spec`, `eval`, `fit`, `train`.
+- **Auth, rate limiting and overload shedding** — 401, 429 and 529 with the
+  headers a client acts on, on both the native and compat paths, all off
+  unless an operator configures them.
+- **Batching across requests** — `Engine.answer_many` coalesces forward
+  passes, asserted to answer identically to the one-at-a-time path. Off by
+  default: it is 30% slower on CPU.
 - **Compatibility adapter** — the incumbent's published request and response
   shapes, served at their path (`trigon serve --compat`) and mounted under
   `/compat` on the native gateway. Both front doors are asserted to return the
@@ -75,7 +81,8 @@ twenty-two runs** — the investigation is closed and the evidence is in
 - `scripts/decline_rule.py`, `scripts/calibrator_choice.py` — score calibration
   rules against heads whose true calibration is known, which a seed sweep
   cannot do.
-- `scripts/load_test.py`, `scripts/gateway_cost.py`, `scripts/price.py`.
+- `scripts/load_test.py`, `scripts/gateway_cost.py`, `scripts/price.py`,
+  `scripts/cache_bench.py`.
 - `scripts/migrate.py` — point it at both endpoints with the same traffic and
   read per-question agreement, calibration on each, and where they diverge. A
   caller switches on a diff over their own traffic, not on a promise. It
@@ -118,6 +125,8 @@ twenty-two runs** — the investigation is closed and the evidence is in
 | Compat path vs native path | Identical answers through one process, asserted per primitive |
 | Schema KV cache, 77 options | 91.8 ms → 15.3 ms p50, a **6× speedup**; 23× at 256 options |
 | Batching 16 requests into one pass, on CPU | 4.14 ms/request against 3.43 ms serial — a 20% loss |
+| Vectorized attention mask | 208 ms → 8.2 ms per request; the whole pass 399 ms → 82.8 ms |
+| GPU on this machine | **Checked, absent.** `nvidia-smi` missing, `torch.cuda.is_available()` False |
 | Banking77, four seeds | 0.7126–0.7404 against a 1.6% marginal; ECE 0.0177–0.0361, floor 0.0153 |
 | `size`, across 7 interventions and 22 runs | Below its own marginal on every seed; median −0.0095 |
 | Banking77 accuracy (pilot, 2 seeds) | 0.4640 / 0.4193 against a 1.8% marginal — **it transfers** |
@@ -149,6 +158,8 @@ The most useful section. Each of these was argued for before it was measured.
 | The KV cache's saving is worth less than its exactness cost | 6× at the served shape, and the exactness cost was never the cache's. |
 | Batching across requests is where the latency story is won | 30% *slower* on CPU: 3.43 ms alone against 4.14 ms in a batch of 16. |
 | A 256-entry cache limit bounds a mask cache | It bounds a count. Masks are quadratic, and it cost three OOM-killed seeds. |
+| The mask build is cheap next to the forward pass | It was 208 of 399 ms. Banking77's uniform lengths hid it behind a cache hit. |
+| A.3 and B.1 are blocked on hardware *(assumed)* | Checked. No GPU is present or reachable. Still blocked, now on evidence. |
 | The distribution corpora need a Parquet reader | HelpSteer2 is gzipped JSONL. Three of four do; it does not. |
 | "ECE ≤ 0.05 per corpus" is a reachable done-condition | Not on a corpus whose test split is below the 5,000-sample floor. |
 
@@ -248,6 +259,10 @@ what order, and how each step is known to be done.
 - **Semantic compatibility is unmet.** The wire, envelope and status codes now
   line up (`docs/compat.md`); the model answers one question of three well. An
   adapter cannot fix that, and calibration makes a wrong answer credible.
+- **HelpSteer2 is loaded and training has never finished.** Three attempts:
+  the first three seeds were OOM-killed by the mask cache, the next four were
+  on course for 45 hours before the mask build was vectorized. The Score
+  primitive still has no result on real data.
 - **Three of five data streams unbuilt.** Two corpora load. The
   *annotator-distribution* data — the stream that teaches a model what
   disagreement looks like, which is the product — is still not among them:
