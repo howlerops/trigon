@@ -477,8 +477,21 @@ class SchemaCompiler:
 # with the same shape -- which, for a schema served at volume, is most of them.
 # Building one costs more than the forward pass does at spike sizes, so the
 # result is memoized on the shape rather than on the request.
+#
+# **The budget is in cells, not entries, and that distinction cost two OOM
+# kills.** It was 256 entries, which is a sensible number when a mask is the
+# synthetic corpus's 70x70 -- 256 of those is about 10 MB. On HelpSteer2 the
+# state is an LLM response and sequences run to 1,897 tokens, so one mask is
+# 3.6M cells and 256 of them is several gigabytes. Four training processes
+# filled 15 GB and the cgroup killed two of them.
+#
+# A count-based limit does not bound a quadratic cost. This one bounds what it
+# is actually protecting: total cells held, whatever mix of shapes produced
+# them. 16M cells is ~64 MB of Python list-of-bool at 4 bytes a pointer, which
+# is 3,300 masks at the synthetic corpus's size and 4 at HelpSteer2's longest.
 _MASK_CACHE: dict[object, list[list[bool]]] = {}
-_MASK_CACHE_LIMIT = 256
+_MASK_CACHE_CELLS = 16_000_000
+_cells_held = 0
 
 
 def mask_shape_key(compiled: CompiledRequest) -> tuple:
@@ -531,10 +544,35 @@ def materialize_mask(compiled: CompiledRequest) -> list[list[bool]]:
             # was not converted to prefix-LM attention.
             row[j] = plan.bidirectional or j <= i
 
-    if len(_MASK_CACHE) >= _MASK_CACHE_LIMIT:
-        _MASK_CACHE.clear()
-    _MASK_CACHE[key] = mask
+    _remember(key, mask, n * n)
     return mask
+
+
+def _remember(key: object, mask: list[list[bool]], cells: int) -> None:
+    """Hold the mask if it fits the cell budget, and evict everything if not.
+
+    Clear-all rather than LRU on purpose: the access pattern this serves is a
+    gateway answering one schema over and over, where the cache is a hit
+    essentially always and eviction never runs. Tracking recency to handle a
+    case that does not arise would be bookkeeping on every hit to save nothing.
+
+    A single mask larger than the whole budget is built and returned but not
+    held, so one enormous request cannot evict a working set it will never
+    join.
+    """
+    global _cells_held
+    if cells > _MASK_CACHE_CELLS:
+        return
+    if _cells_held + cells > _MASK_CACHE_CELLS:
+        _MASK_CACHE.clear()
+        _cells_held = 0
+    _MASK_CACHE[key] = mask
+    _cells_held += cells
+
+
+def mask_cache_cells() -> int:
+    """Cells currently held. Exposed so a test can assert the bound holds."""
+    return _cells_held
 
 
 def render_state(state: State) -> str:

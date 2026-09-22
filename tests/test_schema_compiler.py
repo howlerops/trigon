@@ -277,3 +277,82 @@ def test_compat_budget_requests_are_always_valid_under_the_default():
     )
     SchemaCompiler(budget=COMPAT_BUDGET).compile_request(at_their_limit)
     compile_request(at_their_limit)  # and under ours
+
+
+def test_the_mask_cache_is_bounded_by_cells_not_by_entries():
+    """A count-based limit does not bound a quadratic cost.
+
+    The limit was 256 *entries*, which is sensible when a mask is the
+    synthetic corpus's 70x70 -- 256 of those is about 10 MB. On HelpSteer2 the
+    state is an LLM response, sequences run to 1,897 tokens, one mask is 3.6M
+    cells, and 256 of them is several gigabytes. Four training processes
+    filled 15 GB and the cgroup killed two of them. That is how this was
+    found: not by reading the code, by losing two seeds.
+    """
+    from trigon.schema import compiler as module
+    from trigon.schema.compiler import (
+        SchemaCompiler,
+        mask_cache_cells,
+        materialize_mask,
+    )
+
+    module._MASK_CACHE.clear()
+    module._cells_held = 0
+    compiler = SchemaCompiler()
+
+    # Many distinct state lengths, which is exactly what a corpus of free text
+    # produces and what the entry-count limit failed to bound.
+    for words in range(20, 420, 3):
+        compiled = compiler.compile_request(
+            SystemOneRequest(
+                state="word " * words,
+                questions={"q": NoulQuestion(instructions="present?")},
+            )
+        )
+        materialize_mask(compiled)
+        assert mask_cache_cells() <= module._MASK_CACHE_CELLS, "the cache exceeded its own budget"
+
+
+def test_a_mask_too_large_for_the_budget_is_returned_but_not_held():
+    """One enormous request must not evict a working set it cannot join."""
+    from trigon.schema import compiler as module
+    from trigon.schema.compiler import SchemaCompiler, mask_cache_cells, materialize_mask
+
+    module._MASK_CACHE.clear()
+    module._cells_held = 0
+    compiler = SchemaCompiler()
+
+    small = compiler.compile_request(
+        SystemOneRequest(state="a b c", questions={"q": NoulQuestion(instructions="?")})
+    )
+    materialize_mask(small)
+    held = mask_cache_cells()
+    assert held > 0
+
+    original = module._MASK_CACHE_CELLS
+    module._MASK_CACHE_CELLS = held + 1  # anything bigger cannot be held
+    try:
+        big = compiler.compile_request(
+            SystemOneRequest(state="word " * 200, questions={"q": NoulQuestion(instructions="?")})
+        )
+        mask = materialize_mask(big)
+        assert mask, "the mask must still be built and returned"
+        assert mask_cache_cells() == held, "the working set was evicted by a mask that cannot fit"
+    finally:
+        module._MASK_CACHE_CELLS = original
+
+
+def test_the_cache_still_hits_for_a_repeated_shape():
+    """The saving this exists for: a gateway answering one schema at volume."""
+    from trigon.schema import compiler as module
+    from trigon.schema.compiler import SchemaCompiler, materialize_mask
+
+    module._MASK_CACHE.clear()
+    module._cells_held = 0
+    compiler = SchemaCompiler()
+    request = SystemOneRequest(
+        state="the same length every time", questions={"q": NoulQuestion(instructions="?")}
+    )
+    first = materialize_mask(compiler.compile_request(request))
+    second = materialize_mask(compiler.compile_request(request))
+    assert first is second, "the same shape must not be rebuilt"
