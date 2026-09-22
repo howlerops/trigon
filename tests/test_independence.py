@@ -224,3 +224,46 @@ def test_dot_product_repairs_survive_a_checkpoint_round_trip(flags, tmp_path):
     reloaded = TorchReadoutBackend.load(path)
     for key, value in flags.items():
         assert getattr(reloaded.config, key) == value
+
+
+def test_the_vectorized_mask_matches_the_specification_exactly():
+    """Two builders for one mask, and the Python one is the specification.
+
+    `materialize_mask` is pure Python because the compiler is imported by the
+    gateway and the drift tests without torch, and it is what the isolation
+    tests above read. It is also O(n^2) in the interpreter: 208 ms per request
+    at HelpSteer2's sequence lengths, against 399 ms for the entire forward
+    pass.
+
+    Banking77 hid that entirely — its requests land on a handful of distinct
+    lengths, so the shape cache hits and the cost never appears. A corpus of
+    free text misses every time. The backend therefore builds the mask with
+    tensor indexing instead, and this asserts the two agree **exactly**,
+    because the moment they do not, every isolation guarantee in this file is
+    being proved about a mask the model does not use.
+    """
+    from trigon.schema.compiler import materialize_mask
+
+    backend = TorchReadoutBackend(seed=0)
+    compiler = backend.make_compiler()
+
+    states = [
+        "short",
+        "a medium length state with a few more words in it than the first",
+        "word " * 200,
+        "word " * 511,
+    ]
+    questions = [
+        {"q": BASE["urgent"]},
+        BASE,
+        {**BASE, "extra": NoulQuestion(instructions="Another one?")},
+    ]
+    for state in states:
+        for question_set in questions:
+            compiled = compiler.compile_request(
+                SystemOneRequest(state=state, questions=question_set)
+            )
+            expected = torch.tensor(materialize_mask(compiled), dtype=torch.bool)
+            assert torch.equal(backend._mask_tensor(compiled), expected), (
+                f"the vectorized mask differs at {compiled.total_tokens} tokens"
+            )

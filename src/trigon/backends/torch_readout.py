@@ -584,7 +584,7 @@ class TorchReadoutBackend:
         key = mask_shape_key(compiled)
         mask = self._mask_cache.get(key)
         if mask is None:
-            mask = torch.tensor(materialize_mask(compiled), dtype=torch.bool)
+            mask = self._mask_tensor(compiled)
             cells = mask.shape[0] * mask.shape[1]
             if cells <= MASK_CACHE_CELLS:
                 if self._mask_cache_cells + cells > MASK_CACHE_CELLS:
@@ -872,7 +872,7 @@ class TorchReadoutBackend:
                 padded[i, :n] = embeddings[0]
                 positions[i, :n] = spans.positions()
                 segments[i, :n] = spans.segment_types()
-                one = torch.tensor(materialize_mask(compiled), dtype=torch.bool)
+                one = self._mask_tensor(compiled)
                 if one.shape[0] != n:
                     raise ValueError(
                         f"mask is {one.shape[0]} tokens but the sequence is {n}; "
@@ -922,6 +922,45 @@ class TorchReadoutBackend:
             return results
         finally:
             self.model.train(was_training)
+
+    def _mask_tensor(self, compiled: CompiledRequest) -> torch.Tensor:
+        """The attention mask, built with tensor ops rather than Python loops.
+
+        `trigon.schema.compiler.materialize_mask` is the specification and
+        stays pure Python, because the compiler is imported by the gateway and
+        the drift tests without torch. It is also O(n^2) in the interpreter,
+        and it was costing **208 ms per request** on HelpSteer2 -- over half
+        the total forward time -- against 399 ms for everything.
+
+        Banking77 hid that completely. Its requests are 77 options and a short
+        state, so they land on a handful of distinct lengths and the shape
+        cache hits almost every time. HelpSteer2's state is an LLM response:
+        every request is a different length, every request misses, and every
+        miss rebuilt a 2,246 x 2,246 list of Python bools. Four training seeds
+        were on course for 45 hours.
+
+        This builds the same mask by indexing a (groups x groups) table with
+        the per-token group ids, which is the same computation the double loop
+        does one cell at a time. `tests/test_independence.py` asserts the two
+        agree exactly -- they must, because the Python one is what the
+        isolation tests read.
+        """
+        owners: list[str] = []
+        for segment in compiled.segments:
+            owners.extend([segment.group] * segment.tokens)
+        plan = compiled.attention
+        groups = sorted(set(owners))
+        index = {group: i for i, group in enumerate(groups)}
+        allowed = torch.tensor(
+            [[plan.can_attend(a, b) for b in groups] for a in groups], dtype=torch.bool
+        )
+        ids = torch.tensor([index[o] for o in owners], dtype=torch.long)
+        mask = allowed[ids[:, None], ids[None, :]]
+        if not plan.bidirectional:
+            # The causal fallback applies within a group when the model was
+            # not converted to prefix-LM attention.
+            mask = mask & torch.ones_like(mask).tril()
+        return mask
 
     # -- sequence construction -------------------------------------------
 
