@@ -130,6 +130,7 @@ twenty-two runs** — the investigation is closed and the evidence is in
 | Length bucketing, end to end | **1.63×** — 2.7× on the attention term, diluted by everything linear |
 | GPU on this machine | **Checked, absent.** `nvidia-smi` missing, `torch.cuda.is_available()` False |
 | Banking77, four seeds | 0.7126–0.7404 against a 1.6% marginal; ECE 0.0177–0.0361, floor 0.0153 |
+| HelpSteer2, three seeds, 1,400 cases | **Collapsed to the marginal.** Lift +0.0023 median; ECE 0.0108–0.0207, all passing |
 | `size`, across 7 interventions and 22 runs | Below its own marginal on every seed; median −0.0095 |
 | Banking77 accuracy (pilot, 2 seeds) | 0.4640 / 0.4193 against a 1.8% marginal — **it transfers** |
 
@@ -165,6 +166,23 @@ The most useful section. Each of these was argued for before it was measured.
 | A.3 and B.1 are blocked on hardware *(assumed)* | Checked. No GPU is present or reachable. Still blocked, now on evidence. |
 | The distribution corpora need a Parquet reader | HelpSteer2 is gzipped JSONL. Three of four do; it does not. |
 | "ECE ≤ 0.05 per corpus" is a reachable done-condition | Not on a corpus whose test split is below the 5,000-sample floor. |
+
+---
+
+## Confirmed the hard way
+
+Rules this project wrote down before it had evidence for them, and which
+measurement has since borne out. Shorter than the disproved list, and it
+should stay that way — a rule that keeps being confirmed was probably cheap
+to hold.
+
+- **"Calibration never certifies alone."** Written into `CLAUDE.md` after the
+  first trained model reported each question's marginal at 46% accuracy and
+  passed every ECE gate. HelpSteer2 reproduced it on real data: a model whose
+  accuracy is its own marginal to four decimal places, ECE 0.0108–0.0207
+  against a 0.05 limit, a noise floor of 0.0055 so the number is real, and the
+  calibrator correctly declining to touch a model that is calibrated by
+  construction. Only `accuracy_over_baseline` rejects it.
 
 ---
 
@@ -266,10 +284,13 @@ what order, and how each step is known to be done.
   2.82× of the attention work on a corpus whose lengths run 253–3,647 tokens.
   Sortish batching would fix it and changes which cases share a gradient step,
   so it is `docs/next.md` A.5 rather than a quiet edit mid-certification.
-- **HelpSteer2 is loaded and training has never finished.** Three attempts:
-  OOM-killed by the mask cache, then a 45-hour projection before the mask
-  build was vectorized, then a VM reclamation ninety minutes in. The Score
-  primitive still has no result on real data.
+- **HelpSteer2 has a result and it is a failure.** Three seeds at 1,400
+  training cases: twelve of fifteen question-level accuracies land *exactly*
+  on their own marginal, `accuracy_over_baseline` fails on every seed, and
+  every calibration gate passes. The size was chosen to fit a cloud session's
+  idle window rather than because it was enough — Banking77 needed 7,083
+  cases — so this does not establish that Score cannot learn the corpus.
+  `reports/helpsteer2/README.md`.
 - **A run longer than a session's idle window cannot finish here.** The cloud
   session docs are explicit — background work is not restored when the VM is
   reclaimed — so this is a property of the environment rather than bad luck,

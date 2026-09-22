@@ -84,9 +84,18 @@ A model trained on hard labels learns to be confident; a model trained on
 annotator disagreement learns what disagreement looks like, which is the
 product.
 
+🟡 **Two corpora published, one certified.** Banking77 certifies on four
+seeds. HelpSteer2 has a three-seed result and it is a failure: the model
+collapses to the marginal on twelve of fifteen question-level accuracies while
+passing every calibration gate (`reports/helpsteer2/README.md`). That is the
+gate set working rather than the corpus being unlearnable — the run was sized
+at 1,400 cases to fit a cloud session's idle window, where Banking77 needed
+7,083.
+
 **Done when** the calibration report is published per corpus, never pooled,
 and coverage holds per corpus too. Nine corpora pooled into one ECE would hide
-exactly what a caller needs to know.
+exactly what a caller needs to know. **HelpSteer2 at a size that could answer
+the question needs `docs/gpu-access.md` resolved first.**
 
 **A.3 Replace the spike.** Unchanged from the last plan and now the single
 highest-value item, because it is also the only remaining explanation for
