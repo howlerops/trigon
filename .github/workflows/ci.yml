@@ -117,59 +117,41 @@ jobs:
       - run: |
           pip install torch --index-url https://download.pytorch.org/whl/cpu
           pip install -e ".[dev,server,train]"
-      - name: Train, calibrate, gate
-        # The certified configuration from reports/iso/, which clears every
-        # blocking gate on all four seeds on the development machine.
+      - name: Sweep the reference configuration on this hardware
+        # **A single draw is not evidence, and that rule applies to CI too.**
+        # This job used to train one seed and gate on it. The first time it
+        # ran, that draw failed -- choice accuracy 0.530 where the four
+        # certified runs read 0.648 to 0.849 -- and the reason is written in
+        # scripts/seed_sweep.py's own docstring: "a perturbation far smaller
+        # than a seed change, the summation order of a batched matmul, is
+        # enough to move a given seed from one outcome to the other".
+        # tests/test_prefix_cache.py shows this hardware *has* a different
+        # summation order. Hardware is a second axis of the seed problem and
+        # nobody had swept it.
         #
-        # **It does not clear them here, and the reason is one this project
-        # already wrote down on a different axis.** scripts/seed_sweep.py says
-        # it in its own docstring: "a perturbation far smaller than a seed
-        # change -- the summation order of a batched matmul, on the order of
-        # 1e-6 -- is enough to move a given seed from one outcome to the
-        # other". tests/test_prefix_cache.py now demonstrates that this
-        # hardware *has* a different summation order: the forward pass drifts
-        # 2.4e-08 here where it is exactly 0.0 on the development machine.
+        # So it sweeps four seeds here, the way the rule says to. --jobs 4
+        # because each run is single-threaded by design, so that is cores
+        # rather than oversubscription.
         #
-        # So hardware is a second axis of the same perturbation, and it was
-        # never swept. The first run here got a draw of seed 0 worse than any
-        # of the four this configuration was certified on -- choice accuracy
-        # 0.530 against 0.648, 0.830, 0.847, 0.849, and choice ECE 0.1076
-        # against 0.0064 to 0.0240.
-        #
-        # A single draw on unswept hardware is not evidence either way, which
-        # is the project's own rule, so this step publishes rather than
-        # blocks. The right fix is to run the four-seed sweep here and require
-        # all of them, which is docs/next.md A.4; it is not done in the same
-        # change as the diagnosis because it triples this job's wall clock and
-        # deserves its own measurement.
-        #
-        # --save-model because a report about a model nobody can reload is a
-        # claim rather than a result, and because scripts/regate.py can then
-        # re-run the gates against those weights without retraining.
-        id: reference
+        # `--require none` publishes the spread without gating on it, which is
+        # deliberate and temporary: the point of this change is to *get* the
+        # four-seed measurement on this hardware. docs/next.md A.4 says what
+        # happens next -- block on the verdict once it is known, or replace
+        # the configuration with one whose outcome does not depend on which
+        # machine trains it.
         run: |
-          set +e
-          trigon train -n 8000 --eval-n 6000 --epochs 8 --lr 0.01 \
+          python scripts/seed_sweep.py --seeds 0 1 2 3 --jobs 4 \
+            -n 8000 --eval-n 6000 --epochs 8 --lr 0.01 \
             --d-model 128 --layers 2 --noise 0.2 --option-scoring auto \
-            --out reports/ci-run.md --save-model reports/ci-run.pt
-          status=$?
+            --out-dir reports/ci-sweep --name ci --require none --keep-reports \
+            | tee reports/ci-sweep-summary.txt
           {
-            echo "## Reference run"
+            echo "## Reference configuration, four seeds on this hardware"
             echo
-            if [ $status -eq 0 ]; then
-              echo "Certified: every blocking gate passed."
-            else
-              echo "**Did not certify on this machine.** Blocking failures:"
-              echo
-              echo '```'
-              grep -E '^- FAIL ' reports/ci-run.md || echo "(no FAIL lines; the run itself failed)"
-              echo '```'
-              echo
-              echo "See docs/ledger.md, *Open* -- this is a known, undiagnosed"
-              echo "difference between this hardware and the development machine."
-            fi
+            echo '```'
+            cat reports/ci-sweep-summary.txt
+            echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
-          exit 0
       - uses: actions/upload-artifact@v4
         with:
           name: reference-run

@@ -100,9 +100,14 @@ so there is a real-data baseline to compare against, not only a synthetic one.
 **Done when** four seeds certify with all three synthetic questions above
 their marginals *and* per-corpus ECE holds on real data.
 
-**A.4 Sweep the reference configuration on CI's hardware.** The certified
-configuration certifies on four seeds *on one machine*, and GitHub's runners
-produce a draw worse than any of them. `scripts/seed_sweep.py` already says
+**A.4 Sweep the reference configuration on CI's hardware.** 🔄 **In flight.**
+The `reference-run` job now runs `seed_sweep.py --seeds 0 1 2 3 --jobs 4`
+instead of training one seed, and publishes the spread to the job summary.
+`--require none` for now, deliberately: the point of the change is to *get*
+the four-seed measurement on that hardware before deciding what to gate on.
+
+The certified configuration certifies on four seeds *on one machine*, and
+GitHub's runners produce a draw worse than any of them. `scripts/seed_sweep.py` already says
 why: a perturbation the size of a matmul's summation order moves a seed from
 one outcome to the other, and `tests/test_prefix_cache.py` now shows this
 hardware has a different one. Hardware is a second axis of the seed problem
