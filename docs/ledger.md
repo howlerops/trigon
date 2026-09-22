@@ -268,6 +268,12 @@ what order, and how each step is known to be done.
   the first three seeds were OOM-killed by the mask cache, the next four were
   on course for 45 hours before the mask build was vectorized. The Score
   primitive still has no result on real data.
+- **CI has stopped executing.** Runs 26 and 27 failed with every job ending in
+  three to five seconds, no steps recorded and logs 404 — the runner never
+  reached checkout. Run 12 was green on substantially this workflow, and run
+  26 predates the only workflow change since. Metered Actions minutes on a
+  private organization repository is the likeliest explanation and cannot be
+  confirmed without billing access. A.4 is blocked on it.
 - **Three of five data streams unbuilt.** Two corpora load. The
   *annotator-distribution* data — the stream that teaches a model what
   disagreement looks like, which is the product — is still not among them:

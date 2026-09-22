@@ -106,11 +106,27 @@ instead of training one seed, and publishes the spread to the job summary.
 `--require none` for now, deliberately: the point of the change is to *get*
 the four-seed measurement on that hardware before deciding what to gate on.
 
-**It has still not produced one**, and the reason was the workflow rather than
-the sweep: the job shared a `cancel-in-progress` concurrency group with the
-fast tests, so every commit pushed during the half-hour run discarded it.
-Twenty of one day's twenty-six runs were cancelled that way. It now has its
-own group and does not cancel, so sweeps queue rather than vanish.
+**It has still not produced one**, for two reasons, and the second is now the
+blocker.
+
+The first was the workflow: the job shared a `cancel-in-progress` concurrency
+group with the fast tests, so every commit pushed during the half-hour run
+discarded it. Twenty of one day's twenty-six runs were cancelled that way. It
+now has its own group and does not cancel, so sweeps queue rather than vanish.
+
+The second is that **CI stopped running at all**. Runs 26 and 27 failed with
+every job ending in three to five seconds, zero steps recorded and their logs
+returning 404 — the runner never reached `actions/checkout`. Run 12 was green
+on substantially this workflow. Run 26 failed this way *before* the
+concurrency change, so that edit is not the cause.
+
+This is a private repository owned by an organization, so Actions minutes are
+metered, and 27 runs in a day — several of them half-hour sweeps — is the
+shape of a quota. That is a hypothesis, not a finding: the billing endpoint
+returns 403 to this session and re-running a failed workflow is also refused,
+so it cannot be confirmed from here. **It needs someone with billing access
+to look.** Until then A.4 is blocked on infrastructure rather than on
+anything in the repository.
 
 The certified configuration certifies on four seeds *on one machine*, and
 GitHub's runners produce a draw worse than any of them. `scripts/seed_sweep.py` already says
