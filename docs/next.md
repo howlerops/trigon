@@ -106,6 +106,12 @@ instead of training one seed, and publishes the spread to the job summary.
 `--require none` for now, deliberately: the point of the change is to *get*
 the four-seed measurement on that hardware before deciding what to gate on.
 
+**It has still not produced one**, and the reason was the workflow rather than
+the sweep: the job shared a `cancel-in-progress` concurrency group with the
+fast tests, so every commit pushed during the half-hour run discarded it.
+Twenty of one day's twenty-six runs were cancelled that way. It now has its
+own group and does not cancel, so sweeps queue rather than vanish.
+
 The certified configuration certifies on four seeds *on one machine*, and
 GitHub's runners produce a draw worse than any of them. `scripts/seed_sweep.py` already says
 why: a perturbation the size of a matmul's summation order moves a seed from

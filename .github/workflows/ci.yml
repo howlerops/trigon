@@ -9,7 +9,15 @@ on:
   pull_request:
 
 # A pull request from a branch in this repository would otherwise run the
-# matrix twice, once for the push and once for the PR.
+# matrix twice, once for the push and once for the PR. Cancelling the older
+# run is right for the fast jobs: a superseded commit's test result is not
+# worth the minutes.
+#
+# `reference-run` opts out below, and for a reason worth stating: it is a
+# four-seed sweep that takes about half an hour, and under this group every
+# commit pushed during it threw the whole thing away. Twenty of one day's
+# twenty-six runs were cancelled that way, which is why A.4 has never
+# produced the measurement it exists for.
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
@@ -108,6 +116,13 @@ jobs:
     # Minutes rather than seconds, so it is not on the pull-request path.
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    # Its own group, and **not** cancel-in-progress. A half-hour sweep that is
+    # discarded by the next docs commit never finishes, which is what happened
+    # to every attempt at A.4's measurement. Sweeps queue behind each other
+    # instead; the result is late rather than absent.
+    concurrency:
+      group: reference-run-${{ github.ref }}
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
