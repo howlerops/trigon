@@ -1,0 +1,22 @@
+{
+  "epochs": [
+    {
+      "epoch": 1,
+      "mean_loss": 1.2359860991674756,
+      "seconds": 1034.687880843,
+      "validation_loss": 1.1711714408227376
+    },
+    {
+      "epoch": 2,
+      "mean_loss": 1.1333408709556336,
+      "seconds": 974.5184860650002,
+      "validation_loss": 1.151456306236131
+    }
+  ],
+  "n_cases": 1260,
+  "n_questions": 6300,
+  "seconds": 2010.9598399749998,
+  "first_loss": 1.2359860991674756,
+  "final_loss": 1.1333408709556336,
+  "kept_epoch": 2
+}
