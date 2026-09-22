@@ -126,6 +126,7 @@ twenty-two runs** — the investigation is closed and the evidence is in
 | Schema KV cache, 77 options | 91.8 ms → 15.3 ms p50, a **6× speedup**; 23× at 256 options |
 | Batching 16 requests into one pass, on CPU | 4.14 ms/request against 3.43 ms serial — a 20% loss |
 | Vectorized attention mask | 208 ms → 8.2 ms per request; the whole pass 399 ms → 82.8 ms |
+| Padding waste in a training chunk, HelpSteer2 | 2.82× at chunk 8 in random order; 1.04× length-sorted |
 | GPU on this machine | **Checked, absent.** `nvidia-smi` missing, `torch.cuda.is_available()` False |
 | Banking77, four seeds | 0.7126–0.7404 against a 1.6% marginal; ECE 0.0177–0.0361, floor 0.0153 |
 | `size`, across 7 interventions and 22 runs | Below its own marginal on every seed; median −0.0095 |
@@ -259,6 +260,10 @@ what order, and how each step is known to be done.
 - **Semantic compatibility is unmet.** The wire, envelope and status codes now
   line up (`docs/compat.md`); the model answers one question of three well. An
   adapter cannot fix that, and calibration makes a wrong answer credible.
+- **Training pads accumulation chunks to their longest member**, which costs
+  2.82× of the attention work on a corpus whose lengths run 253–3,647 tokens.
+  Sortish batching would fix it and changes which cases share a gradient step,
+  so it is `docs/next.md` A.5 rather than a quiet edit mid-certification.
 - **HelpSteer2 is loaded and training has never finished.** Three attempts:
   the first three seeds were OOM-killed by the mask cache, the next four were
   on course for 45 hours before the mask build was vectorized. The Score

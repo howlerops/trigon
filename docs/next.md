@@ -120,6 +120,24 @@ whose outcome does not depend on which machine trains it.
 
 ---
 
+**A.5 Bucket training chunks by length.** The trainer batches cases into
+accumulation chunks and pads each to its longest member, and on a corpus of
+free text that is expensive: HelpSteer2 compiles to 253–3,647 tokens, and at
+the default chunk of 8 a randomly ordered epoch wastes **2.82×** of the
+attention work on padding. Sorting within a shuffled epoch — sortish batching
+— brings it to 1.04×.
+
+Not done as part of this pass, deliberately. It changes which cases share a
+gradient step, which is a change to the optimization and not only to the
+clock, and making it in the middle of a certification run would invalidate
+the comparison it is meant to speed up. Blocker: none — it needs a before and
+after on the same seeds.
+
+**Done when** a four-seed sweep at the same configuration certifies with the
+bucketing on, and the wall clock is published beside the unbucketed run.
+
+---
+
 ## Stage B — Make the cost claim real
 
 **B.1 The L4 burn-in.** Unchanged and still the most load-bearing unmeasured
