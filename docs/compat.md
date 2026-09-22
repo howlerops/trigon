@@ -61,11 +61,26 @@ project exists to avoid.
 
 ## What is not there
 
-- **No authentication.** Their `401` never fires here, because there is no key
-  to be wrong. A deployment that needs auth puts it in front.
-- **No `429` or `529`.** There is no rate limiter and no overload shedder. A
-  caller's backoff path is therefore untested against this server, and a load
-  test that assumes it will be shed instead of queued will be wrong.
+- **Authentication, rate limiting and overload shedding are off unless you
+  configure them** — and that is the only thing in this list that is a
+  *choice* rather than a gap. A self-hosted gateway should not invent a policy
+  its operator did not choose, so an unset key means no `401`, an unset rate
+  means no `429`, and an unset concurrency cap means no `529`. Set any of them
+  and the codes and headers match the contract your client already has:
+
+  | Variable | Emits | Headers |
+  | --- | --- | --- |
+  | `TRIGON_API_KEYS=k1,k2` | `401 authentication_error` | `WWW-Authenticate: Bearer` |
+  | `TRIGON_RATE_PER_MINUTE=600` | `429 rate_limit_error` | `Retry-After`, `X-RateLimit-Limit`, `X-RateLimit-Remaining` |
+  | `TRIGON_MAX_CONCURRENT=32` | `529 overloaded_error` | `Retry-After` |
+
+  `/healthz` stays open whatever you set, because a liveness probe that needs
+  a credential reports the credential's health.
+
+  The limiter is a fixed-window counter, in memory, per process. That is
+  stated because it decides what it is good for: it protects one process from
+  one caller's burst and it does not coordinate across replicas. A deployment
+  that needs a global budget puts a real limiter in front.
 - **`output_tokens` is always 0.** Not a stub: there is no decode half, and the
   readout slots are prefill. Cost accounting that multiplies output tokens by a
   rate gets zero because zero is what it costs.

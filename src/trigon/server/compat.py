@@ -59,6 +59,7 @@ from ..types import (
 )
 from .app import create_router
 from .config import ServerConfig
+from .limits_middleware import install_guards
 from .routing import TieredRouter
 
 __all__ = [
@@ -387,6 +388,12 @@ def build_compat_app(
     )
     app.state.router = router
     app.state.config = config
+    install_guards(
+        app,
+        api_keys=config.api_keys,
+        rate_per_minute=config.rate_per_minute,
+        max_concurrent=config.max_concurrent,
+    )
     app.include_router(compat_router(router))
 
     @app.get("/healthz", tags=["ops"])

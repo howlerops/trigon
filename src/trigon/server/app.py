@@ -21,6 +21,7 @@ from ..limits import DEFAULT_BUDGET, DEFAULT_LATENCY_TARGET
 from ..schema.compiler import SchemaTooLarge
 from ..types import SystemOneRequest, SystemOneResponse
 from .config import ServerConfig
+from .limits_middleware import install_guards
 from .routing import RoutingPolicy, TieredRouter
 
 __all__ = ["build_app", "create_router"]
@@ -99,6 +100,12 @@ def build_app(config: ServerConfig | None = None, router: TieredRouter | None = 
     )
     app.state.router = router
     app.state.config = config
+    install_guards(
+        app,
+        api_keys=config.api_keys,
+        rate_per_minute=config.rate_per_minute,
+        max_concurrent=config.max_concurrent,
+    )
 
     @app.exception_handler(SchemaTooLarge)
     async def _too_large(_: Request, exc: SchemaTooLarge) -> JSONResponse:

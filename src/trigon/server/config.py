@@ -16,6 +16,28 @@ from ..calibration.temperature import TemperatureScaler
 __all__ = ["ServerConfig"]
 
 
+def _keys(raw: str | None) -> frozenset[str] | None:
+    """Comma-separated keys, or None for "no authentication".
+
+    An empty or whitespace-only value is None rather than an empty set. An
+    empty set would reject every request, which is a configuration mistake
+    that looks exactly like a total outage.
+    """
+    if not raw or not raw.strip():
+        return None
+    keys = frozenset(part.strip() for part in raw.split(",") if part.strip())
+    return keys or None
+
+
+def _positive(raw: str | None) -> int | None:
+    if not raw or not raw.strip():
+        return None
+    value = int(raw)
+    if value <= 0:
+        raise ValueError(f"expected a positive limit, got {value}")
+    return value
+
+
 @dataclass
 class ServerConfig:
     backend: str = "lexical"
@@ -57,6 +79,16 @@ class ServerConfig:
     premium_backend: str | None = None
     premium_weights: str | None = None
     escalate_below_confidence: float = 0.35
+    # -- the three codes a caller's retry loop branches on -------------------
+    #
+    # All three are None by default, and that is the honest default rather
+    # than a lax one: a self-hosted gateway should not invent an auth or
+    # capacity policy its operator did not choose. What the guards guarantee
+    # is that when an operator *does* set them, the codes and headers match
+    # the contract a migrating caller already has. See docs/compat.md.
+    api_keys: frozenset[str] | None = None
+    rate_per_minute: int | None = None
+    max_concurrent: int | None = None
 
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None) -> ServerConfig:
@@ -72,6 +104,9 @@ class ServerConfig:
             premium_backend=source.get("TRIGON_PREMIUM_BACKEND") or None,
             premium_weights=source.get("TRIGON_PREMIUM_WEIGHTS") or None,
             escalate_below_confidence=float(source.get("TRIGON_ESCALATE_BELOW_CONFIDENCE", "0.35")),
+            api_keys=_keys(source.get("TRIGON_API_KEYS")),
+            rate_per_minute=_positive(source.get("TRIGON_RATE_PER_MINUTE")),
+            max_concurrent=_positive(source.get("TRIGON_MAX_CONCURRENT")),
         )
 
     def load_scaler(self) -> TemperatureScaler:

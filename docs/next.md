@@ -160,9 +160,11 @@ This unblocks when A.3 does.
 (`trigon.usecases`) and priced (`docs/pricing.md`). None has a worked
 end-to-end example a reader can run. Blocker: none.
 
-**C.3 Rate limiting and auth on the compat path.** `docs/compat.md` lists
-`401`, `429` and `529` as codes the adapter never returns, which means a
-caller's backoff path is untested against this server. Blocker: none.
+**C.3 Rate limiting and auth on the compat path.** ✅ **Done.** All three
+codes are emitted, with the headers a client needs to act on them, on both the
+native and the compat paths — and all three stay off unless an operator
+configures them, because a self-hosted gateway should not invent a policy
+nobody chose. `docs/compat.md` has the variables.
 
 ---
 
