@@ -93,3 +93,69 @@ def test_the_cookbook_runs():
     assert "held for a human" in out
     assert "adding a fifth question moved the other answers: False" in out
     assert "out of pocket" in out
+
+
+def test_every_committed_use_case_has_a_cookbook_that_runs():
+    """A worked example that has stopped working is worse than none, and a
+    use case with no worked example is a catalogue entry.
+
+    Parameterised over `all_use_cases()` rather than a hardcoded list, so
+    adding a use case without a runnable example fails here instead of
+    quietly enlarging the catalogue.
+    """
+    import subprocess
+
+    from trigon.usecases import all_use_cases
+
+    script = README.parent / "examples" / "usecase_cookbook.py"
+    for case in all_use_cases():
+        result = subprocess.run(
+            [sys.executable, str(script), case.name],
+            capture_output=True,
+            text=True,
+            cwd=README.parent,
+            check=False,
+        )
+        assert result.returncode == 0, f"{case.name}: {result.stderr}"
+        out = result.stdout
+        assert f"# {case.name}" in out
+        # One answer per declared question, and the cost of the whole thing.
+        for qid in case.questions:
+            assert qid in out, f"{case.name}: no answer printed for {qid}"
+        assert "prefill tokens" in out
+        assert "## Routing" in out
+
+
+def test_the_cookbook_never_prints_a_confidence_for_a_noul():
+    """The contract gives a Noul no confidence field, on purpose. An example
+    that invented `max(p, 1-p)` would put a number on screen that no model
+    produced, in the one place a reader is learning what the shape is.
+    """
+    import subprocess
+
+    from trigon.types import NoulQuestion
+    from trigon.usecases import all_use_cases
+
+    script = README.parent / "examples" / "usecase_cookbook.py"
+    for case in all_use_cases():
+        nouls = [q for q, spec in case.questions.items() if isinstance(spec, NoulQuestion)]
+        if not nouls:
+            continue
+        out = subprocess.run(
+            [sys.executable, str(script), case.name],
+            capture_output=True,
+            text=True,
+            cwd=README.parent,
+            check=False,
+        ).stdout
+        for qid in nouls:
+            block = out.split(f"  {qid}\n", 1)[1].split("\n\n", 1)[0]
+            assert "probability" in block
+            # The *field*, not the word. The first version of this asserted
+            # "confidence" was absent from the block and failed on the
+            # cookbook's own parenthetical explaining that a Noul has none --
+            # a test tripping over the sentence documenting the rule it
+            # enforces, which is the second time that has happened here.
+            fields = [line.strip().split()[0] for line in block.splitlines() if line.strip()]
+            assert "confidence" not in fields, f"{case.name}.{qid} printed a confidence field"
+        return

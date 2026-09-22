@@ -156,9 +156,17 @@ project's name would be the most misleading thing in the repository: a
 `model_version` that answers questions badly is worse than no weights at all.
 This unblocks when A.3 does.
 
-**C.2 A cookbook per use case.** Three use cases are committed
-(`trigon.usecases`) and priced (`docs/pricing.md`). None has a worked
-end-to-end example a reader can run. Blocker: none.
+**C.2 A cookbook per use case.** ✅ **Done.**
+`examples/usecase_cookbook.py <name>` runs any committed use case end to end
+on a fresh clone: the state it reads, one answer per question in the terms its
+primitive actually has, the confidence-routing decision, and what the request
+cost in tokens and milliseconds.
+
+One driver rather than three scripts, because the use cases already live in
+one place and three copies of the same twenty lines diverge the first time one
+is edited. A test runs every use case in `all_use_cases()`, so adding one
+without a runnable example fails the build instead of quietly enlarging the
+catalogue.
 
 **C.3 Rate limiting and auth on the compat path.** ✅ **Done.** All three
 codes are emitted, with the headers a client needs to act on them, on both the

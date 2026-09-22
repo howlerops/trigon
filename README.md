@@ -242,6 +242,18 @@ served, since it makes a guarantee it does not keep. `docs/evals.md` has the
 gate's detection power at each sample size, which is the number that decides
 how many of your own labels you need.
 
+## Try it on your own shape
+
+```bash
+python examples/usecase_cookbook.py --list        # the committed use cases
+python examples/usecase_cookbook.py sentiment     # one, end to end
+```
+
+Runs on the lexical floor, so it needs no weights and no GPU — and the answers
+are nonsense, which is what a floor is for. It exercises the whole path and
+tells you nothing about quality. Pass `--weights` from a `trigon train` or
+`scripts/train_corpus.py` run for answers worth reading.
+
 ## Where this is going
 
 `docs/ledger.md` is the running record — what is built, what is measured, what
