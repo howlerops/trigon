@@ -274,7 +274,7 @@ def main(argv: list[str] | None = None) -> int:
     go = sub.add_parser("launch")
     go.add_argument("--corpus", default="helpsteer2")
     go.add_argument("--seeds", default="0,1,2,3")
-    go.add_argument("-n", type=int, default=12000)
+    go.add_argument("-n", "--n", type=int, default=12000)
     go.add_argument("--epochs", type=int, default=6)
     go.add_argument("--calibration-n", type=int, default=1000)
     go.add_argument("--gpu", default="A10G")
