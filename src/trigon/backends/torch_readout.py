@@ -554,7 +554,10 @@ class TorchReadoutBackend:
             # the backbone and carries only what trained.
             from .qwen_readout import QwenReadoutBackend
 
-            return QwenReadoutBackend.from_payload(payload, version=version)
+            # On the GPU when there is one: a 1.5B backbone serves in tens of
+            # milliseconds there and in seconds on a CPU.
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            return QwenReadoutBackend.from_payload(payload, version=version, device=device)
         stored = dict(payload["config"])
         # A flag absent from a checkpoint means "trained before this flag
         # existed", which is False -- never the current constructor default.

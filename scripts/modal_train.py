@@ -274,6 +274,15 @@ def collect(args) -> None:
     print(f"{args.run_id}: {len(payloads)} seed(s) finished")
     destination = pathlib.Path(args.out_dir) if args.out_dir else REPO / "reports" / corpus
     _write(payloads, destination, prefix)
+    if args.models:
+        # Checkpoints are git-ignored: they land beside the reports for
+        # `trigon serve --weights`, and never in a commit.
+        for name in sorted(n for n in names if n.endswith(".pt")):
+            target = destination / f"{prefix}-{pathlib.Path(name).stem}.pt"
+            with target.open("wb") as out:
+                for chunk in runs.read_file(name):
+                    out.write(chunk)
+            print(f"  model {target} ({target.stat().st_size / 2**20:.0f} MiB)")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -295,6 +304,9 @@ def main(argv: list[str] | None = None) -> int:
         command.add_argument("run_id")
         if name == "collect":
             command.add_argument("--out-dir", default="")
+            command.add_argument(
+                "--models", action="store_true", help="also download seed checkpoints"
+            )
     args = parser.parse_args(argv)
     {"launch": launch, "status": status, "collect": collect}[args.command](args)
     return 0
