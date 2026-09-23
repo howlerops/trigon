@@ -14,10 +14,10 @@ narrative sections are a discipline, not a test.
 
 | | |
 | --- | ---: |
-| Commits | 142 |
-| Tests | 492 |
-| Python files (`src`, `tests`, `scripts`) | 100 |
-| Lines in `src/` | 10,954 |
+| Commits | 150 |
+| Tests | 495 |
+| Python files (`src`, `tests`, `scripts`) | 101 |
+| Lines in `src/` | 11,057 |
 | Release gates | 8 |
 | Green-tier corpora in the licence audit | 9 |
 | Committed use cases | 3 |
@@ -90,6 +90,16 @@ twenty-two runs** — the investigation is closed and the evidence is in
 - `scripts/train_corpus.py` — train, calibrate and gate on a real corpus, with
   the marginal predictor as the floor since a human-labelled corpus has no
   Bayes-optimal loss to quote.
+- **Training on a GPU, from this sandbox.** `scripts/modal_train.py` runs one
+  Modal container per seed and writes each seed's reports to a Volume before
+  returning, so a `--detach`ed run outlives the VM that launched it and
+  `--collect` fetches it later. It refuses a dirty tree, records the commit,
+  the GPU it was given and the wall clock, and asks `train_corpus.py` for
+  `--device cuda` by name so a missing GPU fails rather than falls back.
+  Verified end to end on 2026-09-23.
+- `scripts/burn_in.py` — B.1, written and handed over. Times the serving path
+  at 0.5B and 1.5B backbone shapes rather than the spike's, because the spike
+  would flatter `$/MTok` by the ratio of the models' compute.
 
 ### Data
 - **Real corpora, licence-gated in code.** `trigon.evals.corpora` refuses the
@@ -129,6 +139,8 @@ twenty-two runs** — the investigation is closed and the evidence is in
 | Padding waste in a training chunk, HelpSteer2 | 2.82× at chunk 8 in random order; 1.04× length-sorted |
 | Length bucketing, end to end | **1.63×** — 2.7× on the attention term, diluted by everything linear |
 | GPU on this machine | **Checked, absent.** `nvidia-smi` missing, `torch.cuda.is_available()` False |
+| GPU through Modal | **Works.** Asked for an A10G, got a device reporting `NVIDIA A10`; 30.9 cases/s against ~1.1 on this VM's CPU |
+| The training path's attention mask, per HelpSteer2 request | 352 ms in Python against 10.2 ms vectorized, bit-identical |
 | Banking77, four seeds | 0.7126–0.7404 against a 1.6% marginal; ECE 0.0177–0.0361, floor 0.0153 |
 | HelpSteer2, three seeds, 1,400 cases | **Collapsed to the marginal.** Lift +0.0023 median; ECE 0.0108–0.0207, all passing |
 | `size`, across 7 interventions and 22 runs | Below its own marginal on every seed; median −0.0095 |
@@ -166,6 +178,9 @@ The most useful section. Each of these was argued for before it was measured.
 | A.3 and B.1 are blocked on hardware *(assumed)* | Checked. No GPU is present or reachable. Still blocked, now on evidence. |
 | The distribution corpora need a Parquet reader | HelpSteer2 is gzipped JSONL. Three of four do; it does not. |
 | "ECE ≤ 0.05 per corpus" is a reachable done-condition | Not on a corpus whose test split is below the 5,000-sample floor. |
+| Modal is reachable from here: `api.modal.com` answers 200 | A `GET` is not the client. It speaks gRPC and behind this proxy needs `python-socks`; without it, 50 ms to "could not connect", the cause two exceptions down. |
+| `scripts/modal_train.py` is ready and waiting on a token | It would have trained on the CPU. Nothing in the backend or trainer moved a tensor to a device; `--gpu` was ignored; results lived only on the VM that gets reclaimed. |
+| A chunk of eight fits on a 24 GB GPU | HelpSteer2's longest case is 7,171 tokens; the chunk asked a 22 GiB A10 for 6.13 GiB at once and died four minutes in. |
 
 ---
 
@@ -252,6 +267,12 @@ Errors that flattered the project, found by re-measuring rather than by review:
   there and the difference was never between the two paths at all. The cache
   stays off for a reason that survives measurement: its wall-clock saving has
   never been timed.
+- **The mask vectorization was credited with rescuing HelpSteer2 training and
+  never reached it.** `_mask_tensor`'s docstring tells the story — 208 ms a
+  request, four seeds on course for 45 hours, fixed — and the fix went into
+  `logits`, the serving path. Training calls `logits_batch`, which went on
+  building every mask in Python: 352 ms a request against 10.2 ms. Found by
+  timing a training step before paying for a GPU to run it, not by review.
 - **The first real-corpus evaluation set was a single intent.** Banking77's
   test split is ordered by label and the loader sliced `[:eval_n]`; the
   marginal predictor scored 1.0000 and `accuracy_over_baseline` read −1.0000.
@@ -297,11 +318,10 @@ what order, and how each step is known to be done.
   idle window rather than because it was enough — Banking77 needed 7,083
   cases — so this does not establish that Score cannot learn the corpus.
   `reports/helpsteer2/README.md`.
-- **A run longer than a session's idle window cannot finish here.** The cloud
-  session docs are explicit — background work is not restored when the VM is
-  reclaimed — so this is a property of the environment rather than bad luck,
-  and it is why `docs/gpu-access.md` treats durability and hardware as one
-  question.
+- **A run longer than a session's idle window cannot finish here** — but it
+  no longer has to run here. `scripts/modal_train.py --detach` executes on
+  Modal and writes to a Volume, so the VM can be reclaimed mid-run. This
+  closes when the first long run is collected that way.
 - **CI has stopped executing.** Runs 26 and 27 failed with every job ending in
   three to five seconds, no steps recorded and logs 404 — the runner never
   reached checkout. Run 12 was green on substantially this workflow, and run
