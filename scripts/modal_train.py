@@ -60,6 +60,12 @@ REPO = pathlib.Path(__file__).resolve().parent.parent
 RUNS = "/runs"
 WEIGHTS = "/weights"
 APP_NAME = "trigon-train"
+#: The workspace's plan caps it at ten GPUs at once. Calls beyond that are
+#: queued, not refused -- Modal emails "you have reached your GPU limit" and
+#: the extra seeds start when earlier ones finish -- so a launch that
+#: overshoots is slower, not broken. `launch` says so rather than leaving a
+#: queued seed to look like a hung one.
+GPU_LIMIT = 10
 
 # The training extra plus a CUDA torch. The default PyPI wheel carries CUDA on
 # Linux, so nothing here pins an index -- pinning one is how a CPU wheel ends
@@ -178,6 +184,16 @@ def _git(*args: str) -> str:
     ).stdout.strip()
 
 
+def _running_containers() -> int:
+    try:
+        out = subprocess.run(
+            ["modal", "container", "list", "--json"], capture_output=True, text=True, check=True
+        ).stdout
+        return len(json.loads(out))
+    except (OSError, subprocess.CalledProcessError, json.JSONDecodeError):
+        return 0
+
+
 def launch(args) -> None:
     commit = _git("rev-parse", "HEAD")
     dirty = bool(_git("status", "--porcelain", "--untracked-files=no"))
@@ -216,6 +232,13 @@ def launch(args) -> None:
     }
     seeds = [int(s) for s in args.seeds.split(",") if s.strip()]
 
+    busy = _running_containers()
+    if busy + len(seeds) > GPU_LIMIT:
+        print(
+            f"note: {busy} GPU containers already running and the plan allows "
+            f"{GPU_LIMIT}; {busy + len(seeds) - GPU_LIMIT} of these seeds will queue "
+            "until earlier ones finish"
+        )
     with modal.enable_output():
         app.deploy(name=APP_NAME)
     job = modal.Function.from_name(APP_NAME, "train_one").with_options(gpu=args.gpu)

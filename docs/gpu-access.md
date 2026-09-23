@@ -162,6 +162,12 @@ python scripts/modal_train.py collect <run id>
 python scripts/modal_train.py launch --corpus banking77 --gpu L4 --seeds 0,1,2,3
 ```
 
+**Ten GPUs at once is the plan's cap** (checked 2026-09-23: Modal's "you
+have reached your GPU limit" email, at ten concurrent `train_one`
+containers). Calls beyond it queue rather than fail, so two four-seed sweeps
+plus a third launch run as ten now and the rest when slots free. `launch`
+prints how many will queue.
+
 **The launcher exits in seconds, and that is the durability.** It deploys the
 app, `spawn`s one call per seed and returns; a spawned call on a deployed app
 belongs to Modal, not to this VM. Each seed writes its reports to the
