@@ -114,6 +114,14 @@ and the machine is a 4-core Xeon with 15 GB and no accelerator.
 **This invalidates every number in `reports/`.** Sequence it after A.1 and A.2
 so there is a real-data baseline to compare against, not only a synthetic one.
 
+🟡 **Banking77 certifies on the backbone; the synthetic half and HelpSteer2 are
+open.** Qwen2.5-1.5B with LoRA rank 16 at lr 1e-4: median accuracy 0.9009
+over four seeds, every seed through every blocking gate, against the spike's
+0.7248 (`reports/banking77/README.md`). At lr 3e-4 one seed of four collapsed
+to chance at the peak of warmup. The done-condition below also asks for the
+three synthetic questions above their marginals, and that has not been run on
+the backbone yet.
+
 **Decided 2026-09-23.** Qwen2.5-1.5B (Apache 2.0, 1536 wide, 28 layers) as the
 first backbone. The backbone's own tokenizer, in Python or Rust as measured
 performance and accuracy decide — exact against the reference either way.

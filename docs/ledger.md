@@ -23,7 +23,11 @@ narrative sections are a discipline, not a test.
 | Committed use cases | 3 |
 | Real corpora loadable | 2 |
 
-**Certified configuration.** 8,000 cases, 8 epochs, d_model 128, 2 layers,
+**Certified on real data: Qwen2.5-1.5B on Banking77**, LoRA rank 16, lr
+1e-4, 4 epochs — median accuracy 0.9009 against the spike's 0.7248, every seed
+clearing every blocking gate (`reports/banking77/README.md`).
+
+**Certified configuration (synthetic, the spike).** 8,000 cases, 8 epochs, d_model 128, 2 layers,
 noise 0.2, `--option-scoring auto`. Clears every blocking gate on all four
 seeds tried: ECE 0.0084–0.0247, adaptive 0.0153–0.0289, lift over the marginal
 predictor +0.1614 to +0.2277. Evidence in `reports/iso/`.
@@ -142,6 +146,7 @@ twenty-two runs** — the investigation is closed and the evidence is in
 | GPU through Modal | **Works.** Asked for an A10G, got a device reporting `NVIDIA A10`; 30.9 cases/s against ~1.1 on this VM's CPU |
 | Qwen2.5 tokenizer, Python port against Rust | **Exact**: 0 of 34,520 texts differ over 10.3M tokens. Speed a wash against the forward pass: Rust 1.8× in bulk, Python 2× per warm call, 2.4× slower on unseen text |
 | The training path's attention mask, per HelpSteer2 request | 352 ms in Python against 10.2 ms vectorized, bit-identical |
+| **Banking77 on Qwen2.5-1.5B, lr 1e-4, four seeds — certified** | Every seed clears every blocking gate: accuracy 0.8502–0.9118, median 0.9009; ECE 0.0105–0.0489, median 0.0332 |
 | Banking77 on Qwen2.5-1.5B, four seeds, the spike's config | **0.9004–0.9228 on three seeds**, median 0.9065; seed 2 collapsed to chance (0.0232). ECE 0.0077–0.0481 on the three |
 | The same seed on the same GPU type, twice | Not a replay: accuracy 0.9228 and 0.9252. GPU attention's backward is not deterministic, so a rerun is another draw |
 | A trained Qwen adapter, served on this VM's CPU | 12 of 12 held-out Banking77 intents; ~0.5 s a request, 284 of 323 tokens from the schema cache; 89 MiB on disk |
@@ -310,11 +315,9 @@ what order, and how each step is known to be done.
   failed. What is **not** established is that the architecture cannot — every
   run shares the 128-wide two-layer backbone that has been the confound under
   every finding here. Stage 1.3 is the experiment that settles it.
-- **A pretrained backbone learns Banking77 on three seeds of four, and the
-  fourth collapses.** Qwen2.5-1.5B at the spike's configuration: 90–92%
-  against 71–74%, but seed 2 learned for 200 steps, then fell to ln 77 when
-  warmup reached the peak learning rate, and stayed there. Measured next on
-  all four seeds at a lower peak rate, not by rerunning the seed.
+- ~~A pretrained backbone learns Banking77 on three seeds of four.~~
+  **Closed.** At lr 3e-4 seed 2 learned for 200 steps and collapsed to ln 77
+  at the peak rate; at lr 1e-4 all four seeds certify (median 0.9009).
 - **The calibrator declined a head at ECE 0.0481.** On Qwen seed 1 the
   500-case held-out check could not show the isotonic map helped a 77-way head
   beyond its noise, and the run passed the 0.05 gate by 0.002. **Then the
