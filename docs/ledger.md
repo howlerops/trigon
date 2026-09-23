@@ -143,6 +143,8 @@ twenty-two runs** — the investigation is closed and the evidence is in
 | Qwen2.5 tokenizer, Python port against Rust | **Exact**: 0 of 34,520 texts differ over 10.3M tokens. Speed a wash against the forward pass: Rust 1.8× in bulk, Python 2× per warm call, 2.4× slower on unseen text |
 | The training path's attention mask, per HelpSteer2 request | 352 ms in Python against 10.2 ms vectorized, bit-identical |
 | Banking77 on Qwen2.5-1.5B, four seeds, the spike's config | **0.9004–0.9228 on three seeds**, median 0.9065; seed 2 collapsed to chance (0.0232). ECE 0.0077–0.0481 on the three |
+| The same seed on the same GPU type, twice | Not a replay: accuracy 0.9228 and 0.9252. GPU attention's backward is not deterministic, so a rerun is another draw |
+| A trained Qwen adapter, served on this VM's CPU | 12 of 12 held-out Banking77 intents; ~0.5 s a request, 284 of 323 tokens from the schema cache; 89 MiB on disk |
 | Qwen2 forward in-repo vs `transformers`, real 1.5B weights | Bit-identical: max \|diff\| 0.0, next-token agreement 1.0 |
 | Banking77, four seeds | 0.7126–0.7404 against a 1.6% marginal; ECE 0.0177–0.0361, floor 0.0153 |
 | HelpSteer2, three seeds, 1,400 cases | **Collapsed to the marginal.** Lift +0.0023 median; ECE 0.0108–0.0207, all passing |
@@ -315,8 +317,11 @@ what order, and how each step is known to be done.
   all four seeds at a lower peak rate, not by rerunning the seed.
 - **The calibrator declined a head at ECE 0.0481.** On Qwen seed 1 the
   500-case held-out check could not show the isotonic map helped a 77-way head
-  beyond its noise, and the run passed the 0.05 gate by 0.002. The rule did
-  what it says; whether a 500-case check is enough for 77 classes is open.
+  beyond its noise, and the run passed the 0.05 gate by 0.002. **Then the
+  same seed, rerun, flipped:** seed 0 applied the map (ECE 0.0077) in one run
+  and declined it (ECE 0.0473) in another. On a 77-way head that check sits
+  at the edge of its noise, so whether a model ships calibrated is close to a
+  coin toss. The rule did what it says; the rule is what is open.
 - **$/MTok is unmeasured.** The whole cost argument beyond ~2× rests on it.
   Needs the L4 burn-in.
 - ~~The KV cache is off by default because nobody has timed it.~~ **Closed.**
