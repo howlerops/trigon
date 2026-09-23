@@ -29,71 +29,11 @@ import json
 import pathlib
 import sys
 import time
-import unicodedata
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "src"))
 
-from trigon.bpe import _byte_encoder  # noqa: E402
-
-
-class PortedBPE:
-    """Qwen2-style byte-level BPE in Python, from a `tokenizer.json`."""
-
-    def __init__(self, spec: dict) -> None:
-        import regex
-
-        if spec["normalizer"] != {"type": "NFC"}:
-            raise SystemExit(f"unsupported normalizer {spec['normalizer']}")
-        steps = spec["pre_tokenizer"]["pretokenizers"]
-        if [s["type"] for s in steps] != ["Split", "ByteLevel"] or steps[1]["use_regex"]:
-            raise SystemExit("unsupported pre-tokenizer pipeline")
-        model = spec["model"]
-        if model["type"] != "BPE" or model.get("byte_fallback"):
-            raise SystemExit("unsupported model")
-        self._split = regex.compile(steps[0]["pattern"]["Regex"])
-        self.vocab: dict[str, int] = model["vocab"]
-        merges = [
-            tuple(m.split(" ", 1)) if isinstance(m, str) else tuple(m) for m in model["merges"]
-        ]
-        self.ranks = {pair: rank for rank, pair in enumerate(merges)}
-        self._bytes = _byte_encoder()
-        self._memo: dict[str, list[int]] = {}
-
-    def _merge(self, piece: str) -> list[int]:
-        cached = self._memo.get(piece)
-        if cached is not None:
-            return cached
-        symbols = list(piece)
-        ranks = self.ranks
-        while len(symbols) > 1:
-            best, best_rank = None, None
-            for i in range(len(symbols) - 1):
-                rank = ranks.get((symbols[i], symbols[i + 1]))
-                if rank is not None and (best_rank is None or rank < best_rank):
-                    best, best_rank = i, rank
-            if best is None:
-                break
-            first, second = symbols[best], symbols[best + 1]
-            merged, i = [], 0
-            while i < len(symbols):
-                if i < len(symbols) - 1 and symbols[i] == first and symbols[i + 1] == second:
-                    merged.append(first + second)
-                    i += 2
-                else:
-                    merged.append(symbols[i])
-                    i += 1
-            symbols = merged
-        ids = [self.vocab[s] for s in symbols]
-        self._memo[piece] = ids
-        return ids
-
-    def encode(self, text: str) -> list[int]:
-        text = unicodedata.normalize("NFC", text)
-        out: list[int] = []
-        for piece in self._split.findall(text):
-            out.extend(self._merge("".join(self._bytes[b] for b in piece.encode("utf-8"))))
-        return out
+from trigon.backends.hf_bpe import ByteLevelBPE  # noqa: E402
 
 
 def corpus_texts(limit: int) -> list[str]:
@@ -146,7 +86,7 @@ def main(argv: list[str] | None = None) -> int:
     rust_batch_s = time.perf_counter() - started
 
     build_started = time.perf_counter()
-    port = PortedBPE(spec)
+    port = ByteLevelBPE(spec)
     build_s = time.perf_counter() - build_started
     py_cold, py_cold_s = timed(port.encode)
     _, py_warm_s = timed(port.encode)

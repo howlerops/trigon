@@ -95,7 +95,14 @@ def default_tokenizer() -> Tokenizer:
 
 def describe(tokenizer: Tokenizer) -> dict[str, object]:
     """What a checkpoint records so it can be rebuilt with the same vocabulary."""
-    return {"kind": tokenizer.kind, "vocab_size": tokenizer.vocab_size}
+    spec: dict[str, object] = {"kind": tokenizer.kind, "vocab_size": tokenizer.vocab_size}
+    source = getattr(tokenizer, "source", "")
+    if source:
+        # A pretrained backbone's vocabulary is fetched, not shipped, so the
+        # checkpoint has to say which one -- the name pins a revision in
+        # `backends.hub`.
+        spec["source"] = source
+    return spec
 
 
 def build_tokenizer(spec: dict[str, object] | None) -> Tokenizer:
@@ -122,6 +129,16 @@ def build_tokenizer(spec: dict[str, object] | None) -> Tokenizer:
                 f"installed one has {tokenizer.vocab_size}. Serving it would read "
                 "every token id as a different word; retrain, or install the "
                 "matching trigon/data/bpe.json."
+            )
+        return tokenizer
+    if kind == "hf-bpe":
+        from .hf_bpe import ByteLevelBPE
+
+        tokenizer = ByteLevelBPE.for_backbone(str(spec["source"]))
+        if size and tokenizer.vocab_size != size:
+            raise ValueError(
+                f"checkpoint recorded a {size}-token vocabulary for {spec['source']} "
+                f"and the pinned tokenizer has {tokenizer.vocab_size}"
             )
         return tokenizer
     raise ValueError(f"unknown tokenizer kind {kind!r} in checkpoint")
