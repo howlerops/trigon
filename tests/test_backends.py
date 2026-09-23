@@ -179,3 +179,32 @@ def test_validate_output_rejects_non_finite_logits():
     )
     with pytest.raises(ValueError, match="non-finite"):
         validate_output(output, compile_request(request))
+
+
+def test_moving_a_torch_backend_drops_what_it_cached_on_the_old_device():
+    """A cached mask or schema prefix lives on the device that built it.
+
+    Serving one to a model that has since moved is a device mismatch at best
+    and, for a prefix, a stale answer from weights that no longer exist.
+    """
+    pytest.importorskip("torch")
+    from trigon.backends.torch_readout import TorchReadoutBackend
+
+    backend = TorchReadoutBackend(seed=0)
+    backend.cache_prefixes = True
+    engine = Engine(backend, compiler=backend.make_compiler())
+    request = SystemOneRequest(
+        state="the card was declined",
+        questions={
+            "intent": ChoiceQuestion(
+                instructions="Route this.", options=[{"name": "billing"}, {"name": "other"}]
+            )
+        },
+    )
+    before = engine.answer(request).answers["intent"].probabilities
+    assert backend._mask_cache and backend._prefix_cache
+
+    assert backend.to("cpu") is backend
+    assert str(backend.device) == "cpu"
+    assert not backend._mask_cache and not backend._prefix_cache
+    assert engine.answer(request).answers["intent"].probabilities == before
