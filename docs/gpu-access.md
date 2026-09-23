@@ -156,25 +156,31 @@ drive A.3 and A.2-at-a-real-size from here.
 
 ```bash
 pip install -e ".[gpu]"                 # the launcher only; the job builds its own image
-modal run --detach scripts/modal_train.py --corpus helpsteer2 --n 12000 --epochs 6
-modal run scripts/modal_train.py --collect <run id the launch printed>
-modal run --detach scripts/modal_train.py --corpus banking77 --gpu L4 --seeds 0,1,2,3
+python scripts/modal_train.py launch --corpus helpsteer2 --n 12000 --epochs 6
+python scripts/modal_train.py status <run id the launch printed>
+python scripts/modal_train.py collect <run id>
+python scripts/modal_train.py launch --corpus banking77 --gpu L4 --seeds 0,1,2,3
 ```
 
-**Always `--detach`.** Without it `modal run` stops the app when the launching
-process dies, which on this VM is the failure the route was chosen to avoid.
-Each seed writes its reports to the `trigon-runs` Volume before it returns, so
-a detached run whose launcher was reclaimed is fetched with `--collect` on a
-later turn. The launcher refuses a dirty tree: the image is built from the
-working tree, so a SHA recorded over uncommitted changes names code that did
-not run.
+**The launcher exits in seconds, and that is the durability.** It deploys the
+app, `spawn`s one call per seed and returns; a spawned call on a deployed app
+belongs to Modal, not to this VM. Each seed writes its reports to the
+`trigon-runs` Volume, and `collect` fetches them on any later turn. The
+launcher refuses a dirty tree: the image is built from the working tree, so a
+SHA recorded over uncommitted changes names code that did not run.
+
+The first version of this paragraph said "always `--detach`", and it was
+wrong. `modal run --detach` keeps the *app* alive, but a `starmap` fed from
+the local entrypoint belongs to that process: when this container restarted
+twelve minutes into a 12-epoch sweep, Modal cancelled all four inputs and
+the Volume received nothing.
 
 Each seed is its own container, so four seeds cost the wall clock of one
 rather than four-on-four-cores — which is why this does not reuse
 `scripts/seed_sweep.py`, whose parallelism is local processes. The reports
-come back as return values and land in `reports/<corpus>/`.
+land in `reports/<corpus>/`.
 
-Three things it records rather than assumes, in `modal-run.json` beside the
+Three things it records rather than assumes, in `<prefix>-modal-run.json` beside the
 reports: the **git SHA** the image was built from, the **GPU it actually
 got** (not the one requested), and the wall clock. The distinction is not
 academic: asked for an `A10G`, the first job reported itself as

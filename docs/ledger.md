@@ -184,6 +184,7 @@ The most useful section. Each of these was argued for before it was measured.
 | `scripts/modal_train.py` is ready and waiting on a token | It would have trained on the CPU. Nothing in the backend or trainer moved a tensor to a device; `--gpu` was ignored; results lived only on the VM that gets reclaimed. |
 | HelpSteer2 collapsed for want of data | Partly. 8.6× the data took lift from +0.0023 to +0.0189 and taught two questions of five; the three that judge quality did not move, and every seed kept its last epoch. |
 | The Python tokenizer port is faster than Rust | Only one call at a time, where the binding's per-call overhead dominates. Batched across four cores, Rust is 1.8× ahead. |
+| `modal run --detach` plus a Volume survives this VM | It keeps the app, not the calls. The container restarted twelve minutes into a 12-epoch sweep; Modal cancelled all four `starmap` inputs and nothing was written. Now deploy + `spawn`, and the launcher exits at once. |
 | A chunk of eight fits on a 24 GB GPU | HelpSteer2's longest case is 7,171 tokens; the chunk asked a 22 GiB A10 for 6.13 GiB at once and died four minutes in. |
 
 ---
@@ -323,13 +324,11 @@ what order, and how each step is known to be done.
   epoch with validation still falling, so the run is under-trained and the
   next experiment is more epochs at this size, not more data.
   `reports/helpsteer2/README.md`.
-- ~~A run longer than a session's idle window cannot finish here.~~
-  **Closed.** It no longer runs here: `scripts/modal_train.py --detach`
-  executes on Modal and each seed writes to a Volume before returning. The
-  12,000-case HelpSteer2 run — four seeds, 34 minutes each — was launched that
-  way; `--collect` was verified against the Volume on a smaller run. An actual
-  reclamation mid-run has not happened yet, so that path is exercised in
-  parts rather than end to end.
+- **A run longer than a session's idle window cannot finish here.** It was
+  moved to Modal, and the 12,000-case HelpSteer2 run finished there — but only
+  because this container outlived it. **Reopened by the first real reclamation**: the next sweep lost all
+  four seeds to it (see *disproved*). Closes again when a spawned run is
+  collected after the launching container has gone.
 - **CI has stopped executing.** Runs 26 and 27 failed with every job ending in
   three to five seconds, no steps recorded and logs 404 — the runner never
   reached checkout. Run 12 was green on substantially this workflow, and run

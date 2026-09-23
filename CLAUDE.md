@@ -183,7 +183,8 @@ trigon serve --compat --weights reports/run.pt   # the incumbent's shapes at the
 python scripts/train_corpus.py banking77 --out reports/banking77/run.md  # real data
 python scripts/migrate.py traffic.jsonl --incumbent https://api.example.com
 python scripts/export_openapi.py   # after ANY change to the contract
-modal run scripts/modal_train.py --corpus helpsteer2 --n 12000 --epochs 6  # on a GPU
+python scripts/modal_train.py launch --corpus helpsteer2 --n 12000 --epochs 6  # on a GPU; exits at once
+python scripts/modal_train.py collect <run id>   # whenever it has finished
 ```
 
 **Four artifacts are generated, not maintained.** Change the source and

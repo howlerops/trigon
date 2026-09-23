@@ -18,7 +18,7 @@ predictions per seed, five times the sample-size floor.
 
 Trained on Modal at commit `de60db3` on a clean tree, one container per seed,
 each reporting itself as `NVIDIA A10` (an A10G was requested);
-`modal-run.json` has the commit, the device and the wall clock — 32 to 34
+`modal-n12000-e6-modal-run.json` has the commit, the device and the wall clock — 32 to 34
 minutes a seed, at 38 cases/s.
 
 | Seed | Accuracy | Marginal | Lift | ECE | Adaptive ECE | Verdict |
