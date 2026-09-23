@@ -1,7 +1,59 @@
-# Banking77 — the first certified result on data the generator did not write
+# Banking77 — the pretrained backbone takes it from 72% to 91%
 
 Banking77 (Casanueva et al., 2020), PolyAI. CC BY 4.0.
 https://github.com/PolyAI-LDN/task-specific-datasets
+
+## Qwen2.5-1.5B, four seeds — `qwen15b-e4-seed*`
+
+The spike's certified configuration with one thing changed: the model.
+7,083 training cases, 1,000 held out for the calibrator, 5,000 evaluated
+(3,080 from the test split, 1,920 held out of train), lr 3e-4, chunks of 8,
+4 epochs — two fewer than the spike trained for. Qwen2.5-1.5B at revision
+`8faed76`, frozen in bf16, LoRA rank 16 on every projection
+(`trigon.backends.qwen_readout`; its forward is bit-identical to
+`transformers`' on the real weights, `reports/backbone/`). Commit `799cd4e`,
+clean tree, on Modal A10/A10G (`qwen15b-e4-modal-run.json`).
+
+| Seed | Accuracy | Lift | ECE | Adaptive ECE | Uncalibrated ECE | Verdict |
+| ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| 0 | **0.9228** | +0.9068 | 0.0077 | 0.0077 | 0.0499 | PASS |
+| 1 | **0.9004** | +0.8838 | 0.0481 | 0.0469 | 0.0481 | PASS, by 0.002 |
+| 2 | 0.0232 | +0.0058 | 0.0077 | 0.0096 | 0.0016 | **FAIL** |
+| 3 | **0.9126** | +0.8964 | 0.0116 | 0.0178 | 0.0569 | PASS |
+
+**Median accuracy 0.9065 against the spike's 0.7248**, on the same splits,
+gates and evaluation set, with the ECE of the three that learned at
+0.0077–0.0481 against a perfect-calibration floor of about 0.007.
+
+**It does not certify, and the reason is one seed.** Three of four pass every
+blocking gate; seed 2 never leaves chance. `CLAUDE.md` certifies on the
+median *and* the spread, and a spread that includes a model at 2.3% is not
+one a caller can be handed.
+
+**Seed 2 learned, then collapsed.** Its loss fell to 3.70 by step 200 --
+faster than seed 0 -- and climbed back to 4.33, which is ln 77, the uniform
+distribution over intents, and stayed there for four epochs. Step 200 is
+where the 5% warmup reaches the peak learning rate. That is an update too
+large at the peak knocking the heads into the one solution where the
+gradient vanishes, not a seed that could not learn. The remedy is being
+measured the only way the rule allows -- a lower peak learning rate on all
+four seeds, not a rerun of the seed that failed.
+
+**Seed 1 passes by 0.002, and the calibrator declined it.** The heads that
+learned come out overconfident -- uncalibrated ECE ~0.05 on every one -- and
+on seeds 0 and 3 the isotonic map took that to 0.0077 and 0.0116. On seed 1
+the held-out check (500 cases, against 77 classes) could not show the map
+helped beyond its noise and declined it, leaving a 0.0481 head. That is the
+decline rule working as written and a thin margin as a result; it is recorded
+in `docs/ledger.md` as open rather than tuned here.
+
+**Calibration is still the product, and here it did its job.** Three heads at
+ECE ~0.05 raw, two brought to under 0.012 by a map fitted on data the gates
+never read.
+
+---
+
+## The reference spike, four seeds — `b77-seed*`
 
 Four seeds, 7,083 training cases, 1,000 held out to fit the calibrator, 6
 epochs, d_model 128, 2 layers. Evaluated on 5,000 cases: the corpus's own
