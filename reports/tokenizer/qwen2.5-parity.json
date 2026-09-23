@@ -1,0 +1,11 @@
+{
+  "texts": 34520,
+  "characters": 48293312,
+  "tokens": 10329234,
+  "mismatched_texts": 0,
+  "rust_cold_s": 25.67718798300001,
+  "rust_warm_s": 30.21382301899996,
+  "python_build_s": 0.5764712270000132,
+  "python_cold_s": 16.22589839599999,
+  "python_warm_s": 13.502261292000014
+}
