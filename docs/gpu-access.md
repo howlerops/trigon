@@ -11,7 +11,7 @@ the options actually are, what each unblocks, and what it costs.
 | **A.3** Replace the spike with a real backbone | A GPU, hours | The single largest expected accuracy gain, and the last standing explanation for `size` |
 | **B.1** The L4 burn-in for `$/MTok` | An L4, ~1 hour | The most load-bearing unmeasured number in the project; the economic case is arithmetic over it |
 | **C.1** Publish weights | A.3 | Nothing worth publishing until the model is not a spike |
-| **A.2** HelpSteer2 | Not a GPU — *durability* | Three attempts lost; see below |
+| **A.2** HelpSteer2 | Not a GPU — *durability* | **Unblocked.** Run on Modal at 12,000 cases, 2026-09-23 |
 
 A.3 and B.1 are the real ones. The rest of the plan is done or does not need
 hardware.

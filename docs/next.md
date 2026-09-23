@@ -92,10 +92,18 @@ gate set working rather than the corpus being unlearnable — the run was sized
 at 1,400 cases to fit a cloud session's idle window, where Banking77 needed
 7,083.
 
+**HelpSteer2 at 12,000 cases has an answer, and it is still a failure — a
+different one.** Four seeds on Modal: median lift +0.0189, range +0.0155 to
++0.0203, where 1,400 cases gave +0.0023. `complexity` and `verbosity` learn
+on every seed; `coherence`, `correctness` and `helpfulness` do not move.
+Every seed kept its last epoch with validation loss still falling, so the next
+run is more epochs at this size — about $5 of A10 time for four seeds at 12 —
+before more data, and before reading the three unmoved questions as a
+capacity limit that A.3 would answer.
+
 **Done when** the calibration report is published per corpus, never pooled,
 and coverage holds per corpus too. Nine corpora pooled into one ECE would hide
-exactly what a caller needs to know. **HelpSteer2 at a size that could answer
-the question needs `docs/gpu-access.md` resolved first.**
+exactly what a caller needs to know.
 
 **A.3 Replace the spike.** Unchanged from the last plan and now the single
 highest-value item, because it is also the only remaining explanation for
