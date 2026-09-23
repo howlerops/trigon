@@ -373,6 +373,10 @@ def main(argv: list[str] | None = None) -> int:
             ),
             compiler=compiler,
         )
+    if device.startswith("cuda"):
+        # Sizing the GPU for the next run needs this, and nothing else records it.
+        peak = torch.cuda.max_memory_allocated() / 2**30
+        print(f"{args.corpus}: peak GPU memory in training {peak:.1f} GiB", file=sys.stderr)
     # **Evaluate the path we serve.** The gateway defaults the schema prefix
     # cache on (reports/cache/README.md: 6x at 77 options), so a report
     # measured with it off describes a deployment nobody runs. Safe here for
