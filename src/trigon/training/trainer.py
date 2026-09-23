@@ -268,10 +268,14 @@ def train(
 
         validation = _validation_loss(backend, compiler, holdout, config) if holdout else None
         if validation is not None and (best is None or validation < best[0]):
+            # Only what trains. For the spike that is everything; over a frozen
+            # pretrained backbone it is adapters and heads, and snapshotting
+            # the whole state would copy 3.5 GB each time validation improved.
+            trainable = {name for name, p in model.named_parameters() if p.requires_grad}
             best = (
                 validation,
                 epoch + 1,
-                {k: v.detach().clone() for k, v in model.state_dict().items()},
+                {k: v.detach().clone() for k, v in model.state_dict().items() if k in trainable},
             )
 
         record = EpochReport(
@@ -297,7 +301,7 @@ def train(
         # The last epoch is not the best one. Keeping it anyway ships weights
         # the run had already beaten -- which is not hypothetical: the 8,000
         # case run bottomed at epoch 4 and rose for the next four.
-        model.load_state_dict(best[2])
+        model.load_state_dict(best[2], strict=False)
         kept = best[1]
         print(
             f"  keeping epoch {kept} (validation {best[0]:.4f}), not the last",

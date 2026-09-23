@@ -549,6 +549,12 @@ class TorchReadoutBackend:
     def load(cls, path: str | Path, *, version: str | None = None) -> TorchReadoutBackend:
         """Rebuild a backend from a checkpoint written by ``save``."""
         payload = torch.load(Path(path), map_location="cpu", weights_only=False)
+        if payload.get("format", "").startswith("trigon-backbone-adapter"):
+            # Adapters over a pinned pretrained backbone: the checkpoint names
+            # the backbone and carries only what trained.
+            from .qwen_readout import QwenReadoutBackend
+
+            return QwenReadoutBackend.from_payload(payload, version=version)
         stored = dict(payload["config"])
         # A flag absent from a checkpoint means "trained before this flag
         # existed", which is False -- never the current constructor default.
@@ -1014,7 +1020,11 @@ class TorchReadoutBackend:
             start = group_position.get(group, 0)
             if segment.kind is SegmentKind.READOUT:
                 assert segment.question_id is not None
-                slot = table.weight[READOUT_ID]
+                # A pretrained backbone's vocabulary has no readout token -- id 1
+                # is an ordinary word there -- so a model may carry its own
+                # learned readout vector instead.
+                own = getattr(self.model, "readout", None)
+                slot = own if own is not None else table.weight[READOUT_ID]
                 if segment.member_index is not None:
                     # Seed a per-option slot with that option's own content, so
                     # the slot carries which option it is answering for.

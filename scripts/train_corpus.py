@@ -98,6 +98,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--validation-fraction", type=float, default=0.1)
     parser.add_argument(
+        "--backbone",
+        default=None,
+        help=(
+            "a pinned pretrained backbone from trigon.backends.hub (e.g. qwen2.5-1.5b) "
+            "instead of the spike; --d-model and --layers are then the backbone's"
+        ),
+    )
+    parser.add_argument("--lora-rank", type=int, default=16)
+    parser.add_argument(
         "--max-batch-cells",
         type=int,
         default=0,
@@ -264,6 +273,11 @@ def header(
             f"| Epochs | {args.epochs} |",
             f"| Seed | {args.seed} |",
             *([f"| Device | {hardware} |"] if hardware else []),
+            (
+                f"| Model | {args.backbone}, LoRA rank {args.lora_rank} |"
+                if args.backbone
+                else f"| Model | reference spike, d_model {args.d_model}, {args.layers} layers |"
+            ),
             "",
             "```",
             f"python scripts/train_corpus.py {spec.name} -n {args.n} "
@@ -271,6 +285,7 @@ def header(
             f"--epochs {args.epochs} --lr {args.lr} --accumulate {args.accumulate} "
             f"--d-model {args.d_model} --layers {args.layers} --seed {args.seed} "
             f"--device {args.device}"
+            + (f" --backbone {args.backbone} --lora-rank {args.lora_rank}" if args.backbone else "")
             + (f" --max-batch-cells {args.max_batch_cells}" if args.max_batch_cells else ""),
             "```",
             "",
@@ -317,6 +332,15 @@ def main(argv: list[str] | None = None) -> int:
     spec = corpus(args.corpus)
     if args.weights:
         backend = TorchReadoutBackend.load(args.weights)
+    elif args.backbone:
+        from trigon.backends.qwen_readout import QwenReadoutBackend
+
+        # Loaded straight onto the device: a 1.5B model materialised on the
+        # CPU first and moved costs a second copy of it in a container's RAM.
+        backend = QwenReadoutBackend.from_backbone(
+            args.backbone, device=device, seed=args.seed, lora_rank=args.lora_rank
+        )
+        backend.model.checkpointing = True
     else:
         backend = TorchReadoutBackend(
             config=ReadoutConfig(d_model=args.d_model, n_layers=args.layers), seed=args.seed
