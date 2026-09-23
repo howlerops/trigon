@@ -108,6 +108,14 @@ def train_one(corpus: str, seed: int, flags: list[str], run: dict) -> dict:
     target.mkdir(parents=True, exist_ok=True)
     log_path = target / f"seed{seed}.log"
 
+    # A checkpoint written inside the container dies with it, and one path
+    # shared by four seeds would be one file. Any --save-model is redirected
+    # to this seed's own path on the Volume, which is the only place a trained
+    # model outlives the job that trained it.
+    flags = list(flags)
+    if "--save-model" in flags:
+        flags[flags.index("--save-model") + 1] = str(target / f"seed{seed}.pt")
+
     started = time.time()
     # Streamed to the Volume as it runs, so `status` can show a live epoch
     # line instead of nothing until the seed returns.
