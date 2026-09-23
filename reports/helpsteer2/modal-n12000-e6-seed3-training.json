@@ -1,0 +1,46 @@
+{
+  "epochs": [
+    {
+      "epoch": 1,
+      "mean_loss": 1.1676030471810588,
+      "seconds": 294.003104108,
+      "validation_loss": 1.098775974959135
+    },
+    {
+      "epoch": 2,
+      "mean_loss": 1.0949894228687993,
+      "seconds": 295.538665644,
+      "validation_loss": 1.076582843909661
+    },
+    {
+      "epoch": 3,
+      "mean_loss": 1.077849003115186,
+      "seconds": 298.91926575,
+      "validation_loss": 1.0634937258809805
+    },
+    {
+      "epoch": 4,
+      "mean_loss": 1.0632221345879413,
+      "seconds": 291.79925234999996,
+      "validation_loss": 1.0544935040920973
+    },
+    {
+      "epoch": 5,
+      "mean_loss": 1.051618706578458,
+      "seconds": 290.15277441199987,
+      "validation_loss": 1.0510887141525744
+    },
+    {
+      "epoch": 6,
+      "mean_loss": 1.0453571206331254,
+      "seconds": 294.50757986100007,
+      "validation_loss": 1.0510357360293467
+    }
+  ],
+  "n_cases": 10800,
+  "n_questions": 54000,
+  "seconds": 1777.0376412330002,
+  "first_loss": 1.1676030471810588,
+  "final_loss": 1.0453571206331254,
+  "kept_epoch": 6
+}

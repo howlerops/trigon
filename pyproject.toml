@@ -25,12 +25,17 @@ dependencies = ["pydantic>=2.5"]
 [project.optional-dependencies]
 server = ["fastapi>=0.110", "uvicorn>=0.27", "pyyaml>=6"]
 llm = ["httpx>=0.27"]
-train = ["torch>=2.2", "numpy>=1.26"]
+# `regex` and `safetensors` are for pretrained backbones: the Qwen2 tokenizer
+# needs Unicode classes `re` lacks, and the weights ship as safetensors.
+train = ["torch>=2.2", "numpy>=1.26", "regex>=2023", "safetensors>=0.4"]
 # Only `scripts/modal_train.py` needs this, and only on the machine that
 # launches the job -- the GPU container installs its own dependencies from the
 # image spec in that file. Kept out of `train` so a CPU box fitting a
 # reference model does not pull a job runner it will never call.
-gpu = ["modal>=1.0"]
+# `api-proxy-support` is not optional here: cloud sessions reach the internet
+# through an HTTPS proxy, and without python-socks the client reports only
+# "Could not connect to the Modal server" and hides the ImportError under it.
+gpu = ["modal[api-proxy-support]>=1.0"]
 dev = ["pytest>=8", "httpx>=0.27", "fastapi>=0.110", "pyyaml>=6", "ruff>=0.5"]
 
 [project.scripts]

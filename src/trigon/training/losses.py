@@ -67,10 +67,12 @@ def question_loss(
     scoring rule, so a model that reports honest probabilities minimises them.
     """
     if kind == "noul":
-        target = torch.tensor([float(label)], dtype=logits.dtype)
+        target = torch.tensor([float(label)], dtype=logits.dtype, device=logits.device)
         return nn.functional.binary_cross_entropy_with_logits(logits, target)
 
-    loss = nn.functional.cross_entropy(logits.unsqueeze(0), torch.tensor([label]))
+    loss = nn.functional.cross_entropy(
+        logits.unsqueeze(0), torch.tensor([label], device=logits.device)
+    )
     if kind == "score" and ordinal is not None and ordinal.enabled:
         loss = (1.0 - ordinal.weight) * loss + ordinal.weight * squared_emd(logits, label)
     return loss

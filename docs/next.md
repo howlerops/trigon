@@ -92,10 +92,18 @@ gate set working rather than the corpus being unlearnable — the run was sized
 at 1,400 cases to fit a cloud session's idle window, where Banking77 needed
 7,083.
 
+**HelpSteer2 at 12,000 cases has an answer, and it is still a failure — a
+different one.** Four seeds on Modal: median lift +0.0189, range +0.0155 to
++0.0203, where 1,400 cases gave +0.0023. `complexity` and `verbosity` learn
+on every seed; `coherence`, `correctness` and `helpfulness` do not move.
+The 6-epoch run kept its last epoch with validation still falling, so twelve
+were run: **median lift +0.0188, no change**, validation bottoming at epoch
+6–11. The spike is at its ceiling here, and the three unmoved questions are
+A.3's to answer.
+
 **Done when** the calibration report is published per corpus, never pooled,
 and coverage holds per corpus too. Nine corpora pooled into one ECE would hide
-exactly what a caller needs to know. **HelpSteer2 at a size that could answer
-the question needs `docs/gpu-access.md` resolved first.**
+exactly what a caller needs to know.
 
 **A.3 Replace the spike.** Unchanged from the last plan and now the single
 highest-value item, because it is also the only remaining explanation for
@@ -105,6 +113,28 @@ and the machine is a 4-core Xeon with 15 GB and no accelerator.
 
 **This invalidates every number in `reports/`.** Sequence it after A.1 and A.2
 so there is a real-data baseline to compare against, not only a synthetic one.
+
+🟡 **Banking77 certifies on the backbone; the synthetic half and HelpSteer2 are
+open.** Qwen2.5-1.5B with LoRA rank 16 at lr 1e-4: median accuracy 0.9009
+over four seeds, every seed through every blocking gate, against the spike's
+0.7248 (`reports/banking77/README.md`). At lr 3e-4 one seed of four collapsed
+to chance at the peak of warmup. The done-condition below also asks for the
+three synthetic questions above their marginals, and that has not been run on
+the backbone yet.
+
+HelpSteer2 does not follow: four seeds on the backbone give median lift
++0.0259 against the spike's +0.0188 and a +0.05 gate. The surface questions
+learn; the quality questions move by about a point on two seeds of four. That
+ran at lr 3e-4, the rate that collapsed a Banking77 seed; 1e-4 is the next
+measurement, and the per-annotator `disagreements/` split is the data the
+product is actually meant to learn from.
+
+**Decided 2026-09-23.** Qwen2.5-1.5B (Apache 2.0, 1536 wide, 28 layers) as the
+first backbone. The backbone's own tokenizer, in Python or Rust as measured
+performance and accuracy decide — exact against the reference either way.
+Engineering starts now, in parallel with the 12-epoch HelpSteer2 sweep that
+answers whether A.2's three unmoved questions want training or capacity.
+Modal budget for this stage: $100 before checking back.
 
 **Done when** four seeds certify with all three synthetic questions above
 their marginals *and* per-corpus ECE holds on real data.

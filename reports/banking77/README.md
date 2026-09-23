@@ -1,7 +1,132 @@
-# Banking77 — the first certified result on data the generator did not write
+# Banking77 — a pretrained backbone certifies at 90%, against the spike's 72%
 
 Banking77 (Casanueva et al., 2020), PolyAI. CC BY 4.0.
 https://github.com/PolyAI-LDN/task-specific-datasets
+
+## Qwen2.5-1.5B at lr 1e-4, four seeds — `qwen15b-e4-lr1e-4-seed*` — certified
+
+The run below collapsed one seed of four at lr 3e-4. This is the same
+configuration with the peak learning rate at 1e-4, on all four seeds.
+
+| Seed | Accuracy | Lift | ECE | Adaptive ECE | Calibrator | Kept epoch |
+| ---: | ---: | ---: | ---: | ---: | --- | ---: |
+| 0 | 0.9118 | +0.8958 | 0.0489 | 0.0470 | declined | 2 |
+| 1 | 0.8980 | +0.8814 | 0.0448 | 0.0445 | declined | 2 |
+| 2 | 0.9038 | +0.8864 | 0.0216 | 0.0216 | isotonic | 2 |
+| 3 | 0.8502 | +0.8340 | 0.0105 | 0.0106 | isotonic | 1 |
+
+**Every seed clears every blocking gate.** Median accuracy **0.9009**, range
+0.8502–0.9118, against the spike's 0.7248 (0.7126–0.7404) on the same
+splits, evaluation set and gates. Median ECE 0.0332, range 0.0105–0.0489,
+each above its own noise floor (p95 0.0085–0.0139) so every one is a
+measurement. Seed 2 -- the seed that collapsed at 3e-4 -- learns normally
+here, which is the diagnosis confirmed on the seed it was made on and
+tested on the three it was not.
+
+Two things a reader should not miss:
+
+**Two of four pass calibration by 0.001 and 0.005, and both are the seeds
+whose calibrator declined.** Every head that learned comes out overconfident
+(uncalibrated ECE 0.045–0.053); where the isotonic map is applied it lands at
+0.01–0.02, and where the 500-case held-out check cannot show it helps, the
+head ships raw at the edge of the gate. Seed 0 of the earlier sweep flipped
+between the two outcomes across two runs of one seed. The decline rule is the
+open question, not these models.
+
+**Four epochs is more than this wants.** Validation loss bottomed at epoch 1
+or 2 on every seed and rose after; best-epoch selection kept the early
+weights, so the cost was compute, not quality.
+
+Trained at commit `872ed72` on a clean tree, all four on `NVIDIA A10`,
+57–60 minutes a seed (`qwen15b-e4-lr1e-4-modal-run.json`). The four adapters
+are 89 MiB each and are not committed (`*.pt` is ignored); they live on the
+`trigon-runs` Modal Volume and are fetched with
+`python scripts/modal_train.py collect banking77-qwen15b-e4-lr1e-4-872ed726edcd-20260923T145427 --models`.
+
+### Deployed
+
+Seed 2 is served at **`https://jbeck018--trigon-serve-gateway.modal.run`**
+by `scripts/modal_serve.py` -- the real gateway, `/v1/systemone`,
+`/compat` and `/healthz`, on an A10G that scales to zero. It requires an API
+key (`Authorization: Bearer <key>`), held in the `trigon-serve-auth` Modal
+Secret; without one it answers 401. Measured on deploy, 2026-09-23:
+`/healthz` reports calibrated, trained and schema cache on; 81–108 ms of
+model time a request warm with 284 schema tokens from the cache; the first
+request after idle pays a cold start of a few seconds plus loading the
+backbone. Redeploy with `modal deploy scripts/modal_serve.py`.
+
+### Asking it something
+
+```bash
+trigon ask request.json --backend torch \
+    --weights reports/banking77/qwen15b-e4-lr1e-4-seed2.pt \
+    --temperatures reports/banking77/qwen15b-e4-lr1e-4-seed2-temperatures.json
+TRIGON_TEMPERATURE_PATH=reports/banking77/qwen15b-e4-lr1e-4-seed2-temperatures.json \
+TRIGON_ISOTONIC_PATH=reports/banking77/qwen15b-e4-lr1e-4-seed2-isotonic.json \
+    trigon serve --backend torch --weights reports/banking77/qwen15b-e4-lr1e-4-seed2.pt
+```
+
+The adapter fetches its pinned backbone (3 GB) on first load and runs on a
+GPU when one is present: ~60 ms a request on an A10, ~0.5 s on this
+session's 4-core CPU once the schema prefix is cached. Seed 2 is the one to
+try -- median accuracy, and calibrated. Asked *"I lost my card on the train
+this morning and someone may have used it"*, it answers `compromised card`
+at 0.71 with `card linking` at 0.18: a calibrated head showing the ambiguity
+that the raw one, at 0.98–1.00 on everything, hid.
+
+---
+
+## Qwen2.5-1.5B at lr 3e-4, four seeds — `qwen15b-e4-seed*`
+
+The spike's certified configuration with one thing changed: the model.
+7,083 training cases, 1,000 held out for the calibrator, 5,000 evaluated
+(3,080 from the test split, 1,920 held out of train), lr 3e-4, chunks of 8,
+4 epochs — two fewer than the spike trained for. Qwen2.5-1.5B at revision
+`8faed76`, frozen in bf16, LoRA rank 16 on every projection
+(`trigon.backends.qwen_readout`; its forward is bit-identical to
+`transformers`' on the real weights, `reports/backbone/`). Commit `799cd4e`,
+clean tree, on Modal A10/A10G (`qwen15b-e4-modal-run.json`).
+
+| Seed | Accuracy | Lift | ECE | Adaptive ECE | Uncalibrated ECE | Verdict |
+| ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| 0 | **0.9228** | +0.9068 | 0.0077 | 0.0077 | 0.0499 | PASS |
+| 1 | **0.9004** | +0.8838 | 0.0481 | 0.0469 | 0.0481 | PASS, by 0.002 |
+| 2 | 0.0232 | +0.0058 | 0.0077 | 0.0096 | 0.0016 | **FAIL** |
+| 3 | **0.9126** | +0.8964 | 0.0116 | 0.0178 | 0.0569 | PASS |
+
+**Median accuracy 0.9065 against the spike's 0.7248**, on the same splits,
+gates and evaluation set, with the ECE of the three that learned at
+0.0077–0.0481 against a perfect-calibration floor of about 0.007.
+
+**It does not certify, and the reason is one seed.** Three of four pass every
+blocking gate; seed 2 never leaves chance. `CLAUDE.md` certifies on the
+median *and* the spread, and a spread that includes a model at 2.3% is not
+one a caller can be handed.
+
+**Seed 2 learned, then collapsed.** Its loss fell to 3.70 by step 200 --
+faster than seed 0 -- and climbed back to 4.33, which is ln 77, the uniform
+distribution over intents, and stayed there for four epochs. Step 200 is
+where the 5% warmup reaches the peak learning rate. That is an update too
+large at the peak knocking the heads into the one solution where the
+gradient vanishes, not a seed that could not learn. The remedy is being
+measured the only way the rule allows -- a lower peak learning rate on all
+four seeds, not a rerun of the seed that failed.
+
+**Seed 1 passes by 0.002, and the calibrator declined it.** The heads that
+learned come out overconfident -- uncalibrated ECE ~0.05 on every one -- and
+on seeds 0 and 3 the isotonic map took that to 0.0077 and 0.0116. On seed 1
+the held-out check (500 cases, against 77 classes) could not show the map
+helped beyond its noise and declined it, leaving a 0.0481 head. That is the
+decline rule working as written and a thin margin as a result; it is recorded
+in `docs/ledger.md` as open rather than tuned here.
+
+**Calibration is still the product, and here it did its job.** Three heads at
+ECE ~0.05 raw, two brought to under 0.012 by a map fitted on data the gates
+never read.
+
+---
+
+## The reference spike, four seeds — `b77-seed*`
 
 Four seeds, 7,083 training cases, 1,000 held out to fit the calibrator, 6
 epochs, d_model 128, 2 layers. Evaluated on 5,000 cases: the corpus's own

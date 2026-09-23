@@ -199,3 +199,18 @@ def test_the_baseline_is_fitted_on_train_not_on_evaluation(script, corpus_on_dis
     # Predicting train's modal label (0) scores 0.1 on evaluation. An oracle
     # fitted on evaluation would report 0.9.
     assert script.baseline_accuracy(train, evaluation)["q"] == pytest.approx(0.1)
+
+
+def test_a_named_cuda_is_refused_rather_than_replaced_by_the_cpu(script):
+    """The Modal job asks for cuda by name so a missing GPU fails the run.
+
+    The launcher once recorded the A10G it was given while every tensor stayed
+    on the CPU. A fallback here would reproduce that with a different cause:
+    a report naming a GPU that did no work.
+    """
+    torch = pytest.importorskip("torch")
+    if torch.cuda.is_available():
+        pytest.skip("this machine has the GPU the test needs to be missing")
+    with pytest.raises(SystemExit, match="no CUDA device"):
+        script.resolve_device("cuda")
+    assert script.resolve_device("auto")[0] == "cpu"

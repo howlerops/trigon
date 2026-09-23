@@ -14,16 +14,20 @@ narrative sections are a discipline, not a test.
 
 | | |
 | --- | ---: |
-| Commits | 142 |
-| Tests | 492 |
-| Python files (`src`, `tests`, `scripts`) | 100 |
-| Lines in `src/` | 10,954 |
+| Commits | 170 |
+| Tests | 508 |
+| Python files (`src`, `tests`, `scripts`) | 109 |
+| Lines in `src/` | 11,850 |
 | Release gates | 8 |
 | Green-tier corpora in the licence audit | 9 |
 | Committed use cases | 3 |
 | Real corpora loadable | 2 |
 
-**Certified configuration.** 8,000 cases, 8 epochs, d_model 128, 2 layers,
+**Certified on real data: Qwen2.5-1.5B on Banking77**, LoRA rank 16, lr
+1e-4, 4 epochs — median accuracy 0.9009 against the spike's 0.7248, every seed
+clearing every blocking gate (`reports/banking77/README.md`).
+
+**Certified configuration (synthetic, the spike).** 8,000 cases, 8 epochs, d_model 128, 2 layers,
 noise 0.2, `--option-scoring auto`. Clears every blocking gate on all four
 seeds tried: ECE 0.0084–0.0247, adaptive 0.0153–0.0289, lift over the marginal
 predictor +0.1614 to +0.2277. Evidence in `reports/iso/`.
@@ -90,6 +94,19 @@ twenty-two runs** — the investigation is closed and the evidence is in
 - `scripts/train_corpus.py` — train, calibrate and gate on a real corpus, with
   the marginal predictor as the floor since a human-labelled corpus has no
   Bayes-optimal loss to quote.
+- **Training on a GPU, from this sandbox.** `scripts/modal_train.py` runs one
+  Modal container per seed and writes each seed's reports to a Volume before
+  returning, so a `--detach`ed run outlives the VM that launched it and
+  `--collect` fetches it later. It refuses a dirty tree, records the commit,
+  the GPU it was given and the wall clock, and asks `train_corpus.py` for
+  `--device cuda` by name so a missing GPU fails rather than falls back.
+  Verified end to end on 2026-09-23.
+- **A deployed model.** The certified Banking77 adapter behind the real
+  gateway on Modal (`scripts/modal_serve.py`): API-key auth, calibrated,
+  schema cache on, scale to zero; 81–108 ms model time warm.
+- `scripts/burn_in.py` — B.1, written and handed over. Times the serving path
+  at 0.5B and 1.5B backbone shapes rather than the spike's, because the spike
+  would flatter `$/MTok` by the ratio of the models' compute.
 
 ### Data
 - **Real corpora, licence-gated in code.** `trigon.evals.corpora` refuses the
@@ -129,8 +146,19 @@ twenty-two runs** — the investigation is closed and the evidence is in
 | Padding waste in a training chunk, HelpSteer2 | 2.82× at chunk 8 in random order; 1.04× length-sorted |
 | Length bucketing, end to end | **1.63×** — 2.7× on the attention term, diluted by everything linear |
 | GPU on this machine | **Checked, absent.** `nvidia-smi` missing, `torch.cuda.is_available()` False |
+| GPU through Modal | **Works.** Asked for an A10G, got a device reporting `NVIDIA A10`; 30.9 cases/s against ~1.1 on this VM's CPU |
+| Qwen2.5 tokenizer, Python port against Rust | **Exact**: 0 of 34,520 texts differ over 10.3M tokens. Speed a wash against the forward pass: Rust 1.8× in bulk, Python 2× per warm call, 2.4× slower on unseen text |
+| The training path's attention mask, per HelpSteer2 request | 352 ms in Python against 10.2 ms vectorized, bit-identical |
+| **Banking77 on Qwen2.5-1.5B, lr 1e-4, four seeds — certified** | Every seed clears every blocking gate: accuracy 0.8502–0.9118, median 0.9009; ECE 0.0105–0.0489, median 0.0332 |
+| Banking77 on Qwen2.5-1.5B, four seeds, the spike's config | **0.9004–0.9228 on three seeds**, median 0.9065; seed 2 collapsed to chance (0.0232). ECE 0.0077–0.0481 on the three |
+| HelpSteer2 on Qwen2.5-1.5B, four seeds | Lift +0.0059 to +0.0327, median +0.0259 against the spike's +0.0188; `complexity` to +0.096, `verbosity` to +0.049; `helpfulness`/`correctness` up to +0.015 on two seeds, flat on two; `coherence` never moves |
+| The same seed on the same GPU type, twice | Not a replay: accuracy 0.9228 and 0.9252. GPU attention's backward is not deterministic, so a rerun is another draw |
+| A trained Qwen adapter, served on this VM's CPU | 12 of 12 held-out Banking77 intents; ~0.5 s a request, 284 of 323 tokens from the schema cache; 89 MiB on disk |
+| Qwen2 forward in-repo vs `transformers`, real 1.5B weights | Bit-identical: max \|diff\| 0.0, next-token agreement 1.0 |
 | Banking77, four seeds | 0.7126–0.7404 against a 1.6% marginal; ECE 0.0177–0.0361, floor 0.0153 |
 | HelpSteer2, three seeds, 1,400 cases | **Collapsed to the marginal.** Lift +0.0023 median; ECE 0.0108–0.0207, all passing |
+| HelpSteer2, four seeds, 12,000 cases, 12 epochs | No change from 6: lift +0.0170 to +0.0202; the same three quality questions on their marginals; ECE 0.0187–0.0232 |
+| HelpSteer2, four seeds, 12,000 cases, on a GPU | **Fails, and is no longer a collapse.** Lift +0.0189 median, +0.0155 to +0.0203; `complexity` +0.06–0.08 and `verbosity` +0.02 on every seed, `coherence`, `correctness`, `helpfulness` on their marginals; ECE 0.0082–0.0139, calibrator declined on all four |
 | `size`, across 7 interventions and 22 runs | Below its own marginal on every seed; median −0.0095 |
 | Banking77 accuracy (pilot, 2 seeds) | 0.4640 / 0.4193 against a 1.8% marginal — **it transfers** |
 
@@ -166,6 +194,15 @@ The most useful section. Each of these was argued for before it was measured.
 | A.3 and B.1 are blocked on hardware *(assumed)* | Checked. No GPU is present or reachable. Still blocked, now on evidence. |
 | The distribution corpora need a Parquet reader | HelpSteer2 is gzipped JSONL. Three of four do; it does not. |
 | "ECE ≤ 0.05 per corpus" is a reachable done-condition | Not on a corpus whose test split is below the 5,000-sample floor. |
+| Modal is reachable from here: `api.modal.com` answers 200 | A `GET` is not the client. It speaks gRPC and behind this proxy needs `python-socks`; without it, 50 ms to "could not connect", the cause two exceptions down. |
+| `scripts/modal_train.py` is ready and waiting on a token | It would have trained on the CPU. Nothing in the backend or trainer moved a tensor to a device; `--gpu` was ignored; results lived only on the VM that gets reclaimed. |
+| The certified spike's Banking77 report says how it was trained | Its command line reads `--epochs 4`; its training record has 6 epochs on every seed. The header was written by a later invocation with default flags. |
+| A pretrained backbone would do for HelpSteer2 what it did for Banking77 | Qwen2.5-1.5B, four seeds: median lift +0.0259 against the spike's +0.0188. It learns the surface questions better and the quality questions barely at all. |
+| HelpSteer2's spike at 12,000 cases was under-trained | 12 epochs: median lift +0.0188 against +0.0189 at 6; validation bottomed at epoch 6–11 on every seed. It is at its ceiling. |
+| HelpSteer2 collapsed for want of data | Partly. 8.6× the data took lift from +0.0023 to +0.0189 and taught two questions of five; the three that judge quality did not move, and every seed kept its last epoch. |
+| The Python tokenizer port is faster than Rust | Only one call at a time, where the binding's per-call overhead dominates. Batched across four cores, Rust is 1.8× ahead. |
+| `modal run --detach` plus a Volume survives this VM | It keeps the app, not the calls. The container restarted twelve minutes into a 12-epoch sweep; Modal cancelled all four `starmap` inputs and nothing was written. Now deploy + `spawn`, and the launcher exits at once. |
+| A chunk of eight fits on a 24 GB GPU | HelpSteer2's longest case is 7,171 tokens; the chunk asked a 22 GiB A10 for 6.13 GiB at once and died four minutes in. |
 
 ---
 
@@ -252,6 +289,12 @@ Errors that flattered the project, found by re-measuring rather than by review:
   there and the difference was never between the two paths at all. The cache
   stays off for a reason that survives measurement: its wall-clock saving has
   never been timed.
+- **The mask vectorization was credited with rescuing HelpSteer2 training and
+  never reached it.** `_mask_tensor`'s docstring tells the story — 208 ms a
+  request, four seeds on course for 45 hours, fixed — and the fix went into
+  `logits`, the serving path. Training calls `logits_batch`, which went on
+  building every mask in Python: 352 ms a request against 10.2 ms. Found by
+  timing a training step before paying for a GPU to run it, not by review.
 - **The first real-corpus evaluation set was a single intent.** Banking77's
   test split is ordered by label and the loader sliced `[:eval_n]`; the
   marginal predictor scored 1.0000 and `accuracy_over_baseline` read −1.0000.
@@ -277,6 +320,21 @@ what order, and how each step is known to be done.
   failed. What is **not** established is that the architecture cannot — every
   run shares the 128-wide two-layer backbone that has been the confound under
   every finding here. Stage 1.3 is the experiment that settles it.
+- ~~A pretrained backbone learns Banking77 on three seeds of four.~~
+  **Closed.** At lr 3e-4 seed 2 learned for 200 steps and collapsed to ln 77
+  at the peak rate; at lr 1e-4 all four seeds certify (median 0.9009).
+- **The calibrator declined a head at ECE 0.0481.** On Qwen seed 1 the
+  500-case held-out check could not show the isotonic map helped a 77-way head
+  beyond its noise, and the run passed the 0.05 gate by 0.002. **Then the
+  same seed, rerun, flipped:** seed 0 applied the map (ECE 0.0077) in one run
+  and declined it (ECE 0.0473) in another. On a 77-way head that check sits
+  at the edge of its noise, so whether a model ships calibrated is close to a
+  coin toss. The rule did what it says; the rule is what is open.
+- **Preemption costs a whole seed.** Three Modal containers were preempted
+  today and each restarted its seed from step 0, because training does not
+  checkpoint mid-run -- up to two hours of a HelpSteer2 seed each time.
+  Resuming from a per-epoch checkpoint on the Volume would bound it to one
+  epoch.
 - **$/MTok is unmeasured.** The whole cost argument beyond ~2× rests on it.
   Needs the L4 burn-in.
 - ~~The KV cache is off by default because nobody has timed it.~~ **Closed.**
@@ -290,18 +348,20 @@ what order, and how each step is known to be done.
   2.82× of the attention work on a corpus whose lengths run 253–3,647 tokens.
   Sortish batching would fix it and changes which cases share a gradient step,
   so it is `docs/next.md` A.5 rather than a quiet edit mid-certification.
-- **HelpSteer2 has a result and it is a failure.** Three seeds at 1,400
-  training cases: twelve of fifteen question-level accuracies land *exactly*
-  on their own marginal, `accuracy_over_baseline` fails on every seed, and
-  every calibration gate passes. The size was chosen to fit a cloud session's
-  idle window rather than because it was enough — Banking77 needed 7,083
-  cases — so this does not establish that Score cannot learn the corpus.
+- **HelpSteer2 fails at 12,000 cases, and has stopped collapsing.** Four
+  seeds on a GPU, median lift +0.0189 against the +0.05 gate, spread
+  +0.0155 to +0.0203. `complexity` and `verbosity` are learned on every seed;
+  `coherence`, `correctness` and `helpfulness` — the three that judge quality
+  rather than surface — sit on their marginals. Twelve epochs changed
+  nothing (+0.0188), so this is the spike's ceiling, not under-training; the
+  open question is whether a pretrained backbone moves the three quality
+  questions, which is A.3 and is running.
   `reports/helpsteer2/README.md`.
-- **A run longer than a session's idle window cannot finish here.** The cloud
-  session docs are explicit — background work is not restored when the VM is
-  reclaimed — so this is a property of the environment rather than bad luck,
-  and it is why `docs/gpu-access.md` treats durability and hardware as one
-  question.
+- **A run longer than a session's idle window cannot finish here.** It was
+  moved to Modal, and the 12,000-case HelpSteer2 run finished there — but only
+  because this container outlived it. **Reopened by the first real reclamation**: the next sweep lost all
+  four seeds to it (see *disproved*). Closes again when a spawned run is
+  collected after the launching container has gone.
 - **CI has stopped executing.** Runs 26 and 27 failed with every job ending in
   three to five seconds, no steps recorded and logs 404 — the runner never
   reached checkout. Run 12 was green on substantially this workflow, and run

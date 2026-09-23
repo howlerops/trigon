@@ -11,7 +11,7 @@ the options actually are, what each unblocks, and what it costs.
 | **A.3** Replace the spike with a real backbone | A GPU, hours | The single largest expected accuracy gain, and the last standing explanation for `size` |
 | **B.1** The L4 burn-in for `$/MTok` | An L4, ~1 hour | The most load-bearing unmeasured number in the project; the economic case is arithmetic over it |
 | **C.1** Publish weights | A.3 | Nothing worth publishing until the model is not a spike |
-| **A.2** HelpSteer2 | Not a GPU — *durability* | Three attempts lost; see below |
+| **A.2** HelpSteer2 | Not a GPU — *durability* | **Unblocked.** Run on Modal at 12,000 cases, 2026-09-23 |
 
 A.3 and B.1 are the real ones. The rest of the plan is done or does not need
 hardware.
@@ -108,6 +108,14 @@ the egress proxy allows:
 `pip install modal` also works — the SDK is installed in this session's
 virtualenv at 1.5.5. So the HTTPS route is open and the client runs here.
 
+**That check was of the wrong thing, and the first real use found it.** A 200
+on a `GET` says the host is reachable; the Modal client speaks gRPC, and
+through this session's proxy it needs `python-socks`, which plain `modal` does
+not install. Without it every call fails in 50 ms with *"Could not connect to
+the Modal server"* and the `ImportError` that explains it is two `__cause__`s
+down. The `gpu` extra now installs `modal[api-proxy-support]`. Verified
+2026-09-23 by running a job, which is the only check that counts.
+
 ## What I would actually suggest
 
 **Modal, for everything except B.1.** Five reasons, in the order they matter:
@@ -148,18 +156,41 @@ drive A.3 and A.2-at-a-real-size from here.
 
 ```bash
 pip install -e ".[gpu]"                 # the launcher only; the job builds its own image
-modal run scripts/modal_train.py --corpus helpsteer2 --n 12000 --epochs 6
-modal run scripts/modal_train.py --corpus banking77 --gpu L4 --seeds 0,1,2,3
+python scripts/modal_train.py launch --corpus helpsteer2 --n 12000 --epochs 6
+python scripts/modal_train.py status <run id the launch printed>
+python scripts/modal_train.py collect <run id>
+python scripts/modal_train.py launch --corpus banking77 --gpu L4 --seeds 0,1,2,3
 ```
+
+**Ten GPUs at once is the plan's cap** (checked 2026-09-23: Modal's "you
+have reached your GPU limit" email, at ten concurrent `train_one`
+containers). Calls beyond it queue rather than fail, so two four-seed sweeps
+plus a third launch run as ten now and the rest when slots free. `launch`
+prints how many will queue.
+
+**The launcher exits in seconds, and that is the durability.** It deploys the
+app, `spawn`s one call per seed and returns; a spawned call on a deployed app
+belongs to Modal, not to this VM. Each seed writes its reports to the
+`trigon-runs` Volume, and `collect` fetches them on any later turn. The
+launcher refuses a dirty tree: the image is built from the working tree, so a
+SHA recorded over uncommitted changes names code that did not run.
+
+The first version of this paragraph said "always `--detach`", and it was
+wrong. `modal run --detach` keeps the *app* alive, but a `starmap` fed from
+the local entrypoint belongs to that process: when this container restarted
+twelve minutes into a 12-epoch sweep, Modal cancelled all four inputs and
+the Volume received nothing.
 
 Each seed is its own container, so four seeds cost the wall clock of one
 rather than four-on-four-cores — which is why this does not reuse
 `scripts/seed_sweep.py`, whose parallelism is local processes. The reports
-come back as return values and land in `reports/<corpus>/`.
+land in `reports/<corpus>/`.
 
-Three things it records rather than assumes, in `modal-run.json` beside the
+Three things it records rather than assumes, in `<prefix>-modal-run.json` beside the
 reports: the **git SHA** the image was built from, the **GPU it actually
-got** (not the one requested), and the wall clock. A number from hardware
+got** (not the one requested), and the wall clock. The distinction is not
+academic: asked for an `A10G`, the first job reported itself as
+`NVIDIA A10`. A number from hardware
 nobody can name, at a commit nobody can identify, is a claim rather than a
 result — and that is the whole difference this project trades on.
 
@@ -177,10 +208,31 @@ sets them will not see them.
 ### Where the other two still win
 
 **B.1, the L4 burn-in, does not need any of this.** It is one measurement on
-named hardware: rent an L4 for an hour, run one command I will write, commit
-the report. Doing it through Modal would work and would measure *Modal's*
-L4 under *Modal's* container, which is a fine number and a less direct one
-than the burn-in asks for. If you only ever do one of these, do this one.
+named hardware: rent an L4 for an hour, run one command, commit the report.
+Doing it through Modal would work and would measure *Modal's* L4 under
+*Modal's* container, which is a fine number and a less direct one than the
+burn-in asks for. If you only ever do one of these, do this one.
+
+On any Linux box with an L4 and a CUDA driver:
+
+```bash
+git clone https://github.com/howlerops/trigon && cd trigon
+pip install -e ".[train]"      # PyPI's torch wheel carries CUDA on Linux
+nvidia-smi                     # confirm it is the L4 you are paying for
+python scripts/burn_in.py --usd-per-hour <what the box costs> --out reports/burn-in/
+git add reports/burn-in && git commit -m "L4 burn-in" && git push
+```
+
+It needs no checkpoint and no data. **It does not measure the spike as the
+product.** The 128-wide reference model would serve many times faster than any
+backbone worth shipping, and its throughput quoted as `$/MTok` would flatter
+the cost argument by the ratio of the two models' compute. Throughput depends
+on shape rather than weight values, so `scripts/burn_in.py` times randomly
+initialised encoders at the width and depth of 0.5B and 1.5B backbones — the
+A.3 candidates — with the spike alongside and labelled. It refuses to run
+without CUDA, records `nvidia-smi`, the commit and whether the tree was clean,
+and takes the hourly price as an input because a price is a quote, not a
+measurement.
 
 **Self-hosting wins if you are on Team or Enterprise, already run a GPU box,
 and want checkouts and artifacts to stay inside your network.** Then the

@@ -62,7 +62,6 @@ from ..schema import (
     SchemaCompiler,
     SegmentKind,
     mask_shape_key,
-    materialize_mask,
 )
 from ..schema.compiler import MASK_CACHE_CELLS
 from ..schema.tokens import CallableEstimator
@@ -429,6 +428,25 @@ class TorchReadoutBackend:
     def model_version(self) -> str:
         return self._version
 
+    @property
+    def device(self) -> torch.device:
+        """Where the weights live, and so where every input tensor is built."""
+        return self.model.embed.weight.device
+
+    def to(self, device: str | torch.device) -> TorchReadoutBackend:
+        """Move the weights, and drop everything cached on the old device.
+
+        Every tensor this backend builds is created on ``self.device``. Until
+        this existed nothing was, and nothing raised: the Modal launcher asked
+        for an A10G, recorded the A10G it got, and would have trained on the
+        container's CPU -- a report naming hardware it never used.
+        """
+        self.model.to(device)
+        self._mask_cache.clear()
+        self._mask_cache_cells = 0
+        self._prefix_cache.clear()
+        return self
+
     def stamp_version(self) -> str:
         """Name this build after the weights it actually has.
 
@@ -477,6 +495,7 @@ class TorchReadoutBackend:
             version=f"{self._version}+int8",
             seed=None,
         )
+        twin.model.to(self.device)
         twin.model.load_state_dict(self.model.state_dict())
         with torch.no_grad():
             for module in twin.model.modules():
@@ -530,6 +549,15 @@ class TorchReadoutBackend:
     def load(cls, path: str | Path, *, version: str | None = None) -> TorchReadoutBackend:
         """Rebuild a backend from a checkpoint written by ``save``."""
         payload = torch.load(Path(path), map_location="cpu", weights_only=False)
+        if payload.get("format", "").startswith("trigon-backbone-adapter"):
+            # Adapters over a pinned pretrained backbone: the checkpoint names
+            # the backbone and carries only what trained.
+            from .qwen_readout import QwenReadoutBackend
+
+            # On the GPU when there is one: a 1.5B backbone serves in tens of
+            # milliseconds there and in seconds on a CPU.
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            return QwenReadoutBackend.from_payload(payload, version=version, device=device)
         stored = dict(payload["config"])
         # A flag absent from a checkpoint means "trained before this flag
         # existed", which is False -- never the current constructor default.
@@ -581,6 +609,26 @@ class TorchReadoutBackend:
         divergence is invisible until someone measures ECE on the served path.
         """
         embeddings, spans = self._embed(compiled)
+        mask = self._cached_mask(compiled)
+        if mask.shape[0] != embeddings.shape[1]:
+            raise ValueError(
+                f"mask is {mask.shape[0]} tokens but the sequence is "
+                f"{embeddings.shape[1]}; the compiler's estimator must be the "
+                f"backend's tokenizer"
+            )
+        positions, segments = spans.positions(self.device), spans.segment_types(self.device)
+        self._last_cached_tokens = 0
+        prefix = self._prefix_for(compiled, embeddings, mask, positions, segments)
+        if prefix is None:
+            hidden = self.model(embeddings, mask, positions, segments)[0]
+        else:
+            hidden = self.model.forward_with_prefix(embeddings, mask, positions, segments, prefix)[
+                0
+            ]
+        return self._heads(compiled, request, hidden, spans), int(embeddings.shape[1])
+
+    def _cached_mask(self, compiled: CompiledRequest) -> torch.Tensor:
+        """The token mask for this request's shape, from the cache if it fits."""
         key = mask_shape_key(compiled)
         mask = self._mask_cache.get(key)
         if mask is None:
@@ -592,22 +640,7 @@ class TorchReadoutBackend:
                     self._mask_cache_cells = 0
                 self._mask_cache[key] = mask
                 self._mask_cache_cells += cells
-        if mask.shape[0] != embeddings.shape[1]:
-            raise ValueError(
-                f"mask is {mask.shape[0]} tokens but the sequence is "
-                f"{embeddings.shape[1]}; the compiler's estimator must be the "
-                f"backend's tokenizer"
-            )
-        positions, segments = spans.positions(), spans.segment_types()
-        self._last_cached_tokens = 0
-        prefix = self._prefix_for(compiled, embeddings, mask, positions, segments)
-        if prefix is None:
-            hidden = self.model(embeddings, mask, positions, segments)[0]
-        else:
-            hidden = self.model.forward_with_prefix(embeddings, mask, positions, segments, prefix)[
-                0
-            ]
-        return self._heads(compiled, request, hidden, spans), int(embeddings.shape[1])
+        return mask
 
     def _prefix_for(self, compiled, embeddings, mask, positions, segments):
         """The cached schema prefix for this request, computing it if needed.
@@ -764,14 +797,22 @@ class TorchReadoutBackend:
             embedded, spans = self._embed(compiled)
             embeddings.append(embedded[0])
             spans_list.append(spans)
-            masks.append(torch.tensor(materialize_mask(compiled), dtype=torch.bool))
+            # The vectorized mask, not `materialize_mask`. The two are asserted
+            # identical in `tests/test_independence.py`; this path was left on
+            # the Python one when `logits` moved, and on HelpSteer2 it cost
+            # 352 ms a request against 10 ms -- the training loop's whole
+            # mask budget, on the one path the vectorization was written for.
+            masks.append(self._cached_mask(compiled))
 
+        device = self.device
         width = max(e.shape[0] for e in embeddings)
         batch = len(items)
-        padded = torch.zeros(batch, width, self.config.d_model, dtype=embeddings[0].dtype)
-        mask = torch.zeros(batch, width, width, dtype=torch.bool)
-        positions = torch.zeros(batch, width, dtype=torch.long)
-        segments = torch.zeros(batch, width, dtype=torch.long)
+        padded = torch.zeros(
+            batch, width, self.config.d_model, dtype=embeddings[0].dtype, device=device
+        )
+        mask = torch.zeros(batch, width, width, dtype=torch.bool, device=device)
+        positions = torch.zeros(batch, width, dtype=torch.long, device=device)
+        segments = torch.zeros(batch, width, dtype=torch.long, device=device)
 
         for i, (embedded, spans, sample_mask) in enumerate(
             zip(embeddings, spans_list, masks, strict=True)
@@ -784,12 +825,12 @@ class TorchReadoutBackend:
                 )
             padded[i, :length] = embedded
             mask[i, :length, :length] = sample_mask
-            positions[i, :length] = spans.positions()
-            segments[i, :length] = spans.segment_types()
+            positions[i, :length] = spans.positions(device)
+            segments[i, :length] = spans.segment_types(device)
             # Padded rows attend to themselves and nothing else. They are
             # discarded below; this only keeps the softmax finite.
-            for row in range(length, width):
-                mask[i, row, row] = True
+            pad = torch.arange(length, width, device=device)
+            mask[i, pad, pad] = True
 
         hidden = self.model(padded, mask, positions, segments)
 
@@ -859,19 +900,20 @@ class TorchReadoutBackend:
             lengths = [int(e.shape[1]) for e, _ in embedded]
             width = max(lengths)
             d_model = self.config.d_model
+            device = self.device
 
-            padded = torch.zeros(len(batch), width, d_model)
-            positions = torch.zeros(len(batch), width, dtype=torch.long)
-            segments = torch.zeros(len(batch), width, dtype=torch.long)
-            masks = torch.zeros(len(batch), width, width, dtype=torch.bool)
+            padded = torch.zeros(len(batch), width, d_model, device=device)
+            positions = torch.zeros(len(batch), width, dtype=torch.long, device=device)
+            segments = torch.zeros(len(batch), width, dtype=torch.long, device=device)
+            masks = torch.zeros(len(batch), width, width, dtype=torch.bool, device=device)
 
             for i, ((compiled, _), (embeddings, spans)) in enumerate(
                 zip(batch, embedded, strict=True)
             ):
                 n = lengths[i]
                 padded[i, :n] = embeddings[0]
-                positions[i, :n] = spans.positions()
-                segments[i, :n] = spans.segment_types()
+                positions[i, :n] = spans.positions(device)
+                segments[i, :n] = spans.segment_types(device)
                 one = self._mask_tensor(compiled)
                 if one.shape[0] != n:
                     raise ValueError(
@@ -884,8 +926,8 @@ class TorchReadoutBackend:
                 # poisons every sample sharing the tensor. Letting padding
                 # attend to itself keeps it finite and keeps it isolated: no
                 # real token attends *to* padding, so the value is never read.
-                for j in range(n, width):
-                    masks[i, j, j] = True
+                pad = torch.arange(n, width, device=device)
+                masks[i, pad, pad] = True
 
             with torch.no_grad():
                 hidden = self.model(padded, masks, positions, segments)
@@ -960,7 +1002,8 @@ class TorchReadoutBackend:
             # The causal fallback applies within a group when the model was
             # not converted to prefix-LM attention.
             mask = mask & torch.ones_like(mask).tril()
-        return mask
+        # Built on the CPU from Python lists, then moved once.
+        return mask.to(self.device)
 
     # -- sequence construction -------------------------------------------
 
@@ -980,7 +1023,11 @@ class TorchReadoutBackend:
             start = group_position.get(group, 0)
             if segment.kind is SegmentKind.READOUT:
                 assert segment.question_id is not None
-                slot = table.weight[READOUT_ID]
+                # A pretrained backbone's vocabulary has no readout token -- id 1
+                # is an ordinary word there -- so a model may carry its own
+                # learned readout vector instead.
+                own = getattr(self.model, "readout", None)
+                slot = own if own is not None else table.weight[READOUT_ID]
                 if segment.member_index is not None:
                     # Seed a per-option slot with that option's own content, so
                     # the slot carries which option it is answering for.
@@ -1004,7 +1051,7 @@ class TorchReadoutBackend:
                 spans.record(start + offset, _SEGMENT_TYPE[segment.kind])
             group_position[group] = start + len(ids)
             if ids:
-                vectors = table(torch.tensor(ids, dtype=torch.long))
+                vectors = table(torch.tensor(ids, dtype=torch.long, device=table.weight.device))
                 rows.append(vectors)
                 if segment.member_index is not None and segment.question_id is not None:
                     pooled = vectors.mean(dim=0)
@@ -1044,8 +1091,8 @@ class _Spans:
         self._positions.append(position)
         self._types.append(segment_type)
 
-    def positions(self) -> torch.Tensor:
-        return torch.tensor(self._positions, dtype=torch.long)
+    def positions(self, device=None) -> torch.Tensor:
+        return torch.tensor(self._positions, dtype=torch.long, device=device)
 
-    def segment_types(self) -> torch.Tensor:
-        return torch.tensor(self._types, dtype=torch.long)
+    def segment_types(self, device=None) -> torch.Tensor:
+        return torch.tensor(self._types, dtype=torch.long, device=device)

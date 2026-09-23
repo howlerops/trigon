@@ -1,0 +1,30 @@
+{
+  "backbone": "qwen2.5-1.5b",
+  "revision": "8faed761d45a263340a0528343f099c05c9a4323",
+  "rows": [
+    {
+      "text": "I was charged twice for the same transaction this morning, c",
+      "tokens": 16,
+      "max_abs_diff": 0.0,
+      "mean_abs_diff": 0.0,
+      "hidden_scale": 1.8303459882736206,
+      "next_token_agreement": 1.0
+    },
+    {
+      "text": "The app will not let me log in after I changed my phone numb",
+      "tokens": 17,
+      "max_abs_diff": 0.0,
+      "mean_abs_diff": 0.0,
+      "hidden_scale": 1.8120412826538086,
+      "next_token_agreement": 1.0
+    },
+    {
+      "text": "Write a short poem about the sea.\n\nThe sea is wide and blue ",
+      "tokens": 25,
+      "max_abs_diff": 0.0,
+      "mean_abs_diff": 0.0,
+      "hidden_scale": 2.1473488807678223,
+      "next_token_agreement": 1.0
+    }
+  ]
+}

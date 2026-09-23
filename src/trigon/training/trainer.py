@@ -56,6 +56,18 @@ class TrainingConfig:
     #: a real change to the optimization and why this is a knob rather than the
     #: only behaviour. 1 disables it.
     bucket_window: int = 8
+    #: Upper bound on batch x sequence^2 in one forward pass, or None for none.
+    #: A chunk over it is split into sub-batches whose gradients accumulate
+    #: into the same optimizer step, weighted so the step is still the mean
+    #: over the chunk's cases -- the same update, up to summation order.
+    #:
+    #: Attention memory is quadratic, and the mask is repeated per head, so a
+    #: chunk's footprint is set by its longest case. HelpSteer2's longest
+    #: compiles to 7,171 tokens and bucketing, correctly, puts it beside the
+    #: next-longest: the first GPU run asked a 22 GiB A10 for 6.13 GiB in one
+    #: allocation and died four minutes in. A CPU has the same problem with
+    #: more room, which is why this is off by default rather than tuned for it.
+    max_batch_cells: int | None = None
     grad_clip: float = 1.0
     seed: int = 0
     ordinal: OrdinalConfig = field(default_factory=OrdinalConfig)
@@ -171,7 +183,7 @@ def train(
     # chunk by length so it pads less; see `_chunks`.
     lengths = (
         {i: compiler.compile_request(case.request).total_tokens for i, case in enumerate(cases)}
-        if config.bucket_window > 1
+        if config.bucket_window > 1 or config.max_batch_cells
         else {}
     )
     epoch_reports: list[EpochReport] = []
@@ -191,37 +203,56 @@ def train(
         # equality -- but there is one backward pass instead of `accumulate` of
         # them, which is where the time goes.
         for chunk in _chunks(order, lengths, config):
-            items = [
-                (compiler.compile_request(cases[index].request), cases[index].request)
-                for index in chunk
-            ]
-            batched = backend.logits_batch(items)
+            parts = _within_budget(chunk, lengths, config.max_batch_cells)
+            # Split, the step's loss is still the mean over the whole chunk's
+            # labelled cases, so each part is divided by the chunk's count and
+            # not its own -- or a chunk split in two would take two half-sized
+            # steps' worth of gradient from its shorter half.
+            denominator = (
+                sum(1 for index in chunk if _labelled(cases[index])) if len(parts) > 1 else None
+            )
+            chunk_seen = 0
+            for part in parts:
+                items = [
+                    (compiler.compile_request(cases[index].request), cases[index].request)
+                    for index in part
+                ]
+                batched = backend.logits_batch(items)
 
-            case_losses = []
-            for index, (compiled, _), raw in zip(chunk, items, batched, strict=True):
-                case = cases[index]
-                losses = []
-                for compiled_q in compiled.schema.questions:
-                    qid = compiled_q.question_id
-                    expected = case.expected.get(qid)
-                    if expected is None:
+                case_losses = []
+                for index, (compiled, _), raw in zip(part, items, batched, strict=True):
+                    case = cases[index]
+                    losses = []
+                    for compiled_q in compiled.schema.questions:
+                        qid = compiled_q.question_id
+                        expected = case.expected.get(qid)
+                        if expected is None:
+                            continue
+                        label = expected.hard_label
+                        if label is None:
+                            continue
+                        losses.append(
+                            question_loss(raw[qid], compiled_q.kind, label, config.ordinal)
+                        )
+                    if not losses:
                         continue
-                    label = expected.hard_label
-                    if label is None:
-                        continue
-                    losses.append(question_loss(raw[qid], compiled_q.kind, label, config.ordinal))
-                if not losses:
+                    if epoch == 0:
+                        counted_questions += len(losses)
+                    case_losses.append(torch.stack(losses).mean())
+
+                if not case_losses:
                     continue
-                if epoch == 0:
-                    counted_questions += len(losses)
-                case_losses.append(torch.stack(losses).mean())
+                stacked = torch.stack(case_losses)
+                if denominator is None:
+                    stacked.mean().backward()
+                else:
+                    (stacked.sum() / denominator).backward()
+                total += float(stacked.detach().sum())
+                chunk_seen += len(case_losses)
 
-            if not case_losses:
+            if not chunk_seen:
                 continue
-            stacked = torch.stack(case_losses)
-            stacked.mean().backward()
-            total += float(stacked.detach().sum())
-            seen += len(case_losses)
+            seen += chunk_seen
 
             step += 1
             _set_lr(optimizer, config, step, total_steps, warmup_steps)
@@ -237,10 +268,14 @@ def train(
 
         validation = _validation_loss(backend, compiler, holdout, config) if holdout else None
         if validation is not None and (best is None or validation < best[0]):
+            # Only what trains. For the spike that is everything; over a frozen
+            # pretrained backbone it is adapters and heads, and snapshotting
+            # the whole state would copy 3.5 GB each time validation improved.
+            trainable = {name for name, p in model.named_parameters() if p.requires_grad}
             best = (
                 validation,
                 epoch + 1,
-                {k: v.detach().clone() for k, v in model.state_dict().items()},
+                {k: v.detach().clone() for k, v in model.state_dict().items() if k in trainable},
             )
 
         record = EpochReport(
@@ -266,7 +301,7 @@ def train(
         # The last epoch is not the best one. Keeping it anyway ships weights
         # the run had already beaten -- which is not hypothetical: the 8,000
         # case run bottomed at epoch 4 and rose for the next four.
-        model.load_state_dict(best[2])
+        model.load_state_dict(best[2], strict=False)
         kept = best[1]
         print(
             f"  keeping epoch {kept} (validation {best[0]:.4f}), not the last",
@@ -322,6 +357,36 @@ def _chunks(order, lengths, config):
             yield block[inner : inner + step]
 
 
+def _labelled(case: Case) -> bool:
+    """Whether a case contributes a loss -- the same test the step applies."""
+    return any(
+        (expected := case.expected.get(qid)) is not None and expected.hard_label is not None
+        for qid in case.request.questions
+    )
+
+
+def _within_budget(chunk, lengths, budget: int | None) -> list:
+    """Cut a chunk into consecutive parts whose batch x width^2 fits ``budget``.
+
+    Never fewer than one case a part: a case over the budget on its own runs
+    alone rather than not at all.
+    """
+    if not budget:
+        return [chunk]
+    parts, current, widest = [], [], 0
+    for index in chunk:
+        width = max(widest, lengths[index])
+        if current and (len(current) + 1) * width * width > budget:
+            parts.append(current)
+            current, width = [], lengths[index]
+        current.append(index)
+        widest = width
+    if current:
+        parts.append(current)
+    return parts
+
+
+@torch.no_grad()
 def _validation_loss(backend, compiler, holdout: Sequence[Case], config: TrainingConfig) -> float:
     """Mean loss on the held-out slice, in eval mode.
 
@@ -334,10 +399,16 @@ def _validation_loss(backend, compiler, holdout: Sequence[Case], config: Trainin
         total, seen = 0.0, 0
         for start in range(0, len(holdout), config.accumulate):
             chunk = holdout[start : start + config.accumulate]
-            items = [(compiler.compile_request(c.request), c.request) for c in chunk]
-            for case, (compiled, _), raw in zip(
-                chunk, items, backend.logits_batch(items), strict=True
-            ):
+            compiled_chunk = [(compiler.compile_request(c.request), c.request) for c in chunk]
+            widths = {i: item[0].total_tokens for i, item in enumerate(compiled_chunk)}
+            parts = _within_budget(list(widths), widths, config.max_batch_cells)
+            items = [compiled_chunk[i] for part in parts for i in part]
+            raws = [
+                raw
+                for part in parts
+                for raw in backend.logits_batch([compiled_chunk[i] for i in part])
+            ]
+            for case, (compiled, _), raw in zip(chunk, items, raws, strict=True):
                 losses = [
                     question_loss(
                         raw[q.question_id],

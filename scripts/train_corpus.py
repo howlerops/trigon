@@ -97,7 +97,51 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument("--validation-fraction", type=float, default=0.1)
+    parser.add_argument(
+        "--backbone",
+        default=None,
+        help=(
+            "a pinned pretrained backbone from trigon.backends.hub (e.g. qwen2.5-1.5b) "
+            "instead of the spike; --d-model and --layers are then the backbone's"
+        ),
+    )
+    parser.add_argument("--lora-rank", type=int, default=16)
+    parser.add_argument(
+        "--max-batch-cells",
+        type=int,
+        default=0,
+        help=(
+            "cap batch x sequence^2 per forward pass, splitting a step into "
+            "sub-batches that accumulate into the same update; 0 is no cap. "
+            "A GPU needs one on long-tailed corpora -- see TrainingConfig"
+        ),
+    )
+    parser.add_argument(
+        "--device",
+        default="auto",
+        help=(
+            "cpu, cuda, or auto (cuda when present). Naming cuda on a machine "
+            "without one is an error, not a fallback: a run that asked for a GPU "
+            "and quietly trained on the CPU publishes a report about hardware it "
+            "never used"
+        ),
+    )
     return parser.parse_args(argv)
+
+
+def resolve_device(requested: str) -> tuple[str, str]:
+    """The device to train on, and the name of the hardware behind it."""
+    import torch
+
+    if requested == "auto":
+        requested = "cuda" if torch.cuda.is_available() else "cpu"
+    if requested.startswith("cuda"):
+        if not torch.cuda.is_available():
+            raise SystemExit(f"--device {requested} was asked for and no CUDA device is present")
+        return requested, torch.cuda.get_device_name(torch.device(requested))
+    import platform
+
+    return requested, platform.processor() or platform.machine()
 
 
 def splits(spec, args) -> tuple[list, list, list, int]:
@@ -195,7 +239,9 @@ def baseline_accuracy(train: list, evaluation: list) -> dict[str, float]:
     return out
 
 
-def header(spec, args, train, calibration, evaluation, marginal, topped_up: int) -> str:
+def header(
+    spec, args, train, calibration, evaluation, marginal, topped_up: int, hardware: str = ""
+) -> str:
     questions = train[0].request.questions
     first = next(iter(questions.values()))
     labels = getattr(first, "options", None) or getattr(first, "levels", [])
@@ -226,12 +272,21 @@ def header(spec, args, train, calibration, evaluation, marginal, topped_up: int)
             *(f"| `{qid}` | {value:.4f} |" for qid, value in sorted(marginal.items())),
             f"| Epochs | {args.epochs} |",
             f"| Seed | {args.seed} |",
+            *([f"| Device | {hardware} |"] if hardware else []),
+            (
+                f"| Model | {args.backbone}, LoRA rank {args.lora_rank} |"
+                if args.backbone
+                else f"| Model | reference spike, d_model {args.d_model}, {args.layers} layers |"
+            ),
             "",
             "```",
             f"python scripts/train_corpus.py {spec.name} -n {args.n} "
             f"--calibration-n {args.calibration_n} --eval-n {args.eval_n} "
             f"--epochs {args.epochs} --lr {args.lr} --accumulate {args.accumulate} "
-            f"--d-model {args.d_model} --layers {args.layers} --seed {args.seed}",
+            f"--d-model {args.d_model} --layers {args.layers} --seed {args.seed} "
+            f"--device {args.device}"
+            + (f" --backbone {args.backbone} --lora-rank {args.lora_rank}" if args.backbone else "")
+            + (f" --max-batch-cells {args.max_batch_cells}" if args.max_batch_cells else ""),
             "```",
             "",
             *(
@@ -272,14 +327,27 @@ def main(argv: list[str] | None = None) -> int:
     from trigon.training import train as run_training
 
     torch.set_num_threads(args.torch_threads)
+    device, hardware = resolve_device(args.device)
 
     spec = corpus(args.corpus)
     if args.weights:
         backend = TorchReadoutBackend.load(args.weights)
+    elif args.backbone:
+        from trigon.backends.qwen_readout import QwenReadoutBackend
+
+        # Loaded straight onto the device: a 1.5B model materialised on the
+        # CPU first and moved costs a second copy of it in a container's RAM.
+        backend = QwenReadoutBackend.from_backbone(
+            args.backbone, device=device, seed=args.seed, lora_rank=args.lora_rank
+        )
+        backend.model.checkpointing = True
     else:
         backend = TorchReadoutBackend(
             config=ReadoutConfig(d_model=args.d_model, n_layers=args.layers), seed=args.seed
         )
+    backend.to(device)
+    hardware = f"{device} ({hardware})"
+    print(f"{args.corpus}: training on {hardware}", file=sys.stderr)
     compiler = backend.make_compiler(option_scoring=OptionScoring(args.option_scoring))
     train, calibration, evaluation, topped_up = splits(spec, args)
     marginal = baseline_accuracy(train, evaluation)
@@ -301,9 +369,14 @@ def main(argv: list[str] | None = None) -> int:
                 seed=args.seed,
                 log_every=args.log_every,
                 validation_fraction=args.validation_fraction,
+                max_batch_cells=args.max_batch_cells or None,
             ),
             compiler=compiler,
         )
+    if device.startswith("cuda"):
+        # Sizing the GPU for the next run needs this, and nothing else records it.
+        peak = torch.cuda.max_memory_allocated() / 2**30
+        print(f"{args.corpus}: peak GPU memory in training {peak:.1f} GiB", file=sys.stderr)
     # **Evaluate the path we serve.** The gateway defaults the schema prefix
     # cache on (reports/cache/README.md: 6x at 77 options), so a report
     # measured with it off describes a deployment nobody runs. Safe here for
@@ -324,7 +397,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     gates = check_gates(after, slices=slices)
     markdown = header(
-        spec, args, train, calibration, evaluation, marginal, topped_up
+        spec, args, train, calibration, evaluation, marginal, topped_up, hardware
     ) + render_markdown([before, after], gates, slices, gated=after)
     print(markdown)
 
