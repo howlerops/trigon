@@ -169,7 +169,7 @@ can be imported by the gateway, by training code and by CI without a GPU stack.
 ## Commands
 
 ```bash
-pip install -e ".[dev,server]"     # add "train" for the reference model
+pip install -e ".[dev,server]"     # add "train" for the reference model, "gpu" for Modal
 pytest -q
 ruff check src tests scripts
 trigon eval all -n 200             # exits non-zero on a failed gate
@@ -183,6 +183,7 @@ trigon serve --compat --weights reports/run.pt   # the incumbent's shapes at the
 python scripts/train_corpus.py banking77 --out reports/banking77/run.md  # real data
 python scripts/migrate.py traffic.jsonl --incumbent https://api.example.com
 python scripts/export_openapi.py   # after ANY change to the contract
+modal run scripts/modal_train.py --corpus helpsteer2 --n 12000 --epochs 6  # on a GPU
 ```
 
 **Four artifacts are generated, not maintained.** Change the source and

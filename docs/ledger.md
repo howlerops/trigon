@@ -14,10 +14,10 @@ narrative sections are a discipline, not a test.
 
 | | |
 | --- | ---: |
-| Commits | 131 |
-| Tests | 491 |
-| Python files (`src`, `tests`, `scripts`) | 99 |
-| Lines in `src/` | 10,903 |
+| Commits | 142 |
+| Tests | 492 |
+| Python files (`src`, `tests`, `scripts`) | 100 |
+| Lines in `src/` | 10,954 |
 | Release gates | 8 |
 | Green-tier corpora in the licence audit | 9 |
 | Committed use cases | 3 |
@@ -204,6 +204,12 @@ Errors that flattered the project, found by re-measuring rather than by review:
   reported a 4.3× speedup where an idle machine shows a 30% loss. The same
   mistake as the first KV-cache benchmark, made twice in one session; the
   published numbers were taken with those jobs `kill -STOP`ped.
+- **A test asserted the speedup that benchmark reported.** It required the
+  summed latencies of a batched run to beat a serial one, and passed while the
+  machine was busy enough for noise to cover it. It failed the first time it
+  ran idle. It now asserts the accounting it always claimed to be about — the
+  reported latencies sum to the run's wall clock rather than a multiple of
+  it — which is true whether batching is faster or slower.
 - **The tokenizer was trained on `docs/*.md`.** The vocabulary moved 5,635 →
   4,712 → 6,392 → 4,776 across commits, driven by *documentation edits*. It
   destroyed the one positive `size` result by changing the thing that result

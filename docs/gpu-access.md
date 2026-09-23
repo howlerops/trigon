@@ -147,6 +147,7 @@ drive A.3 and A.2-at-a-real-size from here.
 `scripts/modal_train.py` is written and waiting on a token.
 
 ```bash
+pip install -e ".[gpu]"                 # the launcher only; the job builds its own image
 modal run scripts/modal_train.py --corpus helpsteer2 --n 12000 --epochs 6
 modal run scripts/modal_train.py --corpus banking77 --gpu L4 --seeds 0,1,2,3
 ```

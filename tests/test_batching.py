@@ -136,11 +136,38 @@ def test_the_eval_harness_scores_identically_at_any_batch_size(engine):
 
 
 def test_the_batched_latency_is_per_request_not_per_batch(engine):
-    """A batch's wall clock shared out is what a request cost when the work was
-    coalesced. Reporting the whole batch's time against each request would make
-    a batch of eight look eight times more expensive than the same work
-    unbatched."""
+    """The reported latency is the batch's wall clock shared out, not all of it.
+
+    Charging each request the whole batch's time would make a batch of eight
+    look eight times more expensive than the same work unbatched, which is an
+    accounting error rather than a measurement.
+
+    **This asserted that batching is faster, and it was wrong.** It compared
+    the summed latencies of a batched run against a serial one and required
+    the batched total to be smaller. `reports/batching/README.md` then
+    measured batching at 3.43 ms per request serial against 4.14 ms in a batch
+    of sixteen — a 20% loss on CPU, because batching fills parallel capacity a
+    small request leaves idle and one thread has none to fill. The assertion
+    survived for a while because the machine was busy enough for the noise to
+    cover it, and failed the first time it ran on an idle one.
+
+    So what is asserted is the accounting, which is what the docstring always
+    said the test was about: the sum of the reported per-request latencies is
+    close to the run's own wall clock, not a multiple of it.
+    """
+    import time
+
     cases = synthetic_outcome_cases(n=16, seed=4, noise=0.2)
+    started = time.perf_counter()
     batched = run_cases(engine, cases, batch_size=16)
-    serial = run_cases(engine, cases, batch_size=1)
-    assert sum(o.latency_ms for o in batched) < sum(o.latency_ms for o in serial)
+    elapsed = (time.perf_counter() - started) * 1000.0
+
+    reported = sum(outcome.latency_ms for outcome in batched)
+    assert reported == pytest.approx(elapsed, rel=0.5), (
+        f"the reported latencies sum to {reported:.1f} ms against a run of "
+        f"{elapsed:.1f} ms; each request is being charged the whole batch"
+    )
+    # The failure this guards against is off by the batch size, so a generous
+    # tolerance still catches it: sixteen requests each charged the full batch
+    # would sum to sixteen times the wall clock.
+    assert reported < elapsed * len(cases) / 2
