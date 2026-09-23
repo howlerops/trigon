@@ -235,11 +235,18 @@ question it was for did not move, and two seeds that had certified stopped.
 A tokenizer change alters every embedding the model has, so it can regress
 questions that have nothing to do with the one it was aimed at.
 
-Encoding is pure Python and stays that way. The gateway budgets schemas on CPU
-nodes with no weights, and the compiler, the calibration math and the drift
-test all import without `torch` — a tokenizer needing a Rust extension to count
-tokens pulls that dependency into all of them. Training a vocabulary is a
-different matter and lives in `scripts/`.
+**Python or Rust, chosen on measured performance and accuracy** — decided
+2026-09-23 for A.3, replacing "encoding is pure Python and stays that way".
+A pretrained backbone ships its own tokenizer, and an encoder that differs
+from it by one token on one input feeds the model a sequence it was never
+trained on; exactness against the reference is not negotiable, the language
+is. What the old rule protected is still a cost to weigh, not waive: the
+gateway budgets schemas on CPU nodes with no weights, and the compiler, the
+calibration math and the drift test import without `torch`. A compiled
+tokenizer is fine where it earns its place — keep it an optional dependency
+behind the backend that needs it, and keep the import path of the compiler
+and the calibration math free of it. Training a vocabulary lives in
+`scripts/`.
 
 Expose `encode`, `count`, `exact` and `kind`, and add `kind` to
 `backends.tokenizer.build_tokenizer` so a checkpoint can name you. A model

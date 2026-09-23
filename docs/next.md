@@ -114,6 +114,13 @@ and the machine is a 4-core Xeon with 15 GB and no accelerator.
 **This invalidates every number in `reports/`.** Sequence it after A.1 and A.2
 so there is a real-data baseline to compare against, not only a synthetic one.
 
+**Decided 2026-09-23.** Qwen2.5-1.5B (Apache 2.0, 1536 wide, 28 layers) as the
+first backbone. The backbone's own tokenizer, in Python or Rust as measured
+performance and accuracy decide — exact against the reference either way.
+Engineering starts now, in parallel with the 12-epoch HelpSteer2 sweep that
+answers whether A.2's three unmoved questions want training or capacity.
+Modal budget for this stage: $100 before checking back.
+
 **Done when** four seeds certify with all three synthetic questions above
 their marginals *and* per-corpus ECE holds on real data.
 
