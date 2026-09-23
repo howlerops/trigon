@@ -101,6 +101,9 @@ twenty-two runs** — the investigation is closed and the evidence is in
   the GPU it was given and the wall clock, and asks `train_corpus.py` for
   `--device cuda` by name so a missing GPU fails rather than falls back.
   Verified end to end on 2026-09-23.
+- **A deployed model.** The certified Banking77 adapter behind the real
+  gateway on Modal (`scripts/modal_serve.py`): API-key auth, calibrated,
+  schema cache on, scale to zero; 81–108 ms model time warm.
 - `scripts/burn_in.py` — B.1, written and handed over. Times the serving path
   at 0.5B and 1.5B backbone shapes rather than the spike's, because the spike
   would flatter `$/MTok` by the ratio of the models' compute.

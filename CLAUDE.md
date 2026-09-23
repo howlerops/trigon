@@ -185,6 +185,7 @@ python scripts/migrate.py traffic.jsonl --incumbent https://api.example.com
 python scripts/export_openapi.py   # after ANY change to the contract
 python scripts/modal_train.py launch --corpus helpsteer2 --n 12000 --epochs 6  # on a GPU; exits at once
 python scripts/modal_train.py collect <run id>   # whenever it has finished
+modal deploy scripts/modal_serve.py              # the certified Banking77 model, behind auth
 ```
 
 **Four artifacts are generated, not maintained.** Change the source and

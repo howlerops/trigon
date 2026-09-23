@@ -43,6 +43,18 @@ are 89 MiB each and are not committed (`*.pt` is ignored); they live on the
 `trigon-runs` Modal Volume and are fetched with
 `python scripts/modal_train.py collect banking77-qwen15b-e4-lr1e-4-872ed726edcd-20260923T145427 --models`.
 
+### Deployed
+
+Seed 2 is served at **`https://jbeck018--trigon-serve-gateway.modal.run`**
+by `scripts/modal_serve.py` -- the real gateway, `/v1/systemone`,
+`/compat` and `/healthz`, on an A10G that scales to zero. It requires an API
+key (`Authorization: Bearer <key>`), held in the `trigon-serve-auth` Modal
+Secret; without one it answers 401. Measured on deploy, 2026-09-23:
+`/healthz` reports calibrated, trained and schema cache on; 81–108 ms of
+model time a request warm with 284 schema tokens from the cache; the first
+request after idle pays a cold start of a few seconds plus loading the
+backbone. Redeploy with `modal deploy scripts/modal_serve.py`.
+
 ### Asking it something
 
 ```bash
