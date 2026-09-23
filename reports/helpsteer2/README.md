@@ -1,4 +1,40 @@
-# HelpSteer2: more data moved it off the marginal, and not far enough
+# HelpSteer2: more data moved it off the marginal, and more training did not
+
+## 12,000 cases, 12 epochs, four seeds — `modal-n12000-e12-seed*`
+
+The 6-epoch run below kept its last epoch on every seed with validation loss
+still falling, and was written up as under-trained. **Doubling the epochs
+says it was not.**
+
+| Seed | Accuracy | Lift | ECE | Adaptive ECE | Kept epoch |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 0 | 0.5702 | +0.0178 | 0.0232 | 0.0226 | 6 |
+| 1 | 0.5738 | +0.0202 | 0.0187 | 0.0188 | 11 |
+| 2 | 0.5728 | +0.0197 | 0.0222 | 0.0229 | 8 |
+| 3 | 0.5653 | +0.0170 | 0.0218 | 0.0220 | 8 |
+
+**Median lift +0.0188, range +0.0170 to +0.0202** — against +0.0189 at six
+epochs. Validation loss bottomed between epoch 6 and 11 on every seed and
+rose after, so best-epoch selection kept an earlier epoch and the extra six
+bought nothing. The per-question picture is the six-epoch one exactly:
+`complexity` +0.067 to +0.074, `verbosity` +0.019 to +0.030, and
+`coherence`, `correctness`, `helpfulness` on their marginals (−0.0038 to
++0.0010) on all four seeds.
+
+Calibration got slightly **worse** — ECE 0.0187–0.0232 against 0.0082–0.0139
+— which is what overfitting a head looks like, and still well inside the
+gate; the calibrator declined itself on every seed again.
+
+**What it establishes:** the 128-wide, two-layer spike has reached its
+ceiling on HelpSteer2 at 12,000 cases. The three questions that judge quality
+do not want more training; they want a different model, which is A.3.
+
+Commit `22f4533`, clean tree; three seeds on devices reporting `NVIDIA A10`
+and one on `NVIDIA A10G`, 61 to 73 minutes each
+(`modal-n12000-e12-modal-run.json`).
+
+---
+
 
 HelpSteer2 (Wang et al., 2024), NVIDIA. CC BY 4.0.
 https://huggingface.co/datasets/nvidia/HelpSteer2

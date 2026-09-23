@@ -1,0 +1,98 @@
+[
+  {
+    "seed": 0,
+    "returncode": 1,
+    "elapsed_s": 3631.8,
+    "run_id": "helpsteer2-modal-n12000-e12-22f45336ea79-20260923T130920",
+    "prefix": "modal-n12000-e12",
+    "commit": "22f45336ea79d5a8139657a852d3be1772d734c9",
+    "dirty": false,
+    "flags": [
+      "-n",
+      "12000",
+      "--epochs",
+      "12",
+      "--calibration-n",
+      "1000",
+      "--log-every",
+      "200",
+      "--max-batch-cells",
+      "50000000"
+    ],
+    "gpu_requested": "A10G",
+    "gpu_actual": "NVIDIA A10",
+    "torch": "2.14.0+cu130"
+  },
+  {
+    "seed": 1,
+    "returncode": 1,
+    "elapsed_s": 3648.2,
+    "run_id": "helpsteer2-modal-n12000-e12-22f45336ea79-20260923T130920",
+    "prefix": "modal-n12000-e12",
+    "commit": "22f45336ea79d5a8139657a852d3be1772d734c9",
+    "dirty": false,
+    "flags": [
+      "-n",
+      "12000",
+      "--epochs",
+      "12",
+      "--calibration-n",
+      "1000",
+      "--log-every",
+      "200",
+      "--max-batch-cells",
+      "50000000"
+    ],
+    "gpu_requested": "A10G",
+    "gpu_actual": "NVIDIA A10",
+    "torch": "2.14.0+cu130"
+  },
+  {
+    "seed": 2,
+    "returncode": 1,
+    "elapsed_s": 3647.3,
+    "run_id": "helpsteer2-modal-n12000-e12-22f45336ea79-20260923T130920",
+    "prefix": "modal-n12000-e12",
+    "commit": "22f45336ea79d5a8139657a852d3be1772d734c9",
+    "dirty": false,
+    "flags": [
+      "-n",
+      "12000",
+      "--epochs",
+      "12",
+      "--calibration-n",
+      "1000",
+      "--log-every",
+      "200",
+      "--max-batch-cells",
+      "50000000"
+    ],
+    "gpu_requested": "A10G",
+    "gpu_actual": "NVIDIA A10",
+    "torch": "2.14.0+cu130"
+  },
+  {
+    "seed": 3,
+    "returncode": 1,
+    "elapsed_s": 4371.4,
+    "run_id": "helpsteer2-modal-n12000-e12-22f45336ea79-20260923T130920",
+    "prefix": "modal-n12000-e12",
+    "commit": "22f45336ea79d5a8139657a852d3be1772d734c9",
+    "dirty": false,
+    "flags": [
+      "-n",
+      "12000",
+      "--epochs",
+      "12",
+      "--calibration-n",
+      "1000",
+      "--log-every",
+      "200",
+      "--max-batch-cells",
+      "50000000"
+    ],
+    "gpu_requested": "A10G",
+    "gpu_actual": "NVIDIA A10G",
+    "torch": "2.14.0+cu130"
+  }
+]

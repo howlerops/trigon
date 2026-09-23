@@ -96,10 +96,10 @@ at 1,400 cases to fit a cloud session's idle window, where Banking77 needed
 different one.** Four seeds on Modal: median lift +0.0189, range +0.0155 to
 +0.0203, where 1,400 cases gave +0.0023. `complexity` and `verbosity` learn
 on every seed; `coherence`, `correctness` and `helpfulness` do not move.
-Every seed kept its last epoch with validation loss still falling, so the next
-run is more epochs at this size — about $5 of A10 time for four seeds at 12 —
-before more data, and before reading the three unmoved questions as a
-capacity limit that A.3 would answer.
+The 6-epoch run kept its last epoch with validation still falling, so twelve
+were run: **median lift +0.0188, no change**, validation bottoming at epoch
+6–11. The spike is at its ceiling here, and the three unmoved questions are
+A.3's to answer.
 
 **Done when** the calibration report is published per corpus, never pooled,
 and coverage holds per corpus too. Nine corpora pooled into one ECE would hide

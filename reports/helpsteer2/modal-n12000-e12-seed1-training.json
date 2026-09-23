@@ -1,0 +1,82 @@
+{
+  "epochs": [
+    {
+      "epoch": 1,
+      "mean_loss": 1.1783303504437208,
+      "seconds": 285.56766752,
+      "validation_loss": 1.102620650405685
+    },
+    {
+      "epoch": 2,
+      "mean_loss": 1.099127123521434,
+      "seconds": 291.828175092,
+      "validation_loss": 1.067831809024016
+    },
+    {
+      "epoch": 3,
+      "mean_loss": 1.0836007091954902,
+      "seconds": 291.69110811200005,
+      "validation_loss": 1.0419490227848291
+    },
+    {
+      "epoch": 4,
+      "mean_loss": 1.073506836824947,
+      "seconds": 289.31295021799997,
+      "validation_loss": 1.0423131067305804
+    },
+    {
+      "epoch": 5,
+      "mean_loss": 1.0653780943872753,
+      "seconds": 281.30977452699995,
+      "validation_loss": 1.0398821054399014
+    },
+    {
+      "epoch": 6,
+      "mean_loss": 1.057941446221537,
+      "seconds": 280.3448103359999,
+      "validation_loss": 1.0447815458724896
+    },
+    {
+      "epoch": 7,
+      "mean_loss": 1.0499494585670808,
+      "seconds": 278.67155058599997,
+      "validation_loss": 1.0369428582986195
+    },
+    {
+      "epoch": 8,
+      "mean_loss": 1.0427493450266343,
+      "seconds": 276.73952086300005,
+      "validation_loss": 1.0277314966917037
+    },
+    {
+      "epoch": 9,
+      "mean_loss": 1.03501224430071,
+      "seconds": 277.8725361070001,
+      "validation_loss": 1.029386698032419
+    },
+    {
+      "epoch": 10,
+      "mean_loss": 1.0279342515159535,
+      "seconds": 278.8501966050003,
+      "validation_loss": 1.0268443866074086
+    },
+    {
+      "epoch": 11,
+      "mean_loss": 1.0231581628929685,
+      "seconds": 279.14088843000036,
+      "validation_loss": 1.0260510632395745
+    },
+    {
+      "epoch": 12,
+      "mean_loss": 1.0204258051569814,
+      "seconds": 279.55284525900015,
+      "validation_loss": 1.026532739798228
+    }
+  ],
+  "n_cases": 10800,
+  "n_questions": 54000,
+  "seconds": 3402.396547192,
+  "first_loss": 1.1783303504437208,
+  "final_loss": 1.0204258051569814,
+  "kept_epoch": 11
+}

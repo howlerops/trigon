@@ -1,0 +1,82 @@
+{
+  "epochs": [
+    {
+      "epoch": 1,
+      "mean_loss": 1.1791397853361236,
+      "seconds": 282.621046908,
+      "validation_loss": 1.1332076796889305
+    },
+    {
+      "epoch": 2,
+      "mean_loss": 1.0935630514831454,
+      "seconds": 286.61628283,
+      "validation_loss": 1.0866209368904431
+    },
+    {
+      "epoch": 3,
+      "mean_loss": 1.080042783766985,
+      "seconds": 279.4692963350001,
+      "validation_loss": 1.0725518650809924
+    },
+    {
+      "epoch": 4,
+      "mean_loss": 1.0697207514776124,
+      "seconds": 280.6747886379999,
+      "validation_loss": 1.068829531421264
+    },
+    {
+      "epoch": 5,
+      "mean_loss": 1.0590321365495523,
+      "seconds": 279.140310107,
+      "validation_loss": 1.056758390168349
+    },
+    {
+      "epoch": 6,
+      "mean_loss": 1.0496083972796246,
+      "seconds": 281.10233541799994,
+      "validation_loss": 1.0557216713080804
+    },
+    {
+      "epoch": 7,
+      "mean_loss": 1.041034096851945,
+      "seconds": 283.77900561800016,
+      "validation_loss": 1.0599007191012304
+    },
+    {
+      "epoch": 8,
+      "mean_loss": 1.0336067504297803,
+      "seconds": 279.6427501950002,
+      "validation_loss": 1.0516062583525976
+    },
+    {
+      "epoch": 9,
+      "mean_loss": 1.0245930172199453,
+      "seconds": 278.435206355,
+      "validation_loss": 1.0549557895213366
+    },
+    {
+      "epoch": 10,
+      "mean_loss": 1.0178416728725035,
+      "seconds": 283.79709196700014,
+      "validation_loss": 1.0529726375142734
+    },
+    {
+      "epoch": 11,
+      "mean_loss": 1.0119404752083399,
+      "seconds": 283.405318695,
+      "validation_loss": 1.052596008280913
+    },
+    {
+      "epoch": 12,
+      "mean_loss": 1.00918605995399,
+      "seconds": 281.3106873069996,
+      "validation_loss": 1.0528846838821968
+    }
+  ],
+  "n_cases": 10800,
+  "n_questions": 54000,
+  "seconds": 3391.713155625,
+  "first_loss": 1.1791397853361236,
+  "final_loss": 1.00918605995399,
+  "kept_epoch": 8
+}
