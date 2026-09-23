@@ -97,7 +97,32 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument("--validation-fraction", type=float, default=0.1)
+    parser.add_argument(
+        "--device",
+        default="auto",
+        help=(
+            "cpu, cuda, or auto (cuda when present). Naming cuda on a machine "
+            "without one is an error, not a fallback: a run that asked for a GPU "
+            "and quietly trained on the CPU publishes a report about hardware it "
+            "never used"
+        ),
+    )
     return parser.parse_args(argv)
+
+
+def resolve_device(requested: str) -> tuple[str, str]:
+    """The device to train on, and the name of the hardware behind it."""
+    import torch
+
+    if requested == "auto":
+        requested = "cuda" if torch.cuda.is_available() else "cpu"
+    if requested.startswith("cuda"):
+        if not torch.cuda.is_available():
+            raise SystemExit(f"--device {requested} was asked for and no CUDA device is present")
+        return requested, torch.cuda.get_device_name(torch.device(requested))
+    import platform
+
+    return requested, platform.processor() or platform.machine()
 
 
 def splits(spec, args) -> tuple[list, list, list, int]:
@@ -195,7 +220,9 @@ def baseline_accuracy(train: list, evaluation: list) -> dict[str, float]:
     return out
 
 
-def header(spec, args, train, calibration, evaluation, marginal, topped_up: int) -> str:
+def header(
+    spec, args, train, calibration, evaluation, marginal, topped_up: int, hardware: str = ""
+) -> str:
     questions = train[0].request.questions
     first = next(iter(questions.values()))
     labels = getattr(first, "options", None) or getattr(first, "levels", [])
@@ -226,12 +253,14 @@ def header(spec, args, train, calibration, evaluation, marginal, topped_up: int)
             *(f"| `{qid}` | {value:.4f} |" for qid, value in sorted(marginal.items())),
             f"| Epochs | {args.epochs} |",
             f"| Seed | {args.seed} |",
+            *([f"| Device | {hardware} |"] if hardware else []),
             "",
             "```",
             f"python scripts/train_corpus.py {spec.name} -n {args.n} "
             f"--calibration-n {args.calibration_n} --eval-n {args.eval_n} "
             f"--epochs {args.epochs} --lr {args.lr} --accumulate {args.accumulate} "
-            f"--d-model {args.d_model} --layers {args.layers} --seed {args.seed}",
+            f"--d-model {args.d_model} --layers {args.layers} --seed {args.seed} "
+            f"--device {args.device}",
             "```",
             "",
             *(
@@ -272,6 +301,7 @@ def main(argv: list[str] | None = None) -> int:
     from trigon.training import train as run_training
 
     torch.set_num_threads(args.torch_threads)
+    device, hardware = resolve_device(args.device)
 
     spec = corpus(args.corpus)
     if args.weights:
@@ -280,6 +310,9 @@ def main(argv: list[str] | None = None) -> int:
         backend = TorchReadoutBackend(
             config=ReadoutConfig(d_model=args.d_model, n_layers=args.layers), seed=args.seed
         )
+    backend.to(device)
+    hardware = f"{device} ({hardware})"
+    print(f"{args.corpus}: training on {hardware}", file=sys.stderr)
     compiler = backend.make_compiler(option_scoring=OptionScoring(args.option_scoring))
     train, calibration, evaluation, topped_up = splits(spec, args)
     marginal = baseline_accuracy(train, evaluation)
@@ -324,7 +357,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     gates = check_gates(after, slices=slices)
     markdown = header(
-        spec, args, train, calibration, evaluation, marginal, topped_up
+        spec, args, train, calibration, evaluation, marginal, topped_up, hardware
     ) + render_markdown([before, after], gates, slices, gated=after)
     print(markdown)
 
