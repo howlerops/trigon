@@ -1,7 +1,7 @@
 """Run a corpus training sweep on a Modal GPU, and bring the reports back.
 
     modal run --detach scripts/modal_train.py --corpus helpsteer2 --n 12000 --epochs 6
-    modal run scripts/modal_train.py::collect --run-id <printed by the launch>
+    modal run scripts/modal_train.py --collect <run id printed by the launch>
 
 `docs/gpu-access.md` picked this route, and the reason was durability before
 speed: three HelpSteer2 attempts died in this sandbox, one to an
@@ -13,7 +13,7 @@ the job did run on Modal's infrastructure -- and its results still lived only
 in the process on the VM that gets reclaimed. Without `--detach`, `modal run`
 also stops the app when that process dies. Each seed now writes its reports to
 the `trigon-runs` Volume before returning, so a `--detach`ed run survives this
-session and `collect` fetches it on a later turn. When the launching process
+session and `--collect` fetches it on a later turn. When the launching process
 does survive, it collects on its own.
 
 **Each seed is its own container.** Modal fans them out, so four seeds cost
@@ -166,7 +166,12 @@ def main(
     prefix: str = "",
     out_dir: str = "",
     allow_dirty: bool = False,
+    collect: str = "",
 ) -> None:
+    if collect:
+        _collect(collect, out_dir)
+        return
+
     def git(*args: str) -> str:
         return subprocess.run(
             ["git", *args], cwd=REPO, capture_output=True, text=True, check=True
@@ -205,15 +210,14 @@ def main(
     wanted = [int(s) for s in seeds.split(",") if s.strip()]
     print(f"{corpus}: seeds {wanted}, n={n}, epochs={epochs}, gpu={gpu}, commit {commit[:12]}")
     print(f"run id {run_id}")
-    print(f"if this process dies: modal run scripts/modal_train.py::collect --run-id {run_id}")
+    print(f"if this process dies: modal run scripts/modal_train.py --collect {run_id}")
 
     job = train_one.with_options(gpu=gpu)
     payloads = list(job.starmap([(corpus, seed, flags, run) for seed in wanted]))
     _write(payloads, pathlib.Path(out_dir) if out_dir else REPO / "reports" / corpus)
 
 
-@app.local_entrypoint()
-def collect(run_id: str, out_dir: str = "") -> None:
+def _collect(run_id: str, out_dir: str = "") -> None:
     """Fetch a run's reports from the Volume -- the route that survives this VM."""
     names = [entry.path for entry in volume.listdir(run_id)]
     payloads = [
