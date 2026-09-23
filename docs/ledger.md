@@ -148,6 +148,7 @@ twenty-two runs** — the investigation is closed and the evidence is in
 | The training path's attention mask, per HelpSteer2 request | 352 ms in Python against 10.2 ms vectorized, bit-identical |
 | **Banking77 on Qwen2.5-1.5B, lr 1e-4, four seeds — certified** | Every seed clears every blocking gate: accuracy 0.8502–0.9118, median 0.9009; ECE 0.0105–0.0489, median 0.0332 |
 | Banking77 on Qwen2.5-1.5B, four seeds, the spike's config | **0.9004–0.9228 on three seeds**, median 0.9065; seed 2 collapsed to chance (0.0232). ECE 0.0077–0.0481 on the three |
+| HelpSteer2 on Qwen2.5-1.5B, three seeds of four | Lift +0.0059 to +0.0308, median +0.0209; `complexity` to +0.096, `verbosity` to +0.042; quality questions −0.013 to +0.012 |
 | The same seed on the same GPU type, twice | Not a replay: accuracy 0.9228 and 0.9252. GPU attention's backward is not deterministic, so a rerun is another draw |
 | A trained Qwen adapter, served on this VM's CPU | 12 of 12 held-out Banking77 intents; ~0.5 s a request, 284 of 323 tokens from the schema cache; 89 MiB on disk |
 | Qwen2 forward in-repo vs `transformers`, real 1.5B weights | Bit-identical: max \|diff\| 0.0, next-token agreement 1.0 |
@@ -193,6 +194,7 @@ The most useful section. Each of these was argued for before it was measured.
 | Modal is reachable from here: `api.modal.com` answers 200 | A `GET` is not the client. It speaks gRPC and behind this proxy needs `python-socks`; without it, 50 ms to "could not connect", the cause two exceptions down. |
 | `scripts/modal_train.py` is ready and waiting on a token | It would have trained on the CPU. Nothing in the backend or trainer moved a tensor to a device; `--gpu` was ignored; results lived only on the VM that gets reclaimed. |
 | The certified spike's Banking77 report says how it was trained | Its command line reads `--epochs 4`; its training record has 6 epochs on every seed. The header was written by a later invocation with default flags. |
+| A pretrained backbone would do for HelpSteer2 what it did for Banking77 | Qwen2.5-1.5B, three seeds: median lift +0.0209 against the spike's +0.0188. It learns the surface questions better and the quality questions barely at all. |
 | HelpSteer2's spike at 12,000 cases was under-trained | 12 epochs: median lift +0.0188 against +0.0189 at 6; validation bottomed at epoch 6–11 on every seed. It is at its ceiling. |
 | HelpSteer2 collapsed for want of data | Partly. 8.6× the data took lift from +0.0023 to +0.0189 and taught two questions of five; the three that judge quality did not move, and every seed kept its last epoch. |
 | The Python tokenizer port is faster than Rust | Only one call at a time, where the binding's per-call overhead dominates. Batched across four cores, Rust is 1.8× ahead. |
@@ -325,6 +327,11 @@ what order, and how each step is known to be done.
   and declined it (ECE 0.0473) in another. On a 77-way head that check sits
   at the edge of its noise, so whether a model ships calibrated is close to a
   coin toss. The rule did what it says; the rule is what is open.
+- **Preemption costs a whole seed.** Three Modal containers were preempted
+  today and each restarted its seed from step 0, because training does not
+  checkpoint mid-run -- up to two hours of a HelpSteer2 seed each time.
+  Resuming from a per-epoch checkpoint on the Volume would bound it to one
+  epoch.
 - **$/MTok is unmeasured.** The whole cost argument beyond ~2× rests on it.
   Needs the L4 burn-in.
 - ~~The KV cache is off by default because nobody has timed it.~~ **Closed.**
