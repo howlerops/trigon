@@ -122,6 +122,13 @@ to chance at the peak of warmup. The done-condition below also asks for the
 three synthetic questions above their marginals, and that has not been run on
 the backbone yet.
 
+HelpSteer2 does not follow: four seeds on the backbone give median lift
++0.0259 against the spike's +0.0188 and a +0.05 gate. The surface questions
+learn; the quality questions move by about a point on two seeds of four. That
+ran at lr 3e-4, the rate that collapsed a Banking77 seed; 1e-4 is the next
+measurement, and the per-annotator `disagreements/` split is the data the
+product is actually meant to learn from.
+
 **Decided 2026-09-23.** Qwen2.5-1.5B (Apache 2.0, 1536 wide, 28 layers) as the
 first backbone. The backbone's own tokenizer, in Python or Rust as measured
 performance and accuracy decide — exact against the reference either way.

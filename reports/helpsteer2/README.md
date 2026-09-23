@@ -1,28 +1,32 @@
 # HelpSteer2: more data moved it off the marginal; more training and a pretrained backbone barely did
 
-## Qwen2.5-1.5B, 12,000 cases, 3 epochs — `qwen15b-n12000-e3-seed*` — three seeds of four
+## Qwen2.5-1.5B, 12,000 cases, 3 epochs, four seeds — `qwen15b-n12000-e3-seed*`
 
 The model that took Banking77 from 72% to 90%, at the same 12,000 cases the
 spike used. LoRA rank 16, lr 3e-4 (the rate that collapsed one Banking77
 seed; 1e-4 was found after this was launched), commit `d52ab71`, all on
-`NVIDIA A10`, about 2 h 20 min a seed. **Seed 2 was preempted and restarted
-from nothing**; it is recorded here when it finishes.
+`NVIDIA A10` except seed 2 on an `A10G`, about 2 h 20 min a seed. Seed 2 was
+preempted and restarted from step 0, which is why it finished last.
 
 | Seed | Accuracy | Lift | ECE | Adaptive ECE | `complexity` | `verbosity` | `helpfulness` | `correctness` | `coherence` |
 | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | 0 | 0.5583 | +0.0059 | 0.0225 | 0.0284 | +0.0238 | +0.0058 | +0.0000 | +0.0000 | +0.0000 |
 | 1 | 0.5744 | +0.0209 | 0.0120 | 0.0135 | +0.0920 | +0.0340 | −0.0092 | −0.0126 | +0.0002 |
+| 2 | 0.5858 | **+0.0327** | 0.0102 | 0.0099 | +0.0876 | +0.0490 | +0.0154 | +0.0114 | +0.0000 |
 | 3 | 0.5791 | **+0.0308** | 0.0119 | 0.0138 | +0.0958 | +0.0416 | +0.0118 | +0.0044 | +0.0006 |
 
-**Median lift +0.0209 over three seeds, against the spike's +0.0188** — and
-the gate is +0.05. Where Banking77 moved by eighteen points, this moved by
-two tenths of one, inside the spread of the seeds themselves.
+**Median lift +0.0259 over four seeds, range +0.0059 to +0.0327, against the
+spike's +0.0188** — and the gate is +0.05. Where Banking77 moved by eighteen
+points, this moved by seven tenths of one, and the spread across seeds is
+wider than the gain.
 
 What the backbone does buy is the surface questions: `complexity` +0.092 to
 +0.096 and `verbosity` +0.034 to +0.042 on seeds 1 and 3, above anything the
-spike reached. And seed 3 is the first run of either model to move the
-quality questions at all -- `helpfulness` +0.0118, `correctness` +0.0044 --
-which is small enough to be a draw rather than a finding.
+spike reached. And seeds 2 and 3 are the first runs of either model to
+move the quality questions at all -- `helpfulness` +0.0154 and +0.0118,
+`correctness` +0.0114 and +0.0044 -- while seeds 0 and 1 sit on or below the
+marginal. Two seeds of four, by about a point: a direction worth following,
+not yet a finding. `coherence` does not move on any seed of either model.
 
 Seed 0 looks like a partial version of the Banking77 collapse: every
 question but `complexity` on its marginal, validation loss barely moving
@@ -30,11 +34,11 @@ question but `complexity` on its marginal, validation loss barely moving
 seed, and a rerun at 1e-4 is the obvious next measurement -- not a reason to
 drop it from the median.
 
-**Calibration held on every seed** -- ECE 0.0119–0.0225, each above its floor
--- and the calibrator declined on all three, because a head this close to the
+**Calibration held on every seed** -- ECE 0.0102–0.0225, each above its floor
+-- and the calibrator declined on all four, because a head this close to the
 marginal has little to correct.
 
-**What it establishes, so far:** a 1.5B pretrained backbone with LoRA does not
+**What it establishes:** a 1.5B pretrained backbone with LoRA does not
 learn HelpSteer2's quality judgements from 12,000 aggregated labels either.
 The labels may be the ceiling: these are integer averages of annotators who
 disagree, and the per-annotator `disagreements/` split -- the distribution the
