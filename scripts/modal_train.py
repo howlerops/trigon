@@ -167,6 +167,7 @@ def main(
     out_dir: str = "",
     allow_dirty: bool = False,
     collect: str = "",
+    max_batch_cells: int = 50_000_000,
 ) -> None:
     if collect:
         _collect(collect, out_dir)
@@ -195,6 +196,11 @@ def main(
         str(calibration_n),
         "--log-every",
         "200",
+        # 8 x 2,500^2. HelpSteer2's longest case compiles to 7,171 tokens and
+        # a chunk of eight at that width asked a 22 GiB A10 for 6.13 GiB in
+        # one allocation. Splitting accumulates into the same update.
+        "--max-batch-cells",
+        str(max_batch_cells),
         *(extra.split() if extra else []),
     ]
     prefix = prefix or f"modal-n{n}-e{epochs}"

@@ -597,3 +597,54 @@ def test_a_score_wider_than_the_head_is_refused_by_name():
     )
     with pytest.raises(ValueError, match="sized for 3"):
         Engine(backend, compiler=backend.make_compiler()).answer(request)
+
+
+def test_a_step_split_to_fit_memory_is_the_same_step(monkeypatch):
+    """`max_batch_cells` changes what fits on a GPU, not what the model learns.
+
+    A cap of one cell forces every case into its own sub-batch, which is the
+    most any split can differ from the unsplit step. If each part were divided
+    by its own size rather than the chunk's, every step's gradient would be
+    off by the chunk size.
+
+    Compared on the gradient each optimizer step receives, not on the weights
+    afterwards. The per-option Choice head's bias shifts every option equally,
+    softmax ignores that, so its true gradient is exactly zero and what arrives
+    is rounding (~1e-9) -- which AdamW then normalises into a full
+    learning-rate step. Weights after Adam therefore diverge at 1e-3 on a
+    parameter that cannot change an answer, while the step itself agrees.
+    """
+    steps: dict[str, list[torch.Tensor]] = {}
+
+    class Recorder:
+        made: list[Recorder] = []
+
+        def __init__(self, params, **_):
+            self.params = list(params)
+            self.param_groups = [{"lr": 0.0}]
+            self.record: list[torch.Tensor] = []
+            Recorder.made.append(self)
+
+        def zero_grad(self, set_to_none=True):
+            for p in self.params:
+                p.grad = None
+
+        def step(self):
+            self.record.append(
+                torch.cat([p.grad.flatten() for p in self.params if p.grad is not None])
+            )
+
+    cases = synthetic_outcome_cases(n=60, seed=0, noise=0.2)
+    monkeypatch.setattr(torch.optim, "AdamW", Recorder)
+    for name, budget in (("whole", None), ("split", 1)):
+        Recorder.made.clear()
+        train(
+            _tiny_backend(),
+            cases,
+            TrainingConfig(epochs=1, accumulate=8, validation_fraction=0, max_batch_cells=budget),
+        )
+        steps[name] = Recorder.made[0].record
+
+    assert len(steps["whole"]) == len(steps["split"]) == 8
+    for whole, split in zip(steps["whole"], steps["split"], strict=True):
+        assert (whole - split).norm() <= 1e-5 * whole.norm()

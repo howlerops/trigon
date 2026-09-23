@@ -98,6 +98,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--validation-fraction", type=float, default=0.1)
     parser.add_argument(
+        "--max-batch-cells",
+        type=int,
+        default=0,
+        help=(
+            "cap batch x sequence^2 per forward pass, splitting a step into "
+            "sub-batches that accumulate into the same update; 0 is no cap. "
+            "A GPU needs one on long-tailed corpora -- see TrainingConfig"
+        ),
+    )
+    parser.add_argument(
         "--device",
         default="auto",
         help=(
@@ -260,7 +270,8 @@ def header(
             f"--calibration-n {args.calibration_n} --eval-n {args.eval_n} "
             f"--epochs {args.epochs} --lr {args.lr} --accumulate {args.accumulate} "
             f"--d-model {args.d_model} --layers {args.layers} --seed {args.seed} "
-            f"--device {args.device}",
+            f"--device {args.device}"
+            + (f" --max-batch-cells {args.max_batch_cells}" if args.max_batch_cells else ""),
             "```",
             "",
             *(
@@ -334,6 +345,7 @@ def main(argv: list[str] | None = None) -> int:
                 seed=args.seed,
                 log_every=args.log_every,
                 validation_fraction=args.validation_fraction,
+                max_batch_cells=args.max_batch_cells or None,
             ),
             compiler=compiler,
         )
