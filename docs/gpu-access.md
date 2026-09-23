@@ -108,6 +108,14 @@ the egress proxy allows:
 `pip install modal` also works — the SDK is installed in this session's
 virtualenv at 1.5.5. So the HTTPS route is open and the client runs here.
 
+**That check was of the wrong thing, and the first real use found it.** A 200
+on a `GET` says the host is reachable; the Modal client speaks gRPC, and
+through this session's proxy it needs `python-socks`, which plain `modal` does
+not install. Without it every call fails in 50 ms with *"Could not connect to
+the Modal server"* and the `ImportError` that explains it is two `__cause__`s
+down. The `gpu` extra now installs `modal[api-proxy-support]`. Verified
+2026-09-23 by running a job, which is the only check that counts.
+
 ## What I would actually suggest
 
 **Modal, for everything except B.1.** Five reasons, in the order they matter:
@@ -148,9 +156,18 @@ drive A.3 and A.2-at-a-real-size from here.
 
 ```bash
 pip install -e ".[gpu]"                 # the launcher only; the job builds its own image
-modal run scripts/modal_train.py --corpus helpsteer2 --n 12000 --epochs 6
-modal run scripts/modal_train.py --corpus banking77 --gpu L4 --seeds 0,1,2,3
+modal run --detach scripts/modal_train.py --corpus helpsteer2 --n 12000 --epochs 6
+modal run scripts/modal_train.py --collect <run id the launch printed>
+modal run --detach scripts/modal_train.py --corpus banking77 --gpu L4 --seeds 0,1,2,3
 ```
+
+**Always `--detach`.** Without it `modal run` stops the app when the launching
+process dies, which on this VM is the failure the route was chosen to avoid.
+Each seed writes its reports to the `trigon-runs` Volume before it returns, so
+a detached run whose launcher was reclaimed is fetched with `--collect` on a
+later turn. The launcher refuses a dirty tree: the image is built from the
+working tree, so a SHA recorded over uncommitted changes names code that did
+not run.
 
 Each seed is its own container, so four seeds cost the wall clock of one
 rather than four-on-four-cores — which is why this does not reuse
@@ -159,7 +176,9 @@ come back as return values and land in `reports/<corpus>/`.
 
 Three things it records rather than assumes, in `modal-run.json` beside the
 reports: the **git SHA** the image was built from, the **GPU it actually
-got** (not the one requested), and the wall clock. A number from hardware
+got** (not the one requested), and the wall clock. The distinction is not
+academic: asked for an `A10G`, the first job reported itself as
+`NVIDIA A10`. A number from hardware
 nobody can name, at a commit nobody can identify, is a claim rather than a
 result — and that is the whole difference this project trades on.
 
@@ -177,10 +196,31 @@ sets them will not see them.
 ### Where the other two still win
 
 **B.1, the L4 burn-in, does not need any of this.** It is one measurement on
-named hardware: rent an L4 for an hour, run one command I will write, commit
-the report. Doing it through Modal would work and would measure *Modal's*
-L4 under *Modal's* container, which is a fine number and a less direct one
-than the burn-in asks for. If you only ever do one of these, do this one.
+named hardware: rent an L4 for an hour, run one command, commit the report.
+Doing it through Modal would work and would measure *Modal's* L4 under
+*Modal's* container, which is a fine number and a less direct one than the
+burn-in asks for. If you only ever do one of these, do this one.
+
+On any Linux box with an L4 and a CUDA driver:
+
+```bash
+git clone https://github.com/howlerops/trigon && cd trigon
+pip install -e ".[train]"      # PyPI's torch wheel carries CUDA on Linux
+nvidia-smi                     # confirm it is the L4 you are paying for
+python scripts/burn_in.py --usd-per-hour <what the box costs> --out reports/burn-in/
+git add reports/burn-in && git commit -m "L4 burn-in" && git push
+```
+
+It needs no checkpoint and no data. **It does not measure the spike as the
+product.** The 128-wide reference model would serve many times faster than any
+backbone worth shipping, and its throughput quoted as `$/MTok` would flatter
+the cost argument by the ratio of the two models' compute. Throughput depends
+on shape rather than weight values, so `scripts/burn_in.py` times randomly
+initialised encoders at the width and depth of 0.5B and 1.5B backbones — the
+A.3 candidates — with the spike alongside and labelled. It refuses to run
+without CUDA, records `nvidia-smi`, the commit and whether the tree was clean,
+and takes the hourly price as an input because a price is a quote, not a
+measurement.
 
 **Self-hosting wins if you are on Team or Enterprise, already run a GPU box,
 and want checkouts and artifacts to stay inside your network.** Then the
