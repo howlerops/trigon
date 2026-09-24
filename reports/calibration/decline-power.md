@@ -106,6 +106,13 @@ spread, tilted hard        never scale     40/40     0.1079     0.1218
 shape where the original study found the strict rule losing -- the slightly
 overconfident head, 0.0269 -> 0.0218 -- and moves by 0.0003 on the others.
 
+## On the certified model
+
+Re-gating the four certified Banking77 checkpoints under 0.80
+(`reports/banking77/README.md`): seed 0 now applies the isotonic map it had
+declined, 0.0489 → 0.0202; seed 1 still declines, at 0.0448; seeds 2 and 3
+are unchanged. Median ECE 0.0332 → 0.0209.
+
 ## What changed
 
 `ACCEPT_CONFIDENCE` 0.95 -> 0.80. The burden of proof still sits on
