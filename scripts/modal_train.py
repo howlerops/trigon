@@ -49,6 +49,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import pathlib
 import subprocess
 import sys
@@ -131,11 +132,17 @@ def train_one(corpus: str, seed: int, flags: list[str], run: dict) -> dict:
     # line instead of nothing until the seed returns.
     # Appended, so a preempted and restarted seed shows both lives in its log.
     with log_path.open("a") as log:
+        # "synthetic" is the generator's three questions through `trigon train`
+        # -- the suite A.3's done-condition names -- and every other name is a
+        # real corpus through scripts/train_corpus.py.
+        entry = (
+            [sys.executable, "-m", "trigon.cli", "train"]
+            if corpus == "synthetic"
+            else [sys.executable, "scripts/train_corpus.py", corpus]
+        )
         process = subprocess.Popen(
             [
-                sys.executable,
-                "scripts/train_corpus.py",
-                corpus,
+                *entry,
                 "--seed",
                 str(seed),
                 "--out",
@@ -145,6 +152,9 @@ def train_one(corpus: str, seed: int, flags: list[str], run: dict) -> dict:
                 *flags,
             ],
             cwd=root,
+            # `-m trigon.cli` needs the package importable; train_corpus.py
+            # puts src/ on its own path, the CLI does not.
+            env={**os.environ, "PYTHONPATH": str(root / "src")},
             stdout=log,
             stderr=subprocess.STDOUT,
             text=True,

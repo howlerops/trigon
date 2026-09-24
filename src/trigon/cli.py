@@ -235,6 +235,8 @@ def cmd_train(args: argparse.Namespace) -> int:
     """
     import json as _json
 
+    import torch
+
     from .backends.torch_readout import ReadoutConfig, TorchReadoutBackend
     from .engine import Engine
     from .evals import (
@@ -248,23 +250,39 @@ def cmd_train(args: argparse.Namespace) -> int:
     from .training import TrainingConfig
     from .training import train as run_training
 
+    device = args.device
+    if device == "auto":
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+    if device.startswith("cuda") and not torch.cuda.is_available():
+        raise SystemExit(f"--device {device} was asked for and no CUDA device is present")
+
     tokenizer = None
     if args.tokenizer == "hashing":
         from .backends.tokenizer import HashingTokenizer
 
         tokenizer = HashingTokenizer()
-    backend = TorchReadoutBackend(
-        tokenizer=tokenizer,
-        config=ReadoutConfig(
-            d_model=args.d_model,
-            n_layers=args.layers,
-            match_normalize=args.match_normalize,
-            match_residual=args.match_residual,
-            match_residual_score=args.score_residual,
-            score_head=args.score_head,
-        ),
-        seed=args.seed,
+    heads = ReadoutConfig(
+        d_model=args.d_model,
+        n_layers=args.layers,
+        match_normalize=args.match_normalize,
+        match_residual=args.match_residual,
+        match_residual_score=args.score_residual,
+        score_head=args.score_head,
     )
+    if args.backbone:
+        # The same heads over a pretrained backbone. Its tokenizer is its own
+        # -- `--tokenizer` does not apply -- and it loads straight onto the
+        # device, so a 1.5B model is never materialised twice.
+        from .backends.qwen_readout import QwenReadoutBackend
+
+        backend = QwenReadoutBackend.from_backbone(
+            args.backbone, device=device, seed=args.seed, lora_rank=args.lora_rank, config=heads
+        )
+        backend.model.checkpointing = True
+    else:
+        backend = TorchReadoutBackend(tokenizer=tokenizer, config=heads, seed=args.seed)
+    backend.to(device)
+    print(f"training on {device}", file=sys.stderr)
     if args.score_readout_per_level:
         # Module-level rather than threaded through every call site:
         # the slot count is a property of the compiled layout, which
@@ -294,6 +312,8 @@ def cmd_train(args: argparse.Namespace) -> int:
             seed=args.seed,
             log_every=args.log_every,
             validation_fraction=args.validation_fraction,
+            max_batch_cells=args.max_batch_cells or None,
+            resume_path=args.resume_path,
         ),
         compiler=compiler,
     )
@@ -413,6 +433,7 @@ def _training_section(report, args) -> str:
         f"--layers {args.layers} --noise {args.noise} --seed {args.seed} "
         f"--floor-trials {args.floor_trials} --calibration-n {args.calibration_n} "
         f"--option-scoring {args.option_scoring}"
+        + (f" --backbone {args.backbone} --lora-rank {args.lora_rank}" if args.backbone else "")
         + (" --match-normalize" if args.match_normalize else "")
         + ("" if args.match_residual else " --no-match-residual")
         + (" --score-residual" if args.score_residual else "")
@@ -1103,6 +1124,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--save-model",
         default=None,
         help="write the trained weights here, so the run can be served",
+    )
+    tr.add_argument(
+        "--backbone",
+        default=None,
+        help="a pinned pretrained backbone (e.g. qwen2.5-1.5b) instead of the spike",
+    )
+    tr.add_argument("--lora-rank", type=int, default=16)
+    tr.add_argument("--device", default="auto", help="cpu, cuda, or auto")
+    tr.add_argument("--resume-path", default=None, help="resume file, written every epoch")
+    tr.add_argument(
+        "--max-batch-cells", type=int, default=0, help="cap batch x sequence^2 per forward"
     )
     tr.set_defaults(func=cmd_train)
     return parser
