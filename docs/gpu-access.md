@@ -8,9 +8,9 @@ the options actually are, what each unblocks, and what it costs.
 
 | Item | Needs | Why it matters |
 | --- | --- | --- |
-| **A.3** Replace the spike with a real backbone | A GPU, hours | The single largest expected accuracy gain, and the last standing explanation for `size` |
+| **A.3** Replace the spike with a real backbone | A GPU, hours | ✅ **Done on Modal**, 2026-09-24: Qwen2.5-1.5B, `size` learned on four seeds |
 | **B.1** The L4 burn-in for `$/MTok` | An L4, ~1 hour | The most load-bearing unmeasured number in the project; the economic case is arithmetic over it |
-| **C.1** Publish weights | A.3 | Nothing worth publishing until the model is not a spike |
+| **C.1** Publish weights | A.3 | Unblocked; waits on a publishing decision |
 | **A.2** HelpSteer2 | Not a GPU — *durability* | **Unblocked.** Run on Modal at 12,000 cases, 2026-09-23 |
 
 A.3 and B.1 are the real ones. The rest of the plan is done or does not need

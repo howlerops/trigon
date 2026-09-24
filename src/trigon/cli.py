@@ -235,6 +235,8 @@ def cmd_train(args: argparse.Namespace) -> int:
     """
     import json as _json
 
+    import torch
+
     from .backends.torch_readout import ReadoutConfig, TorchReadoutBackend
     from .engine import Engine
     from .evals import (
@@ -248,23 +250,39 @@ def cmd_train(args: argparse.Namespace) -> int:
     from .training import TrainingConfig
     from .training import train as run_training
 
+    device = args.device
+    if device == "auto":
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+    if device.startswith("cuda") and not torch.cuda.is_available():
+        raise SystemExit(f"--device {device} was asked for and no CUDA device is present")
+
     tokenizer = None
     if args.tokenizer == "hashing":
         from .backends.tokenizer import HashingTokenizer
 
         tokenizer = HashingTokenizer()
-    backend = TorchReadoutBackend(
-        tokenizer=tokenizer,
-        config=ReadoutConfig(
-            d_model=args.d_model,
-            n_layers=args.layers,
-            match_normalize=args.match_normalize,
-            match_residual=args.match_residual,
-            match_residual_score=args.score_residual,
-            score_head=args.score_head,
-        ),
-        seed=args.seed,
+    heads = ReadoutConfig(
+        d_model=args.d_model,
+        n_layers=args.layers,
+        match_normalize=args.match_normalize,
+        match_residual=args.match_residual,
+        match_residual_score=args.score_residual,
+        score_head=args.score_head,
     )
+    if args.backbone:
+        # The same heads over a pretrained backbone. Its tokenizer is its own
+        # -- `--tokenizer` does not apply -- and it loads straight onto the
+        # device, so a 1.5B model is never materialised twice.
+        from .backends.qwen_readout import QwenReadoutBackend
+
+        backend = QwenReadoutBackend.from_backbone(
+            args.backbone, device=device, seed=args.seed, lora_rank=args.lora_rank, config=heads
+        )
+        backend.model.checkpointing = True
+    else:
+        backend = TorchReadoutBackend(tokenizer=tokenizer, config=heads, seed=args.seed)
+    backend.to(device)
+    print(f"training on {device}", file=sys.stderr)
     if args.score_readout_per_level:
         # Module-level rather than threaded through every call site:
         # the slot count is a property of the compiled layout, which
@@ -294,6 +312,8 @@ def cmd_train(args: argparse.Namespace) -> int:
             seed=args.seed,
             log_every=args.log_every,
             validation_fraction=args.validation_fraction,
+            max_batch_cells=args.max_batch_cells or None,
+            resume_path=args.resume_path,
         ),
         compiler=compiler,
     )
@@ -413,6 +433,7 @@ def _training_section(report, args) -> str:
         f"--layers {args.layers} --noise {args.noise} --seed {args.seed} "
         f"--floor-trials {args.floor_trials} --calibration-n {args.calibration_n} "
         f"--option-scoring {args.option_scoring}"
+        + (f" --backbone {args.backbone} --lora-rank {args.lora_rank}" if args.backbone else "")
         + (" --match-normalize" if args.match_normalize else "")
         + ("" if args.match_residual else " --no-match-residual")
         + (" --score-residual" if args.score_residual else "")
@@ -472,7 +493,23 @@ def _scaled(logits: list[float], temperature: float) -> list[float]:
 #: rather than a preference -- `scripts/decline_rule.py` scores three rules
 #: against heads whose true calibration is known. See `docs/decisions.md`,
 #: "A temperature is a proposal, not a result".
-ACCEPT_CONFIDENCE = 0.95
+#:
+#: **0.80, not 0.95, and the 0.95 shipped a certified model at the edge of its
+#: gate.** On a 77-way head at ~90% accuracy the check is 500 answers, where a
+#: perfectly calibrated head already reads ECE 0.02-0.03, and 95% of paired
+#: resamples is more power than that check has: the certified Banking77 model
+#: declined an isotonic map on two seeds of four whose held-out check read
+#: 0.0486 -> 0.0261 and 0.0420 -> 0.0318, and shipped them raw at 0.0489 and
+#: 0.0448. `scripts/decline_power.py` runs this exact rule on 77-way heads of
+#: known calibration: worst-case gate error over five shapes 0.0844 at 0.95,
+#: 0.0438 at 0.80 -- the only threshold that keeps every shape under 0.05 --
+#: for 0.0259 against 0.0197 on a head that was calibrated to begin with.
+#: At four classes (`scripts/decline_rule.py`) the worst case is identical at
+#: both thresholds on all seven shapes. `reports/calibration/decline-power.md`.
+ACCEPT_CONFIDENCE = 0.80
+#: The mirror rule's threshold, kept apart so the rejected alternatives the
+#: studies score do not move when the shipped one does.
+HARM_CONFIDENCE = 0.95
 
 
 def _harm_is_real(unscaled, rescaled, labels, *, resamples: int = 200, seed: int = 4919) -> bool:
@@ -528,7 +565,7 @@ def _harm_is_real(unscaled, rescaled, labels, *, resamples: int = 200, seed: int
         a = calibration_report([unscaled[i] for i in picks], pick_labels, simulate_floor=False).ece
         b = calibration_report([rescaled[i] for i in picks], pick_labels, simulate_floor=False).ece
         worse += b > a
-    return worse >= ACCEPT_CONFIDENCE * resamples
+    return worse >= HARM_CONFIDENCE * resamples
 
 
 def _calibration_error(probs, labels) -> float:
@@ -609,6 +646,105 @@ def _help_is_real(unscaled, rescaled, labels, *, resamples: int = 200, seed: int
     return counted > 0 and better >= ACCEPT_CONFIDENCE * counted
 
 
+def _choose_calibrator(primitive, data, scaler, isotonic) -> str:
+    """Fit both calibrators on half of ``data``, check on the other half, apply one or neither.
+
+    The per-primitive decision `_fit_calibration` makes, taken out of it so
+    that a study can call exactly the rule that ships -- `scripts/decline_power.py`
+    scores it on heads whose true calibration is known. Mutates ``scaler`` and
+    ``isotonic`` the way the decision says and returns the verdict line.
+    """
+    import math
+
+    from .calibration.isotonic import MIN_ISOTONIC_SAMPLES, IsotonicCalibrator
+
+    cut = max(1, len(data) // 2)
+    fit_rows, check_rows = data[:cut], data[cut:]
+    if not check_rows:
+        # Nothing to check on. Serve unscaled rather than apply an
+        # unverified calibrator: the failure being prevented is
+        # precisely a fit nobody checked.
+        return "none -- too few answers to check a fit on"
+
+    labels = [y for _, y in check_rows]
+    unscaled = [_scaled(x, 1.0) for x, _ in check_rows]
+    baseline = _calibration_error(unscaled, labels)
+
+    # Candidate 1: a temperature.
+    if primitive == "noul":
+        value = scaler.fit_binary([r[0][1] - r[0][0] for r in fit_rows], [y for _, y in fit_rows])
+    else:
+        value = scaler.fit(primitive, [x for x, _ in fit_rows], [y for _, y in fit_rows])
+    warmed = [_scaled(x, value) for x, _ in check_rows]
+    warm_ece = _calibration_error(warmed, labels)
+    warm_ok = _help_is_real(unscaled, warmed, labels)
+
+    # Candidate 2: an isotonic map, where there is enough data for one.
+    # `fit` refuses below its minimum rather than memorising the split.
+    iso_ok, iso_ece, mapped = False, float("nan"), None
+    if len(fit_rows) >= MIN_ISOTONIC_SAMPLES:
+        candidate = IsotonicCalibrator()
+        fit_probs = [_scaled(x, 1.0) for x, _ in fit_rows]
+        if primitive == "noul":
+            # A Noul is calibrated on P(yes) against whether yes
+            # happened -- the standard binary calibration, and the
+            # quantity the engine actually maps at serving time.
+            #
+            # It was fitted on max(p) against correctness, which lives
+            # in [0.5, 1], and applied to P(yes), which lives in
+            # [0, 1]. Every answer below even odds fell off the left
+            # end of the fitted range and took the leftmost knot. That
+            # is the same shape of defect as compiling with one
+            # tokenizer and running tensors built by another, and it
+            # cost a factor of thirteen: this head's ECE read 0.3313
+            # against 0.0251 unscaled.
+            candidate.fit(
+                primitive,
+                [p[1] for p in fit_probs],
+                [int(y == 1) for _, y in fit_rows],
+            )
+        else:
+            candidate.fit(
+                primitive,
+                [max(p) for p in fit_probs],
+                [
+                    int(max(range(len(p)), key=lambda i: p[i]) == y)
+                    for p, (_, y) in zip(fit_probs, fit_rows, strict=True)
+                ],
+            )
+        mapped = (
+            [
+                [
+                    1.0 - candidate.confidence(primitive, p[1]),
+                    candidate.confidence(primitive, p[1]),
+                ]
+                for p in unscaled
+            ]
+            if primitive == "noul"
+            else [candidate.apply(primitive, p) for p in unscaled]
+        )
+        iso_ece = _calibration_error(mapped, labels)
+        iso_ok = _help_is_real(unscaled, mapped, labels)
+
+    # Prefer whichever helps more, among those that demonstrably help.
+    if iso_ok and (not warm_ok or iso_ece < warm_ece):
+        isotonic.knots[primitive] = candidate.knots[primitive]
+        isotonic.fitted_on[primitive] = candidate.fitted_on[primitive]
+        scaler.primitive.pop(primitive, None)
+        scaler.fitted_on.pop(primitive, None)
+        return f"isotonic ({baseline:.4f} -> {iso_ece:.4f})"
+    elif warm_ok:
+        return f"temperature T={value:.4f} ({baseline:.4f} -> {warm_ece:.4f})"
+    else:
+        # `fitted_on` is what a reader checks to see whether a
+        # primitive was calibrated at all, so a declined fit must not
+        # leave a count behind claiming it was.
+        scaler.primitive.pop(primitive, None)
+        scaler.fitted_on.pop(primitive, None)
+        best = warm_ece if math.isnan(iso_ece) else min(warm_ece, iso_ece)
+        return f"none -- unscaled is {baseline:.4f}, the best fit {best:.4f}"
+
+
 def _fit_calibration(engine, cases):
     """Fit both calibrators per primitive and apply whichever demonstrably helps.
 
@@ -646,7 +782,7 @@ def _fit_calibration(engine, cases):
     import math
     import warnings
 
-    from .calibration.isotonic import MIN_ISOTONIC_SAMPLES, IsotonicCalibrator
+    from .calibration.isotonic import IsotonicCalibrator
     from .calibration.temperature import CalibrationWarning, TemperatureScaler
     from .evals import run_cases
 
@@ -671,94 +807,7 @@ def _fit_calibration(engine, cases):
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always", CalibrationWarning)
         for primitive, data in sorted(rows.items()):
-            cut = max(1, len(data) // 2)
-            fit_rows, check_rows = data[:cut], data[cut:]
-            if not check_rows:
-                # Nothing to check on. Serve unscaled rather than apply an
-                # unverified calibrator: the failure being prevented is
-                # precisely a fit nobody checked.
-                chosen[primitive] = "none -- too few answers to check a fit on"
-                continue
-
-            labels = [y for _, y in check_rows]
-            unscaled = [_scaled(x, 1.0) for x, _ in check_rows]
-            baseline = _calibration_error(unscaled, labels)
-
-            # Candidate 1: a temperature.
-            if primitive == "noul":
-                value = scaler.fit_binary(
-                    [r[0][1] - r[0][0] for r in fit_rows], [y for _, y in fit_rows]
-                )
-            else:
-                value = scaler.fit(primitive, [x for x, _ in fit_rows], [y for _, y in fit_rows])
-            warmed = [_scaled(x, value) for x, _ in check_rows]
-            warm_ece = _calibration_error(warmed, labels)
-            warm_ok = _help_is_real(unscaled, warmed, labels)
-
-            # Candidate 2: an isotonic map, where there is enough data for one.
-            # `fit` refuses below its minimum rather than memorising the split.
-            iso_ok, iso_ece, mapped = False, float("nan"), None
-            if len(fit_rows) >= MIN_ISOTONIC_SAMPLES:
-                candidate = IsotonicCalibrator()
-                fit_probs = [_scaled(x, 1.0) for x, _ in fit_rows]
-                if primitive == "noul":
-                    # A Noul is calibrated on P(yes) against whether yes
-                    # happened -- the standard binary calibration, and the
-                    # quantity the engine actually maps at serving time.
-                    #
-                    # It was fitted on max(p) against correctness, which lives
-                    # in [0.5, 1], and applied to P(yes), which lives in
-                    # [0, 1]. Every answer below even odds fell off the left
-                    # end of the fitted range and took the leftmost knot. That
-                    # is the same shape of defect as compiling with one
-                    # tokenizer and running tensors built by another, and it
-                    # cost a factor of thirteen: this head's ECE read 0.3313
-                    # against 0.0251 unscaled.
-                    candidate.fit(
-                        primitive,
-                        [p[1] for p in fit_probs],
-                        [int(y == 1) for _, y in fit_rows],
-                    )
-                else:
-                    candidate.fit(
-                        primitive,
-                        [max(p) for p in fit_probs],
-                        [
-                            int(max(range(len(p)), key=lambda i: p[i]) == y)
-                            for p, (_, y) in zip(fit_probs, fit_rows, strict=True)
-                        ],
-                    )
-                mapped = (
-                    [
-                        [
-                            1.0 - candidate.confidence(primitive, p[1]),
-                            candidate.confidence(primitive, p[1]),
-                        ]
-                        for p in unscaled
-                    ]
-                    if primitive == "noul"
-                    else [candidate.apply(primitive, p) for p in unscaled]
-                )
-                iso_ece = _calibration_error(mapped, labels)
-                iso_ok = _help_is_real(unscaled, mapped, labels)
-
-            # Prefer whichever helps more, among those that demonstrably help.
-            if iso_ok and (not warm_ok or iso_ece < warm_ece):
-                isotonic.knots[primitive] = candidate.knots[primitive]
-                isotonic.fitted_on[primitive] = candidate.fitted_on[primitive]
-                scaler.primitive.pop(primitive, None)
-                scaler.fitted_on.pop(primitive, None)
-                chosen[primitive] = f"isotonic ({baseline:.4f} -> {iso_ece:.4f})"
-            elif warm_ok:
-                chosen[primitive] = f"temperature T={value:.4f} ({baseline:.4f} -> {warm_ece:.4f})"
-            else:
-                # `fitted_on` is what a reader checks to see whether a
-                # primitive was calibrated at all, so a declined fit must not
-                # leave a count behind claiming it was.
-                scaler.primitive.pop(primitive, None)
-                scaler.fitted_on.pop(primitive, None)
-                best = warm_ece if math.isnan(iso_ece) else min(warm_ece, iso_ece)
-                chosen[primitive] = f"none -- unscaled is {baseline:.4f}, the best fit {best:.4f}"
+            chosen[primitive] = _choose_calibrator(primitive, data, scaler, isotonic)
 
     for primitive, verdict in sorted(chosen.items()):
         print(f"  {primitive}: {verdict}", file=sys.stderr)
@@ -1091,6 +1140,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--save-model",
         default=None,
         help="write the trained weights here, so the run can be served",
+    )
+    tr.add_argument(
+        "--backbone",
+        default=None,
+        help="a pinned pretrained backbone (e.g. qwen2.5-1.5b) instead of the spike",
+    )
+    tr.add_argument("--lora-rank", type=int, default=16)
+    tr.add_argument("--device", default="auto", help="cpu, cuda, or auto")
+    tr.add_argument("--resume-path", default=None, help="resume file, written every epoch")
+    tr.add_argument(
+        "--max-batch-cells", type=int, default=0, help="cap batch x sequence^2 per forward"
     )
     tr.set_defaults(func=cmd_train)
     return parser

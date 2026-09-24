@@ -75,6 +75,7 @@ Rows marked *unchecked* keep the plan's assumption and are still blockers.
 | Amazon Reviews 2023 | Score | **Amazon Customer Reviews Terms of Use** (repo scripts MIT) | **amber** | McAuley Lab card; platform terms are not an open licence |
 | ASAP essay scoring | Score + rubric | Kaggle competition terms | **dropped** | not pursued; see sign-off Q18 |
 | HelpSteer2/3 | Score | CC BY 4.0 | **green** ✓ | HF `nvidia/HelpSteer2` metadata |
+| HelpSteer2-annotators | Score, annotator distributions | CC BY 4.0 | **green** ✓ | HF `nvidia/HelpSteer2` `disagreements/`, same dataset and licence |
 | GoEmotions | Choice (27) + distributions | Apache-2.0 | **green** ✓ | HF `google-research-datasets/go_emotions` metadata |
 | ChaosNLI | annotator distributions | **no licence field found** | **red** | HF mirror carries no licence |
 | Civil Comments | Noul/Score soft labels | CC0-1.0 | **green** ✓ | HF `google/civil_comments` metadata |
@@ -99,6 +100,7 @@ the drift tests, neither of which has a GPU stack — a Parquet reader here puts
 | --- | --- | --- |
 | Banking77 | CSV over HTTP | ✅ built |
 | HelpSteer2 | gzipped JSONL | ✅ built |
+| HelpSteer2-annotators | gzipped JSONL, per-annotator lists | ✅ built — the distribution stream |
 | GoEmotions | Parquet only | needs a conversion step in `scripts/` |
 | measuring_hate_speech | Parquet only | needs a conversion step in `scripts/` |
 | Circa | Parquet only | needs a conversion step in `scripts/` |
@@ -108,6 +110,13 @@ aggregated integer ratings, 0–4, across five attributes. The per-annotator
 disagreement data is in its `disagreements/` split and is a separate load.
 The row above clears the licence; it does not deliver the thing that makes
 annotator-distribution training different from hard-label training.
+
+**`helpsteer2-annotators` does.** 23,652 pairs with every annotator's rating,
+two to six each, loaded as a distribution the trainer fits with soft
+cross-entropy, plus one annotator drawn per case as the outcome the gates
+score. Split by a hash of the prompt, a quarter held out, so no prompt is on
+both sides. The modal rating carries only 67–75% of annotators on any
+question — the disagreement the averaged split erases.
 
 Net movement: CLINC150 and measuring_hate_speech clear to **green**, DBpedia-14
 resolves to **amber**, AG News separates out as **red** (the two were one row in

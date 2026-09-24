@@ -49,6 +49,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import pathlib
 import subprocess
 import sys
@@ -119,18 +120,32 @@ def train_one(corpus: str, seed: int, flags: list[str], run: dict) -> dict:
     # to this seed's own path on the Volume, which is the only place a trained
     # model outlives the job that trained it.
     flags = list(flags)
+    # Every seed resumes from its own last finished epoch. A preempted
+    # container restarts this function from the top; without this, that meant
+    # step 0 -- three seeds lost up to two hours each on the first day.
+    flags += ["--resume-path", str(target / f"seed{seed}.resume.pt")]
+    # `--weights /runs/<run>/seed{seed}.pt` re-gates each seed's own
+    # checkpoint rather than one file for all four.
+    flags = [f.replace("{seed}", str(seed)) for f in flags]
     if "--save-model" in flags:
         flags[flags.index("--save-model") + 1] = str(target / f"seed{seed}.pt")
 
     started = time.time()
     # Streamed to the Volume as it runs, so `status` can show a live epoch
     # line instead of nothing until the seed returns.
-    with log_path.open("w") as log:
+    # Appended, so a preempted and restarted seed shows both lives in its log.
+    with log_path.open("a") as log:
+        # "synthetic" is the generator's three questions through `trigon train`
+        # -- the suite A.3's done-condition names -- and every other name is a
+        # real corpus through scripts/train_corpus.py.
+        entry = (
+            [sys.executable, "-m", "trigon.cli", "train"]
+            if corpus == "synthetic"
+            else [sys.executable, "scripts/train_corpus.py", corpus]
+        )
         process = subprocess.Popen(
             [
-                sys.executable,
-                "scripts/train_corpus.py",
-                corpus,
+                *entry,
                 "--seed",
                 str(seed),
                 "--out",
@@ -140,6 +155,9 @@ def train_one(corpus: str, seed: int, flags: list[str], run: dict) -> dict:
                 *flags,
             ],
             cwd=root,
+            # `-m trigon.cli` needs the package importable; train_corpus.py
+            # puts src/ on its own path, the CLI does not.
+            env={**os.environ, "PYTHONPATH": str(root / "src")},
             stdout=log,
             stderr=subprocess.STDOUT,
             text=True,
@@ -161,6 +179,7 @@ def train_one(corpus: str, seed: int, flags: list[str], run: dict) -> dict:
         # Recorded, not assumed: a report whose hardware and commit are
         # unknown is not reproducible, and this is the only place that
         # information exists.
+        "corpus": corpus,
         **{k: run[k] for k in ("run_id", "prefix", "commit", "dirty", "flags")},
         "gpu_requested": run["gpu"],
         "gpu_actual": torch.cuda.get_device_name(0) if torch.cuda.is_available() else "NONE",
@@ -239,12 +258,19 @@ def launch(args) -> None:
             f"{GPU_LIMIT}; {busy + len(seeds) - GPU_LIMIT} of these seeds will queue "
             "until earlier ones finish"
         )
+    # One deployed app per commit. Queued inputs go to any warm container of
+    # the app they were spawned on, including one left from the previous
+    # deploy, and that container runs the previous deploy's code: four seeds
+    # launched at one commit once ran on another's containers, while their
+    # reports would have named the launch's commit. A per-commit name makes
+    # the recorded commit the only code that can pick the input up.
+    deployed = f"{APP_NAME}-{commit[:12]}" + ("-dirty" if dirty else "")
     with modal.enable_output():
-        app.deploy(name=APP_NAME)
-    job = modal.Function.from_name(APP_NAME, "train_one").with_options(gpu=args.gpu)
+        app.deploy(name=deployed)
+    job = modal.Function.from_name(deployed, "train_one").with_options(gpu=args.gpu)
     calls = {seed: job.spawn(args.corpus, seed, flags, run).object_id for seed in seeds}
 
-    print(f"{args.corpus}: seeds {seeds}, gpu={args.gpu}, commit {commit[:12]}")
+    print(f"{args.corpus}: seeds {seeds}, gpu={args.gpu}, commit {commit[:12]}, app {deployed}")
     print(f"flags: {' '.join(flags)}")
     print(f"run id {run_id}")
     print(json.dumps({"run_id": run_id, "calls": calls}))
@@ -292,7 +318,10 @@ def collect(args) -> None:
     ]
     if not payloads:
         raise SystemExit(f"nothing on the Volume under {args.run_id} yet")
-    corpus = args.run_id.split("-", 1)[0]
+    # Recorded by the seed rather than parsed from the run id: a corpus name
+    # can contain the id's separator, and `helpsteer2-annotators` was filed
+    # under `helpsteer2` until it was.
+    corpus = payloads[0].get("corpus") or args.run_id.split("-", 1)[0]
     prefix = payloads[0]["prefix"]
     print(f"{args.run_id}: {len(payloads)} seed(s) finished")
     destination = pathlib.Path(args.out_dir) if args.out_dir else REPO / "reports" / corpus
@@ -300,7 +329,9 @@ def collect(args) -> None:
     if args.models:
         # Checkpoints are git-ignored: they land beside the reports for
         # `trigon serve --weights`, and never in a commit.
-        for name in sorted(n for n in names if n.endswith(".pt")):
+        # Models only: a resume file is four times the size and only means
+        # anything to the job that wrote it.
+        for name in sorted(n for n in names if n.endswith(".pt") and not n.endswith(".resume.pt")):
             target = destination / f"{prefix}-{pathlib.Path(name).stem}.pt"
             with target.open("wb") as out:
                 for chunk in runs.read_file(name):

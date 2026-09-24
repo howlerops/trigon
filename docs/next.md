@@ -11,6 +11,27 @@ next, and what each step would have to show to count.
 
 ---
 
+## Where it stands, 2026-09-24
+
+| Item | State |
+| --- | --- |
+| A.1 Banking77 | ✅ **Certified twice** — the spike at 0.7248, then Qwen2.5-1.5B at **0.9009**, four seeds, every blocking gate (`reports/banking77/`). Deployed behind auth |
+| A.2 annotator distributions | ✅ **Built and measured.** HelpSteer2's per-annotator split; the model is calibrated against a random annotator and the soft targets are shown to be why (`reports/helpsteer2-annotators/`). Its accuracy gate cannot be passed by any predictor on this data — a gate decision, open |
+| A.3 real backbone | ✅ **Done.** All three synthetic questions certify on four seeds, `size` included (`reports/synthetic/`) |
+| A.4 CI's hardware | Blocked on Actions billing |
+| A.5 length bucketing | Implemented; its before/after timing is still owed |
+| B.1 L4 burn-in | Written and handed over (`scripts/burn_in.py`); needs a rented L4 |
+| B.2 / B.3 | Done |
+| C.1 publish weights | **Unblocked by A.3.** Outward-facing and licence-bearing; waits on a decision |
+| C.2 / C.3 | Done |
+
+Two findings changed what a number means here. **The calibrator's accept
+threshold is 0.80, not 0.95** — at 77 classes the old one shipped certified
+heads raw (`reports/calibration/decline-power.md`). **Argmax accuracy is the
+wrong instrument for rating data**: HelpSteer2's annotators predict each other
+at +0.021 over the marginal, so every corpus report now prints the marginal's
+Brier and NLL beside the gates (`reports/helpsteer2/ceiling.md`).
+
 ## What the last plan actually established
 
 | Stage | State |
@@ -92,6 +113,13 @@ gate set working rather than the corpus being unlearnable — the run was sized
 at 1,400 cases to fit a cloud session's idle window, where Banking77 needed
 7,083.
 
+**The annotator-distribution stream is built and measured.** Qwen2.5-1.5B on
+HelpSteer2's per-annotator ratings, soft targets, four seeds: calibrated
+against a random annotator (ECE 0.0082–0.0271) and at the annotators' own
+accuracy ceiling (`reports/helpsteer2-annotators/README.md`). It fails
+`accuracy_over_baseline`, which no predictor on this data can pass
+(`reports/helpsteer2/ceiling.md`) -- the gate question is open.
+
 **HelpSteer2 at 12,000 cases has an answer, and it is still a failure — a
 different one.** Four seeds on Modal: median lift +0.0189, range +0.0155 to
 +0.0203, where 1,400 cases gave +0.0023. `complexity` and `verbosity` learn
@@ -114,8 +142,12 @@ and the machine is a 4-core Xeon with 15 GB and no accelerator.
 **This invalidates every number in `reports/`.** Sequence it after A.1 and A.2
 so there is a real-data baseline to compare against, not only a synthetic one.
 
-🟡 **Banking77 certifies on the backbone; the synthetic half and HelpSteer2 are
-open.** Qwen2.5-1.5B with LoRA rank 16 at lr 1e-4: median accuracy 0.9009
+✅ **Done.** The synthetic suite certifies on four seeds of four with all
+three questions far above their marginals -- `size` at +0.57–0.59, where the
+spike never left it (`reports/synthetic/README.md`) -- and per-corpus ECE holds
+on Banking77 and HelpSteer2. C.1 is unblocked.
+
+**Banking77 certifies on the backbone.** Qwen2.5-1.5B with LoRA rank 16 at lr 1e-4: median accuracy 0.9009
 over four seeds, every seed through every blocking gate, against the spike's
 0.7248 (`reports/banking77/README.md`). At lr 3e-4 one seed of four collapsed
 to chance at the peak of warmup. The done-condition below also asks for the

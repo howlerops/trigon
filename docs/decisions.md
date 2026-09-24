@@ -911,6 +911,17 @@ the right answer and it is phase-2 work; declining is the honest interim,
 because serving a head unscaled is a known quantity and serving it through a
 harmful temperature is not.
 
+
+**Revised 2026-09-24: the threshold is 0.80, not 0.95.** The direction held
+and the level did not. On a 77-way head at ~90% accuracy the check split is
+500 answers and a calibrated head already reads ECE 0.02-0.03 there, so 95% of
+paired resamples was more certainty than the check can produce: the certified
+Banking77 model declined a map that halved its held-out error on two seeds of
+four and shipped them at 0.0489 and 0.0448. Measured on heads of known
+calibration (`reports/calibration/decline-power.md`): worst-case gate error
+0.0844 at 0.95 and 0.0438 at 0.80 across five 77-way shapes, and an identical
+worst case at both on all seven of this section's four-class shapes.
+
 ### The temperature was fitted on the split the model trained on
 
 **Decision.** `trigon train` builds three splits, not two: training,

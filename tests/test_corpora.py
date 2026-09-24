@@ -245,3 +245,67 @@ def test_gzipped_jsonl_and_csv_both_load_without_a_compiled_dependency():
             imported.add(node.module.split(".")[0])
     for banned in ("pyarrow", "pandas", "datasets", "torch", "numpy"):
         assert banned not in imported, f"{banned} must not be imported by the corpus loader"
+
+
+# -- Annotator distributions: every rating, not their average -----------------
+
+
+@pytest.fixture
+def annotated(tmp_path: pathlib.Path) -> pathlib.Path:
+    import gzip
+    import json
+
+    root = tmp_path / "cache"
+    (root / "helpsteer2-annotators").mkdir(parents=True)
+    rows = []
+    for p in range(40):
+        for r in range(3):  # several responses per prompt, as the real split has
+            rows.append(
+                {
+                    "prompt": f"prompt {p}" + (" " if r == 2 else ""),  # whitespace variant
+                    "response": f"response {r}",
+                    **{
+                        q: [r, (r + 1) % 5, 4]
+                        for q in ("helpfulness", "correctness", "coherence", "complexity")
+                    },
+                    "verbosity": [1, 1],
+                }
+            )
+    with gzip.open(root / "helpsteer2-annotators" / "all.jsonl.gz", "wt") as handle:
+        for row in rows:
+            handle.write(json.dumps(row) + "\n")
+    return root
+
+
+def test_annotator_ratings_become_a_distribution_and_one_drawn_label(annotated):
+    cases = load("helpsteer2-annotators", "train", purpose="train", root=annotated)
+    cases += load("helpsteer2-annotators", "test", purpose="eval", root=annotated)
+    for case in cases:
+        verbosity = case.expected["verbosity"]
+        assert verbosity.distribution == (0.0, 1.0, 0.0, 0.0, 0.0)
+        assert verbosity.label == 1
+        helpful = case.expected["helpfulness"]
+        assert sum(helpful.distribution) == pytest.approx(1.0)
+        # The label is one annotator's rating, never a level nobody chose.
+        assert helpful.distribution[helpful.label] > 0
+
+
+def test_the_split_is_by_prompt_so_no_prompt_is_on_both_sides(annotated):
+    """Several responses share a prompt; a row split would test on trained prompts."""
+    train = load("helpsteer2-annotators", "train", purpose="train", root=annotated)
+    test = load("helpsteer2-annotators", "test", purpose="eval", root=annotated)
+    assert train and test
+    assert len(train) + len(test) == 120
+
+    def prompts(cases):
+        return {c.request.state.split("RESPONSE:")[0].strip() for c in cases}
+
+    assert not prompts(train) & prompts(test)
+
+
+def test_the_drawn_label_is_the_same_on_every_load(annotated):
+    first = load("helpsteer2-annotators", "test", purpose="eval", root=annotated)
+    again = load("helpsteer2-annotators", "test", purpose="eval", root=annotated)
+    assert [c.expected["helpfulness"].label for c in first] == [
+        c.expected["helpfulness"].label for c in again
+    ]

@@ -14,14 +14,14 @@ narrative sections are a discipline, not a test.
 
 | | |
 | --- | ---: |
-| Commits | 170 |
-| Tests | 508 |
-| Python files (`src`, `tests`, `scripts`) | 109 |
-| Lines in `src/` | 11,850 |
+| Commits | 184 |
+| Tests | 514 |
+| Python files (`src`, `tests`, `scripts`) | 111 |
+| Lines in `src/` | 12,090 |
 | Release gates | 8 |
 | Green-tier corpora in the licence audit | 9 |
 | Committed use cases | 3 |
-| Real corpora loadable | 2 |
+| Real corpora loadable | 3 |
 
 **Certified on real data: Qwen2.5-1.5B on Banking77**, LoRA rank 16, lr
 1e-4, 4 epochs — median accuracy 0.9009 against the spike's 0.7248, every seed
@@ -32,7 +32,12 @@ noise 0.2, `--option-scoring auto`. Clears every blocking gate on all four
 seeds tried: ECE 0.0084–0.0247, adaptive 0.0153–0.0289, lift over the marginal
 predictor +0.1614 to +0.2277. Evidence in `reports/iso/`.
 
-**What the model can and cannot do.** `plan` (copy a value from the state) is
+**What the pretrained backbone does on the synthetic suite.** All three
+questions far above their marginals on four seeds of four -- `size` included,
+at +0.57–0.59, after seven failed interventions on the spike
+(`reports/synthetic/README.md`).
+
+**What the spike can and cannot do.** `plan` (copy a value from the state) is
 learned to Bayes-optimal, +0.57 lift. `at_risk` (a conjunction plus a threshold
 over 13 values) is learned on three seeds of four, +0.09. `size` (a threshold
 over 500 values) is **not learned by any of seven interventions over
@@ -149,8 +154,12 @@ twenty-two runs** — the investigation is closed and the evidence is in
 | GPU through Modal | **Works.** Asked for an A10G, got a device reporting `NVIDIA A10`; 30.9 cases/s against ~1.1 on this VM's CPU |
 | Qwen2.5 tokenizer, Python port against Rust | **Exact**: 0 of 34,520 texts differ over 10.3M tokens. Speed a wash against the forward pass: Rust 1.8× in bulk, Python 2× per warm call, 2.4× slower on unseen text |
 | The training path's attention mask, per HelpSteer2 request | 352 ms in Python against 10.2 ms vectorized, bit-identical |
+| Certified Banking77, re-gated at `ACCEPT_CONFIDENCE` 0.80 | Median ECE 0.0332 → 0.0209, worst 0.0489 → 0.0448; seed 0 now calibrated (0.0202), seed 1 still declined (0.0448); accuracy unchanged |
 | **Banking77 on Qwen2.5-1.5B, lr 1e-4, four seeds — certified** | Every seed clears every blocking gate: accuracy 0.8502–0.9118, median 0.9009; ECE 0.0105–0.0489, median 0.0332 |
 | Banking77 on Qwen2.5-1.5B, four seeds, the spike's config | **0.9004–0.9228 on three seeds**, median 0.9065; seed 2 collapsed to chance (0.0232). ECE 0.0077–0.0481 on the three |
+| Soft (distribution) targets against majority-vote, same splits | Raw ECE 0.0096 vs 0.0560 median; Brier better on all four seeds (0.5985 vs 0.6039); quality questions move on 4/4 seeds vs 3/4 |
+| **Qwen trained on annotator distributions, four seeds** | ECE 0.0082–0.0271 against a random annotator (seed 0 within its noise floor); lift +0.018–0.024 against the annotators' own +0.021 ceiling; `helpfulness`/`correctness` +0.011–0.019 on every seed; Brier 5.4–6.6% under the marginal |
+| HelpSteer2 on Qwen2.5-1.5B at lr 1e-4, four seeds | Lift +0.0241 to +0.0288; Brier +7.9% to +8.8% over the marginal on every seed; ECE 0.0104–0.0179. No collapsed seed |
 | HelpSteer2 on Qwen2.5-1.5B, four seeds | Lift +0.0059 to +0.0327, median +0.0259 against the spike's +0.0188; `complexity` to +0.096, `verbosity` to +0.049; `helpfulness`/`correctness` up to +0.015 on two seeds, flat on two; `coherence` never moves |
 | The same seed on the same GPU type, twice | Not a replay: accuracy 0.9228 and 0.9252. GPU attention's backward is not deterministic, so a rerun is another draw |
 | A trained Qwen adapter, served on this VM's CPU | 12 of 12 held-out Banking77 intents; ~0.5 s a request, 284 of 323 tokens from the schema cache; 89 MiB on disk |
@@ -160,6 +169,7 @@ twenty-two runs** — the investigation is closed and the evidence is in
 | HelpSteer2, four seeds, 12,000 cases, 12 epochs | No change from 6: lift +0.0170 to +0.0202; the same three quality questions on their marginals; ECE 0.0187–0.0232 |
 | HelpSteer2, four seeds, 12,000 cases, on a GPU | **Fails, and is no longer a collapse.** Lift +0.0189 median, +0.0155 to +0.0203; `complexity` +0.06–0.08 and `verbosity` +0.02 on every seed, `coherence`, `correctness`, `helpfulness` on their marginals; ECE 0.0082–0.0139, calibrator declined on all four |
 | `size`, across 7 interventions and 22 runs | Below its own marginal on every seed; median −0.0095 |
+| **`size` on Qwen2.5-1.5B, four seeds** | **+0.571 to +0.594 over its marginal on every seed**; `plan` +0.57–0.60, `at_risk` +0.13–0.14; every blocking gate passes; best validation loss 0.5556–0.6037 against a Bayes floor of 0.5585 |
 | Banking77 accuracy (pilot, 2 seeds) | 0.4640 / 0.4193 against a 1.8% marginal — **it transfers** |
 
 ---
@@ -180,6 +190,7 @@ The most useful section. Each of these was argued for before it was measured.
 | `size` fails because arithmetic is a non-goal | Never measured. A threshold over 13 values *is* learned. |
 | The tokenizer hid the numbers, so splitting digits fixes it | `size` did not move; two certified seeds regressed. |
 | Not enough capacity | 256×4 leaves it exactly where it was. |
+| `size` cannot be learned by this architecture | It can. On a pretrained 1.5B backbone under the same layout, mask and heads, +0.57–0.59 on four seeds of four. The spike was the bottleneck, as the last standing explanation said. |
 | The Score head was the constraint, +0.2425 proves it | Did not reproduce. The vocabulary had changed underneath. |
 | One readout slot carrying two bits is the bottleneck | A slot per level: median −0.0095. The last structural hypothesis, dead. |
 | Stage 4.1 is blocked on the incumbent's wire format | It is published. `decisions.md` had already cited that source. |
@@ -198,10 +209,14 @@ The most useful section. Each of these was argued for before it was measured.
 | `scripts/modal_train.py` is ready and waiting on a token | It would have trained on the CPU. Nothing in the backend or trainer moved a tensor to a device; `--gpu` was ignored; results lived only on the VM that gets reclaimed. |
 | The certified spike's Banking77 report says how it was trained | Its command line reads `--epochs 4`; its training record has 6 epochs on every seed. The header was written by a later invocation with default flags. |
 | A pretrained backbone would do for HelpSteer2 what it did for Banking77 | Qwen2.5-1.5B, four seeds: median lift +0.0259 against the spike's +0.0188. It learns the surface questions better and the quality questions barely at all. |
+| HelpSteer2's failures are the models' | The annotators' own ceiling: an oracle using the other annotators' ratings of the same response reaches +0.021 against a +0.05 gate; half-panels predict each other at −0.024. On Brier every run beats the marginal, the spike by ~5.5%, Qwen by up to 9.4%. |
+| A naive oracle puts HelpSteer2's ceiling at +0.18 | It let the labelling annotator vote for itself. Leave one out and it is +0.021. Caught before anything was built on it. |
 | HelpSteer2's spike at 12,000 cases was under-trained | 12 epochs: median lift +0.0188 against +0.0189 at 6; validation bottomed at epoch 6–11 on every seed. It is at its ceiling. |
 | HelpSteer2 collapsed for want of data | Partly. 8.6× the data took lift from +0.0023 to +0.0189 and taught two questions of five; the three that judge quality did not move, and every seed kept its last epoch. |
 | The Python tokenizer port is faster than Rust | Only one call at a time, where the binding's per-call overhead dominates. Batched across four cores, Rust is 1.8× ahead. |
+| A launch runs the code it deployed, so its recorded commit is the code that ran | Not with one app name. Queued inputs are taken by any warm container of the app, including one from the previous deploy: four annotator seeds launched at `298d283` ran on the re-gate's `ca90134` containers and died on a corpus that commit did not have. It failed loudly only because the old code lacked something. |
 | `modal run --detach` plus a Volume survives this VM | It keeps the app, not the calls. The container restarted twelve minutes into a 12-epoch sweep; Modal cancelled all four `starmap` inputs and nothing was written. Now deploy + `spawn`, and the launcher exits at once. |
+| Accepting a calibrator at 95% of resamples is the right burden of proof | At four classes, yes. At 77 classes on a 500-answer check it is more power than the check has: worst-case gate error 0.0844 over five known heads, three of them failing. 0.80 keeps all five under 0.05 (0.0438) and is identical at four classes. |
 | A chunk of eight fits on a 24 GB GPU | HelpSteer2's longest case is 7,171 tokens; the chunk asked a 22 GiB A10 for 6.13 GiB at once and died four minutes in. |
 
 ---
@@ -313,7 +328,10 @@ Errors that flattered the project, found by re-measuring rather than by review:
 `docs/plan.md` is the execution plan for closing these: what has to be true, in
 what order, and how each step is known to be done.
 
-- **`size` is unlearned, and the investigation is closed.** Seven
+- ~~`size` is unlearned.~~ **Closed: the backbone learns it** (+0.57–0.59, four
+  seeds of four; `reports/synthetic/README.md`). The record below stands as
+  what was true of the spike.
+- **`size` was unlearned on the spike, and the investigation is closed.** Seven
   interventions, twenty-two runs, below its own marginal on every seed
   (`reports/perlevel/README.md`). What is established is narrow: *this* model
   does not learn *this* question and six attempts to fix it inside the model
@@ -323,18 +341,34 @@ what order, and how each step is known to be done.
 - ~~A pretrained backbone learns Banking77 on three seeds of four.~~
   **Closed.** At lr 3e-4 seed 2 learned for 200 steps and collapsed to ln 77
   at the peak rate; at lr 1e-4 all four seeds certify (median 0.9009).
-- **The calibrator declined a head at ECE 0.0481.** On Qwen seed 1 the
+- ~~The calibrator declined a head at ECE 0.0481.~~ **Closed: the threshold
+  was the cause, and it is 0.80 now** (`reports/calibration/decline-power.md`).
+  The history, for the record: On Qwen seed 1 the
   500-case held-out check could not show the isotonic map helped a 77-way head
   beyond its noise, and the run passed the 0.05 gate by 0.002. **Then the
   same seed, rerun, flipped:** seed 0 applied the map (ECE 0.0077) in one run
   and declined it (ECE 0.0473) in another. On a 77-way head that check sits
   at the edge of its noise, so whether a model ships calibrated is close to a
   coin toss. The rule did what it says; the rule is what is open.
-- **Preemption costs a whole seed.** Three Modal containers were preempted
-  today and each restarted its seed from step 0, because training does not
-  checkpoint mid-run -- up to two hours of a HelpSteer2 seed each time.
-  Resuming from a per-epoch checkpoint on the Volume would bound it to one
-  epoch.
+- ~~Preemption costs a whole seed.~~ **Closed in code.** Three Modal
+  containers restarted their seeds from step 0 on the first day, up to two
+  hours each. The trainer now writes a resume file every epoch and continues
+  from it (`TrainingConfig.resume_path`); every Modal seed gets its own on the
+  Volume. A run killed after epoch 1 and restarted in a fresh process ends
+  bit-identical to an uninterrupted one on CPU (`tests/test_training.py`).
+  Not yet exercised by a real preemption.
+- ~~Whether soft targets cause the calibrated disagreement.~~ **Closed: they
+  do.** Same splits, majority-vote targets: raw ECE against a random
+  annotator 0.0560 median against 0.0096, two seeds of four failing the gate
+  uncalibrated, and Brier worse on every seed even after the calibrator
+  (`reports/helpsteer2-annotators/README.md`).
+- **`accuracy_over_baseline` cannot certify an annotator-distribution
+  corpus.** On HelpSteer2 no predictor clears +0.05 -- the annotators do not
+  (`reports/helpsteer2/ceiling.md`). `CLAUDE.md` requires every gate set to
+  keep a term that fails a model ignoring its input; for such corpora that
+  term would have to be a proper score against the marginal distribution
+  (Brier or NLL), which every report now prints beside the gates. Whether to
+  gate on it is a decision, not made here.
 - **$/MTok is unmeasured.** The whole cost argument beyond ~2× rests on it.
   Needs the L4 burn-in.
 - ~~The KV cache is off by default because nobody has timed it.~~ **Closed.**

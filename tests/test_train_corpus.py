@@ -214,3 +214,23 @@ def test_a_named_cuda_is_refused_rather_than_replaced_by_the_cpu(script):
     with pytest.raises(SystemExit, match="no CUDA device"):
         script.resolve_device("cuda")
     assert script.resolve_device("auto")[0] == "cpu"
+
+
+def test_the_hard_label_ablation_trains_on_the_majority_and_nothing_else(script):
+    from trigon.evals.harness import Case, Expectation
+    from trigon.types import ScoreQuestion, SystemOneRequest
+
+    request = SystemOneRequest(
+        state="s",
+        questions={
+            "q": ScoreQuestion(instructions="Rate.", levels=[{"name": str(i)} for i in range(3)])
+        },
+    )
+    tied = Case("c", request, {"q": Expectation(label=2, distribution=(0.5, 0.0, 0.5))})
+    plain = Case("d", request, {"q": Expectation(label=1)})
+    rewritten = script.majority_labels([tied, plain])
+    # A tie goes to the lower rating, and the drawn label is dropped.
+    assert rewritten[0].expected["q"].label == 0
+    assert rewritten[0].expected["q"].distribution is None
+    # A case without a distribution is left exactly as it was.
+    assert rewritten[1] == plain

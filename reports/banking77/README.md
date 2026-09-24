@@ -43,6 +43,30 @@ are 89 MiB each and are not committed (`*.pt` is ignored); they live on the
 `trigon-runs` Modal Volume and are fetched with
 `python scripts/modal_train.py collect banking77-qwen15b-e4-lr1e-4-872ed726edcd-20260923T145427 --models`.
 
+### Re-gated under the revised calibrator rule — `qwen15b-e4-lr1e-4-regate080-seed*`
+
+The same four checkpoints, re-calibrated and re-gated with no retraining after
+`ACCEPT_CONFIDENCE` moved from 0.95 to 0.80 (`reports/calibration/decline-power.md`).
+Commit `ca90134`, on `NVIDIA A10`, ~11 minutes a seed.
+
+| Seed | Accuracy | ECE | Adaptive ECE | Calibrator | Was |
+| ---: | ---: | ---: | ---: | --- | --- |
+| 0 | 0.9054 | **0.0202** | 0.0112 | isotonic (check 0.0486 → 0.0261) | declined, 0.0489 |
+| 1 | 0.8980 | 0.0448 | 0.0445 | declined (check 0.0420 → 0.0318) | declined, 0.0448 |
+| 2 | 0.9038 | 0.0216 | 0.0216 | isotonic | unchanged |
+| 3 | 0.8502 | 0.0105 | 0.0106 | isotonic | unchanged |
+
+**Median ECE 0.0332 → 0.0209; worst 0.0489 → 0.0448; every seed still clears
+every blocking gate; median accuracy unchanged at 0.9009.** Seed 0 -- the seed
+whose map was declined at a check that halved its error -- now ships
+calibrated. Seed 1 is still declined: its check improved by a quarter, which
+at 500 answers does not reach 80% of resamples either. The simulation
+predicted exactly that trade (at 0.80 a mildly overconfident head is
+sometimes still declined, and never past the gate).
+
+Seeds 2 and 3 reproduce their original rows to four decimals: same weights,
+same evaluation. The deployed model is seed 2 and does not change.
+
 ### Deployed
 
 Seed 2 is served at **`https://jbeck018--trigon-serve-gateway.modal.run`**
