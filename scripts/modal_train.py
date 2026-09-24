@@ -257,12 +257,19 @@ def launch(args) -> None:
             f"{GPU_LIMIT}; {busy + len(seeds) - GPU_LIMIT} of these seeds will queue "
             "until earlier ones finish"
         )
+    # One deployed app per commit. Queued inputs go to any warm container of
+    # the app they were spawned on, including one left from the previous
+    # deploy, and that container runs the previous deploy's code: four seeds
+    # launched at one commit once ran on another's containers, while their
+    # reports would have named the launch's commit. A per-commit name makes
+    # the recorded commit the only code that can pick the input up.
+    deployed = f"{APP_NAME}-{commit[:12]}" + ("-dirty" if dirty else "")
     with modal.enable_output():
-        app.deploy(name=APP_NAME)
-    job = modal.Function.from_name(APP_NAME, "train_one").with_options(gpu=args.gpu)
+        app.deploy(name=deployed)
+    job = modal.Function.from_name(deployed, "train_one").with_options(gpu=args.gpu)
     calls = {seed: job.spawn(args.corpus, seed, flags, run).object_id for seed in seeds}
 
-    print(f"{args.corpus}: seeds {seeds}, gpu={args.gpu}, commit {commit[:12]}")
+    print(f"{args.corpus}: seeds {seeds}, gpu={args.gpu}, commit {commit[:12]}, app {deployed}")
     print(f"flags: {' '.join(flags)}")
     print(f"run id {run_id}")
     print(json.dumps({"run_id": run_id, "calls": calls}))
