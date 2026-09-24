@@ -11,6 +11,27 @@ next, and what each step would have to show to count.
 
 ---
 
+## Where it stands, 2026-09-24
+
+| Item | State |
+| --- | --- |
+| A.1 Banking77 | ✅ **Certified twice** — the spike at 0.7248, then Qwen2.5-1.5B at **0.9009**, four seeds, every blocking gate (`reports/banking77/`). Deployed behind auth |
+| A.2 annotator distributions | ✅ **Built and measured.** HelpSteer2's per-annotator split; the model is calibrated against a random annotator and the soft targets are shown to be why (`reports/helpsteer2-annotators/`). Its accuracy gate cannot be passed by any predictor on this data — a gate decision, open |
+| A.3 real backbone | ✅ **Done.** All three synthetic questions certify on four seeds, `size` included (`reports/synthetic/`) |
+| A.4 CI's hardware | Blocked on Actions billing |
+| A.5 length bucketing | Implemented; its before/after timing is still owed |
+| B.1 L4 burn-in | Written and handed over (`scripts/burn_in.py`); needs a rented L4 |
+| B.2 / B.3 | Done |
+| C.1 publish weights | **Unblocked by A.3.** Outward-facing and licence-bearing; waits on a decision |
+| C.2 / C.3 | Done |
+
+Two findings changed what a number means here. **The calibrator's accept
+threshold is 0.80, not 0.95** — at 77 classes the old one shipped certified
+heads raw (`reports/calibration/decline-power.md`). **Argmax accuracy is the
+wrong instrument for rating data**: HelpSteer2's annotators predict each other
+at +0.021 over the marginal, so every corpus report now prints the marginal's
+Brier and NLL beside the gates (`reports/helpsteer2/ceiling.md`).
+
 ## What the last plan actually established
 
 | Stage | State |

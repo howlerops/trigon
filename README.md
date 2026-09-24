@@ -267,9 +267,26 @@ it recorded as blocked that were not blocked by what they said.
 `docs/compat.md` is the drop-in claim in detail: what the adapter translates,
 where it is lossy and why, and what wire compatibility does *not* buy.
 
-The shortest honest summary: the calibration layer is ahead of the model, the
-economic case rests on one unmeasured number, and a well-calibrated wrong
-answer is the worst thing this project could ship.
+The shortest honest summary: the model has caught up with the calibration
+layer, the economic case still rests on one unmeasured number, and a
+well-calibrated wrong answer is still the worst thing this project could ship.
+
+## What a real model does
+
+The reference model is a spike. Put Qwen2.5-1.5B under the same layout,
+mask and heads — a frozen backbone with LoRA adapters, its forward written
+in-repo and bit-identical to `transformers` — and:
+
+- **Banking77 certifies at 90.1%** median accuracy over four seeds against the
+  spike's 72.5%, every seed through every blocking gate, median ECE 0.0209
+  (`reports/banking77/`). It is deployed behind an API key
+  (`modal deploy scripts/modal_serve.py`).
+- **Every synthetic question is learned**, including `size`, which seven
+  interventions on the spike never moved (`reports/synthetic/`).
+- **Trained on HelpSteer2's per-annotator ratings it is calibrated against a
+  random annotator** — raw ECE 0.0096 — while the same model trained on the
+  majority vote is off by 0.0560. That is the product claim, measured on real
+  raters (`reports/helpsteer2-annotators/`).
 
 ## Layout
 
@@ -362,9 +379,10 @@ miscalibrated one certifies neither.
 
 ## Status
 
-Phase 0 of a 16-week plan: contract, scaffolding, calibration layer, eval
-harness, and a training loop that closes it. See
-[`docs/roadmap.md`](docs/roadmap.md).
+Phase 0 of a 16-week plan — contract, scaffolding, calibration layer, eval
+harness, a training loop that closes it — plus a pretrained backbone that
+certifies on real data. See [`docs/roadmap.md`](docs/roadmap.md) and, for
+where each item stands, [`docs/next.md`](docs/next.md).
 
 ## Licence
 

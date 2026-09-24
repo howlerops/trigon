@@ -15,6 +15,13 @@ spike — 128-wide, two layers, a hashing tokenizer — so its accuracy is not a
 result; that the gates are exercised by a model rather than asserted about one
 is.
 
+**The model that produces results is Qwen2.5-1.5B** under the same layout,
+mask and heads (`trigon.backends.qwen_readout`, `--backbone qwen2.5-1.5b`),
+trained on Modal (`scripts/modal_train.py`). It certifies Banking77 at 90%,
+learns every synthetic question the spike could not, and — trained on
+annotator distributions — is calibrated against how real raters disagree.
+The spike stays as the CPU-sized model the tests and CI run.
+
 ## Ground rules
 
 **Calibration is the product.** ECE numbers, reliability diagrams and the eval
