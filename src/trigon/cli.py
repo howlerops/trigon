@@ -493,7 +493,23 @@ def _scaled(logits: list[float], temperature: float) -> list[float]:
 #: rather than a preference -- `scripts/decline_rule.py` scores three rules
 #: against heads whose true calibration is known. See `docs/decisions.md`,
 #: "A temperature is a proposal, not a result".
-ACCEPT_CONFIDENCE = 0.95
+#:
+#: **0.80, not 0.95, and the 0.95 shipped a certified model at the edge of its
+#: gate.** On a 77-way head at ~90% accuracy the check is 500 answers, where a
+#: perfectly calibrated head already reads ECE 0.02-0.03, and 95% of paired
+#: resamples is more power than that check has: the certified Banking77 model
+#: declined an isotonic map on two seeds of four whose held-out check read
+#: 0.0486 -> 0.0261 and 0.0420 -> 0.0318, and shipped them raw at 0.0489 and
+#: 0.0448. `scripts/decline_power.py` runs this exact rule on 77-way heads of
+#: known calibration: worst-case gate error over five shapes 0.0844 at 0.95,
+#: 0.0438 at 0.80 -- the only threshold that keeps every shape under 0.05 --
+#: for 0.0259 against 0.0197 on a head that was calibrated to begin with.
+#: At four classes (`scripts/decline_rule.py`) the worst case is identical at
+#: both thresholds on all seven shapes. `reports/calibration/decline-power.md`.
+ACCEPT_CONFIDENCE = 0.80
+#: The mirror rule's threshold, kept apart so the rejected alternatives the
+#: studies score do not move when the shipped one does.
+HARM_CONFIDENCE = 0.95
 
 
 def _harm_is_real(unscaled, rescaled, labels, *, resamples: int = 200, seed: int = 4919) -> bool:
@@ -549,7 +565,7 @@ def _harm_is_real(unscaled, rescaled, labels, *, resamples: int = 200, seed: int
         a = calibration_report([unscaled[i] for i in picks], pick_labels, simulate_floor=False).ece
         b = calibration_report([rescaled[i] for i in picks], pick_labels, simulate_floor=False).ece
         worse += b > a
-    return worse >= ACCEPT_CONFIDENCE * resamples
+    return worse >= HARM_CONFIDENCE * resamples
 
 
 def _calibration_error(probs, labels) -> float:

@@ -202,6 +202,7 @@ The most useful section. Each of these was argued for before it was measured.
 | HelpSteer2 collapsed for want of data | Partly. 8.6× the data took lift from +0.0023 to +0.0189 and taught two questions of five; the three that judge quality did not move, and every seed kept its last epoch. |
 | The Python tokenizer port is faster than Rust | Only one call at a time, where the binding's per-call overhead dominates. Batched across four cores, Rust is 1.8× ahead. |
 | `modal run --detach` plus a Volume survives this VM | It keeps the app, not the calls. The container restarted twelve minutes into a 12-epoch sweep; Modal cancelled all four `starmap` inputs and nothing was written. Now deploy + `spawn`, and the launcher exits at once. |
+| Accepting a calibrator at 95% of resamples is the right burden of proof | At four classes, yes. At 77 classes on a 500-answer check it is more power than the check has: worst-case gate error 0.0844 over five known heads, three of them failing. 0.80 keeps all five under 0.05 (0.0438) and is identical at four classes. |
 | A chunk of eight fits on a 24 GB GPU | HelpSteer2's longest case is 7,171 tokens; the chunk asked a 22 GiB A10 for 6.13 GiB at once and died four minutes in. |
 
 ---
@@ -323,7 +324,9 @@ what order, and how each step is known to be done.
 - ~~A pretrained backbone learns Banking77 on three seeds of four.~~
   **Closed.** At lr 3e-4 seed 2 learned for 200 steps and collapsed to ln 77
   at the peak rate; at lr 1e-4 all four seeds certify (median 0.9009).
-- **The calibrator declined a head at ECE 0.0481.** On Qwen seed 1 the
+- ~~The calibrator declined a head at ECE 0.0481.~~ **Closed: the threshold
+  was the cause, and it is 0.80 now** (`reports/calibration/decline-power.md`).
+  The history, for the record: On Qwen seed 1 the
   500-case held-out check could not show the isotonic map helped a 77-way head
   beyond its noise, and the run passed the 0.05 gate by 0.002. **Then the
   same seed, rerun, flipped:** seed 0 applied the map (ECE 0.0077) in one run
