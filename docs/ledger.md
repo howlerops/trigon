@@ -157,6 +157,7 @@ twenty-two runs** — the investigation is closed and the evidence is in
 | Certified Banking77, re-gated at `ACCEPT_CONFIDENCE` 0.80 | Median ECE 0.0332 → 0.0209, worst 0.0489 → 0.0448; seed 0 now calibrated (0.0202), seed 1 still declined (0.0448); accuracy unchanged |
 | **Banking77 on Qwen2.5-1.5B, lr 1e-4, four seeds — certified** | Every seed clears every blocking gate: accuracy 0.8502–0.9118, median 0.9009; ECE 0.0105–0.0489, median 0.0332 |
 | Banking77 on Qwen2.5-1.5B, four seeds, the spike's config | **0.9004–0.9228 on three seeds**, median 0.9065; seed 2 collapsed to chance (0.0232). ECE 0.0077–0.0481 on the three |
+| **Qwen trained on annotator distributions, four seeds** | ECE 0.0082–0.0271 against a random annotator (seed 0 within its noise floor); lift +0.018–0.024 against the annotators' own +0.021 ceiling; `helpfulness`/`correctness` +0.011–0.019 on every seed; Brier 5.4–6.6% under the marginal |
 | HelpSteer2 on Qwen2.5-1.5B at lr 1e-4, four seeds | Lift +0.0241 to +0.0288; Brier +7.9% to +8.8% over the marginal on every seed; ECE 0.0104–0.0179. No collapsed seed |
 | HelpSteer2 on Qwen2.5-1.5B, four seeds | Lift +0.0059 to +0.0327, median +0.0259 against the spike's +0.0188; `complexity` to +0.096, `verbosity` to +0.049; `helpfulness`/`correctness` up to +0.015 on two seeds, flat on two; `coherence` never moves |
 | The same seed on the same GPU type, twice | Not a replay: accuracy 0.9228 and 0.9252. GPU attention's backward is not deterministic, so a rerun is another draw |
@@ -355,6 +356,10 @@ what order, and how each step is known to be done.
   Volume. A run killed after epoch 1 and restarted in a fresh process ends
   bit-identical to an uninterrupted one on CPU (`tests/test_training.py`).
   Not yet exercised by a real preemption.
+- **Whether soft targets cause the calibrated disagreement.** The
+  distribution-trained model is calibrated against random annotators
+  (`reports/helpsteer2-annotators/README.md`); a hard-label model on the same
+  splits is the ablation that would say why, and has not run.
 - **`accuracy_over_baseline` cannot certify an annotator-distribution
   corpus.** On HelpSteer2 no predictor clears +0.05 -- the annotators do not
   (`reports/helpsteer2/ceiling.md`). `CLAUDE.md` requires every gate set to

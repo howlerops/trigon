@@ -92,6 +92,13 @@ gate set working rather than the corpus being unlearnable — the run was sized
 at 1,400 cases to fit a cloud session's idle window, where Banking77 needed
 7,083.
 
+**The annotator-distribution stream is built and measured.** Qwen2.5-1.5B on
+HelpSteer2's per-annotator ratings, soft targets, four seeds: calibrated
+against a random annotator (ECE 0.0082–0.0271) and at the annotators' own
+accuracy ceiling (`reports/helpsteer2-annotators/README.md`). It fails
+`accuracy_over_baseline`, which no predictor on this data can pass
+(`reports/helpsteer2/ceiling.md`) -- the gate question is open.
+
 **HelpSteer2 at 12,000 cases has an answer, and it is still a failure — a
 different one.** Four seeds on Modal: median lift +0.0189, range +0.0155 to
 +0.0203, where 1,400 cases gave +0.0023. `complexity` and `verbosity` learn

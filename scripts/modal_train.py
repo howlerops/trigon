@@ -179,6 +179,7 @@ def train_one(corpus: str, seed: int, flags: list[str], run: dict) -> dict:
         # Recorded, not assumed: a report whose hardware and commit are
         # unknown is not reproducible, and this is the only place that
         # information exists.
+        "corpus": corpus,
         **{k: run[k] for k in ("run_id", "prefix", "commit", "dirty", "flags")},
         "gpu_requested": run["gpu"],
         "gpu_actual": torch.cuda.get_device_name(0) if torch.cuda.is_available() else "NONE",
@@ -317,7 +318,10 @@ def collect(args) -> None:
     ]
     if not payloads:
         raise SystemExit(f"nothing on the Volume under {args.run_id} yet")
-    corpus = args.run_id.split("-", 1)[0]
+    # Recorded by the seed rather than parsed from the run id: a corpus name
+    # can contain the id's separator, and `helpsteer2-annotators` was filed
+    # under `helpsteer2` until it was.
+    corpus = payloads[0].get("corpus") or args.run_id.split("-", 1)[0]
     prefix = payloads[0]["prefix"]
     print(f"{args.run_id}: {len(payloads)} seed(s) finished")
     destination = pathlib.Path(args.out_dir) if args.out_dir else REPO / "reports" / corpus
@@ -325,7 +329,9 @@ def collect(args) -> None:
     if args.models:
         # Checkpoints are git-ignored: they land beside the reports for
         # `trigon serve --weights`, and never in a commit.
-        for name in sorted(n for n in names if n.endswith(".pt")):
+        # Models only: a resume file is four times the size and only means
+        # anything to the job that wrote it.
+        for name in sorted(n for n in names if n.endswith(".pt") and not n.endswith(".resume.pt")):
             target = destination / f"{prefix}-{pathlib.Path(name).stem}.pt"
             with target.open("wb") as out:
                 for chunk in runs.read_file(name):
