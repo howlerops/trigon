@@ -19,8 +19,15 @@ own training split:
 | Spike, 6 epochs | +5.7% | +5.2% | +5.5% | +5.2% |
 | Spike, 12 epochs | +5.7% | +5.4% | +5.6% | +5.5% |
 | Qwen2.5-1.5B, lr 3e-4 | +1.9% | +7.9% | +9.4% | +9.2% |
+| **Qwen2.5-1.5B, lr 1e-4** | **+7.9%** | **+8.6%** | **+8.8%** | **+8.5%** |
 
-Brier reduction over the marginal predictor; higher is better. Every run
+Brier reduction over the marginal predictor; higher is better. At lr 1e-4
+(`qwen15b-n12000-e3-lr1e-4-seed*`, commit `abe8888`, on A10/A10G) the weak
+seed is gone: accuracy lift +0.0241 to +0.0288, ECE 0.0104–0.0179, Brier
++7.9% to +8.8% -- the same median as lr 3e-4 with the spread a quarter of
+its width, which is the configuration to keep. `complexity` +0.08–0.10 and
+`verbosity` +0.035–0.044 on every seed; the quality questions within ±0.013
+of their marginals, as the annotators' own ceiling says they must be. Every run
 reports each response's ratings better than the population does, the
 backbone by nearly twice as much, and its one weak seed is the one that ran
 at the learning rate that collapsed a Banking77 seed. Argmax accuracy hid all

@@ -157,6 +157,7 @@ twenty-two runs** — the investigation is closed and the evidence is in
 | Certified Banking77, re-gated at `ACCEPT_CONFIDENCE` 0.80 | Median ECE 0.0332 → 0.0209, worst 0.0489 → 0.0448; seed 0 now calibrated (0.0202), seed 1 still declined (0.0448); accuracy unchanged |
 | **Banking77 on Qwen2.5-1.5B, lr 1e-4, four seeds — certified** | Every seed clears every blocking gate: accuracy 0.8502–0.9118, median 0.9009; ECE 0.0105–0.0489, median 0.0332 |
 | Banking77 on Qwen2.5-1.5B, four seeds, the spike's config | **0.9004–0.9228 on three seeds**, median 0.9065; seed 2 collapsed to chance (0.0232). ECE 0.0077–0.0481 on the three |
+| HelpSteer2 on Qwen2.5-1.5B at lr 1e-4, four seeds | Lift +0.0241 to +0.0288; Brier +7.9% to +8.8% over the marginal on every seed; ECE 0.0104–0.0179. No collapsed seed |
 | HelpSteer2 on Qwen2.5-1.5B, four seeds | Lift +0.0059 to +0.0327, median +0.0259 against the spike's +0.0188; `complexity` to +0.096, `verbosity` to +0.049; `helpfulness`/`correctness` up to +0.015 on two seeds, flat on two; `coherence` never moves |
 | The same seed on the same GPU type, twice | Not a replay: accuracy 0.9228 and 0.9252. GPU attention's backward is not deterministic, so a rerun is another draw |
 | A trained Qwen adapter, served on this VM's CPU | 12 of 12 held-out Banking77 intents; ~0.5 s a request, 284 of 323 tokens from the schema cache; 89 MiB on disk |
