@@ -691,3 +691,15 @@ def test_a_run_resumed_after_an_epoch_ends_where_an_uninterrupted_one_does(tmp_p
         straight.model.state_dict().items(), restarted.model.state_dict().items(), strict=True
     ):
         assert torch.equal(a, b), name
+
+
+def test_a_distribution_target_is_minimised_by_reporting_the_distribution():
+    """Soft cross-entropy's optimum is the annotators' own spread, not the mode."""
+    target = (0.5, 0.3, 0.2, 0.0, 0.0)
+    exact = torch.log(torch.tensor([0.5, 0.3, 0.2, 1e-9, 1e-9]))
+    confident = torch.log(torch.tensor([0.96, 0.01, 0.01, 0.01, 0.01]))
+    assert question_loss(exact, "score", 0, distribution=target) < question_loss(
+        confident, "score", 0, distribution=target
+    )
+    # Without a distribution the same call is the old hard-label loss.
+    assert question_loss(confident, "score", 0) < question_loss(exact, "score", 0)

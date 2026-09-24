@@ -261,7 +261,13 @@ def train(
                         if label is None:
                             continue
                         losses.append(
-                            question_loss(raw[qid], compiled_q.kind, label, config.ordinal)
+                            question_loss(
+                                raw[qid],
+                                compiled_q.kind,
+                                label,
+                                config.ordinal,
+                                distribution=expected.distribution,
+                            )
                         )
                     if not losses:
                         continue
@@ -492,6 +498,7 @@ def _validation_loss(backend, compiler, holdout: Sequence[Case], config: Trainin
                         q.kind,
                         case.expected[q.question_id].hard_label,
                         config.ordinal,
+                        distribution=case.expected[q.question_id].distribution,
                     )
                     for q in compiled.schema.questions
                     if case.expected.get(q.question_id) is not None

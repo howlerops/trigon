@@ -1,5 +1,34 @@
 # HelpSteer2: more data moved it off the marginal; more training and a pretrained backbone barely did
 
+## Read this first: accuracy is the wrong instrument here, and the models learned
+
+Every run below fails `accuracy_over_baseline`, and that gate cannot be
+cleared on this corpus by much of anything. `reports/helpsteer2/ceiling.md`
+measures it from the annotators themselves: an oracle that knows the *other*
+annotators' ratings of the same response predicts one annotator at **+0.021**
+over the marginal, and one half-panel predicts the other half's average at
+**−0.024**. The gate asks for +0.05 -- more agreement than the people have
+with each other.
+
+A proper scoring rule does separate the models from the population. Brier on
+the same 25,000 predictions against the marginal distribution of each seed's
+own training split:
+
+| Run | Seed 0 | Seed 1 | Seed 2 | Seed 3 |
+| --- | ---: | ---: | ---: | ---: |
+| Spike, 6 epochs | +5.7% | +5.2% | +5.5% | +5.2% |
+| Spike, 12 epochs | +5.7% | +5.4% | +5.6% | +5.5% |
+| Qwen2.5-1.5B, lr 3e-4 | +1.9% | +7.9% | +9.4% | +9.2% |
+
+Brier reduction over the marginal predictor; higher is better. Every run
+reports each response's ratings better than the population does, the
+backbone by nearly twice as much, and its one weak seed is the one that ran
+at the learning rate that collapsed a Banking77 seed. Argmax accuracy hid all
+of it, because the argmax of a five-level rating is mostly annotator noise.
+
+What follows is the accuracy record as it was written, kept because it is
+what the gates read.
+
 ## Qwen2.5-1.5B, 12,000 cases, 3 epochs, four seeds — `qwen15b-n12000-e3-seed*`
 
 The model that took Banking77 from 72% to 90%, at the same 12,000 cases the

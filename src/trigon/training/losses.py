@@ -42,15 +42,19 @@ class OrdinalConfig:
         return self.weight > 0.0
 
 
-def squared_emd(logits: torch.Tensor, label: int) -> torch.Tensor:
+def squared_emd(logits: torch.Tensor, label: int, distribution=None) -> torch.Tensor:
     """Squared earth-mover's distance between the predicted and true CDFs.
 
     Ordinal-aware: moving mass one level costs less than moving it four. Used
-    only as an auxiliary term, and only behind ``OrdinalConfig``.
+    only as an auxiliary term, and only behind ``OrdinalConfig``. Against an
+    annotator distribution when one is given, a point mass otherwise.
     """
     probs = torch.softmax(logits, dim=-1)
-    target = torch.zeros_like(probs)
-    target[label] = 1.0
+    if distribution is not None:
+        target = torch.tensor(distribution, dtype=probs.dtype, device=probs.device)
+    else:
+        target = torch.zeros_like(probs)
+        target[label] = 1.0
     return torch.sum((torch.cumsum(probs, dim=-1) - torch.cumsum(target, dim=-1)) ** 2)
 
 
@@ -59,13 +63,28 @@ def question_loss(
     kind: str,
     label: int,
     ordinal: OrdinalConfig | None = None,
+    distribution=None,
 ) -> torch.Tensor:
     """Loss for one question's head.
 
     Choice and Score use categorical cross-entropy over the declared labels;
     Noul uses binary cross-entropy on its single logit. Both are the log
     scoring rule, so a model that reports honest probabilities minimises them.
+
+    With an annotator ``distribution`` the target is that distribution rather
+    than one label: cross-entropy against it is minimised by reporting it, so
+    a model trained this way learns how much people disagree -- where the hard
+    label teaches it to be as sure as the majority, which is the confident
+    wrong answer the product exists to avoid.
     """
+    if distribution is not None and kind != "noul":
+        target = torch.tensor(distribution, dtype=logits.dtype, device=logits.device)
+        loss = -(target * torch.log_softmax(logits, dim=-1)).sum()
+        if kind == "score" and ordinal is not None and ordinal.enabled:
+            loss = (1.0 - ordinal.weight) * loss + ordinal.weight * squared_emd(
+                logits, label, distribution
+            )
+        return loss
     if kind == "noul":
         target = torch.tensor([float(label)], dtype=logits.dtype, device=logits.device)
         return nn.functional.binary_cross_entropy_with_logits(logits, target)

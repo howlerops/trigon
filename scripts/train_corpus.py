@@ -244,6 +244,38 @@ def baseline_accuracy(train: list, evaluation: list) -> dict[str, float]:
     return out
 
 
+def marginal_scores(train: list, evaluation: list) -> tuple[float, float]:
+    """Brier and NLL of the model that ignores its input, pooled like the suite's.
+
+    `accuracy_over_baseline` compares argmaxes, and on a corpus whose labels
+    are single annotators it cannot be cleared by anything -- an oracle that
+    knows the other annotators' ratings of the same response reaches +0.021
+    on HelpSteer2 (`reports/helpsteer2/ceiling.md`). A proper scoring rule
+    still separates a model that reports each response's spread of opinion
+    from one that reports the population's, so the report states what the
+    population's scores: the per-question label distribution of the training
+    split, add-one smoothed, scored on the evaluation labels. Reported beside
+    the gates, not as one.
+    """
+    from trigon.calibration.metrics import brier, negative_log_likelihood
+
+    probs, labels = [], []
+    for qid in train[0].expected:
+        counts: dict[int, int] = {}
+        for case in train:
+            label = case.expected[qid].label
+            counts[label] = counts.get(label, 0) + 1
+        levels = max(max(counts) + 1, len(counts))
+        for case in evaluation:
+            levels = max(levels, case.expected[qid].label + 1)
+        total = sum(counts.values()) + levels
+        marginal = [(counts.get(k, 0) + 1) / total for k in range(levels)]
+        for case in evaluation:
+            probs.append(marginal)
+            labels.append(case.expected[qid].label)
+    return brier(probs, labels), negative_log_likelihood(probs, labels)
+
+
 def header(
     spec, args, train, calibration, evaluation, marginal, topped_up: int, hardware: str = ""
 ) -> str:
@@ -275,6 +307,18 @@ def header(
             "| Question | Marginal predictor |",
             "| --- | ---: |",
             *(f"| `{qid}` | {value:.4f} |" for qid, value in sorted(marginal.items())),
+            "",
+            "| Marginal predictor, pooled | Brier | NLL |",
+            "| --- | ---: | ---: |",
+            "| {} | {:.4f} | {:.4f} |".format(
+                "ignores its input", *marginal_scores(train, evaluation)
+            ),
+            "",
+            "A proper scoring rule, where argmax accuracy cannot separate a model",
+            "from the population: compare the model's Brier in the Suites table.",
+            "",
+            "| | |",
+            "| --- | ---: |",
             f"| Epochs | {args.epochs} |",
             f"| Seed | {args.seed} |",
             *([f"| Device | {hardware} |"] if hardware else []),

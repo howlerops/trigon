@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import csv
 import gzip
+import hashlib
 import json
 import os
 import pathlib
@@ -95,6 +96,21 @@ class CorpusSpec:
     # heading. A record is state; flattening it loses which part was which.
     state_fields: tuple[str, ...] = ()
     per_question_instructions: dict[str, str] = field(default_factory=dict)
+    # -- Annotator-distribution corpora ------------------------------------
+    # Each rating field holds every annotator's rating as a list rather than
+    # one aggregated integer. The expectation carries the empirical
+    # distribution, which is what training fits, and one annotator drawn at
+    # random per case as the label the gates score against -- a model whose
+    # probabilities match annotator disagreement is calibrated against a
+    # random annotator by definition, so the existing gates test exactly the
+    # claim this data exists for.
+    annotator_lists: bool = False
+    # A corpus shipped as one file is split here, by a hash of the field named
+    # below, with this share held out as "test". Hashing the *prompt* rather
+    # than the row keeps every response to one prompt on one side: several
+    # share a prompt, and a row-level split would test on prompts it trained on.
+    holdout_fraction: float = 0.0
+    holdout_key: str = "prompt"
 
     def permits(self, purpose: Purpose) -> bool:
         return purpose in _PERMITS[self.tier]
@@ -159,7 +175,36 @@ HELPSTEER2 = CorpusSpec(
     },
 )
 
-CORPORA: dict[str, CorpusSpec] = {c.name: c for c in (BANKING77, HELPSTEER2)}
+HELPSTEER2_ANNOTATORS = CorpusSpec(
+    name="helpsteer2-annotators",
+    primitive="score",
+    tier="green",
+    licence="CC BY 4.0",
+    attribution=HELPSTEER2.attribution,
+    files={
+        # Pinned: this split is the annotator ratings behind HelpSteer2, and a
+        # moving file under a published number is a second source of truth.
+        "all": (
+            "https://huggingface.co/datasets/nvidia/HelpSteer2/resolve/"
+            "990b2711a36180dd19d9c94b8627844866f8982a/disagreements/disagreements.jsonl.gz"
+        ),
+    },
+    instructions=HELPSTEER2.instructions,
+    # The same five questions over the same kind of state, with every
+    # annotator's rating instead of their average: 23,652 pairs, two to six
+    # annotators each. This is the annotator-distribution stream -- the one
+    # that teaches a model what disagreement looks like, which is the product.
+    score_fields=HELPSTEER2.score_fields,
+    levels=HELPSTEER2.levels,
+    state_fields=HELPSTEER2.state_fields,
+    per_question_instructions=HELPSTEER2.per_question_instructions,
+    annotator_lists=True,
+    # A quarter, so the held-out split alone clears MIN_CALIBRATION_SAMPLES
+    # and no evaluation row is topped up from training prompts.
+    holdout_fraction=0.25,
+)
+
+CORPORA: dict[str, CorpusSpec] = {c.name: c for c in (BANKING77, HELPSTEER2, HELPSTEER2_ANNOTATORS)}
 
 
 def corpus(name: str) -> CorpusSpec:
@@ -238,6 +283,12 @@ def _state(spec: CorpusSpec, row: dict[str, Any]) -> str:
     )
 
 
+def _held_out(spec: CorpusSpec, row: dict[str, Any]) -> bool:
+    key = str(row.get(spec.holdout_key) or "").strip().encode()
+    bucket = int.from_bytes(hashlib.blake2b(key, digest_size=4).digest(), "big") / 2**32
+    return bucket < spec.holdout_fraction
+
+
 def _score_cases(spec: CorpusSpec, split: str, path: pathlib.Path, limit: int | None) -> list[Case]:
     """Several ordered ratings over one piece of state, each its own question.
 
@@ -257,9 +308,30 @@ def _score_cases(spec: CorpusSpec, split: str, path: pathlib.Path, limit: int | 
     for i, row in enumerate(_records(path)):
         if limit is not None and len(cases) >= limit:
             break
+        if spec.holdout_fraction and _held_out(spec, row) != (split == "test"):
+            continue
         expected = {}
         for name in spec.score_fields:
             value = row.get(name)
+            if spec.annotator_lists:
+                ratings = value if isinstance(value, list) else []
+                if not ratings or not all(
+                    isinstance(r, int) and 0 <= r < spec.levels for r in ratings
+                ):
+                    expected = {}
+                    break
+                counts = [ratings.count(level) for level in range(spec.levels)]
+                # One annotator per case and question, fixed by the case: the
+                # outcome the gates score, drawn so a rerun draws the same one.
+                draw = int.from_bytes(
+                    hashlib.blake2b(f"{spec.name}/{i}/{name}".encode(), digest_size=4).digest(),
+                    "big",
+                )
+                expected[name] = Expectation(
+                    label=ratings[draw % len(ratings)],
+                    distribution=tuple(c / len(ratings) for c in counts),
+                )
+                continue
             # A rating outside the declared range is not clipped into it: a
             # silently clamped label trains the model on an answer nobody
             # gave. The row is dropped and the drop is visible in the count.
@@ -302,6 +374,11 @@ def load(
             f"{purpose}; docs/decisions.md section 3 has the policy"
         )
     paths = fetch(spec, root=root)
+    if spec.holdout_fraction:
+        # One file, split here by prompt; see `holdout_fraction`.
+        if split not in ("train", "test"):
+            raise KeyError(f"{spec.name} has splits 'train' and 'test'; got {split!r}")
+        paths = {split: paths["all"]}
     if split not in paths:
         raise KeyError(f"{spec.name} has no split {split!r}; it has {sorted(paths)}")
     if spec.primitive == "score":

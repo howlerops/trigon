@@ -21,7 +21,7 @@ narrative sections are a discipline, not a test.
 | Release gates | 8 |
 | Green-tier corpora in the licence audit | 9 |
 | Committed use cases | 3 |
-| Real corpora loadable | 2 |
+| Real corpora loadable | 3 |
 
 **Certified on real data: Qwen2.5-1.5B on Banking77**, LoRA rank 16, lr
 1e-4, 4 epochs — median accuracy 0.9009 against the spike's 0.7248, every seed
@@ -198,6 +198,8 @@ The most useful section. Each of these was argued for before it was measured.
 | `scripts/modal_train.py` is ready and waiting on a token | It would have trained on the CPU. Nothing in the backend or trainer moved a tensor to a device; `--gpu` was ignored; results lived only on the VM that gets reclaimed. |
 | The certified spike's Banking77 report says how it was trained | Its command line reads `--epochs 4`; its training record has 6 epochs on every seed. The header was written by a later invocation with default flags. |
 | A pretrained backbone would do for HelpSteer2 what it did for Banking77 | Qwen2.5-1.5B, four seeds: median lift +0.0259 against the spike's +0.0188. It learns the surface questions better and the quality questions barely at all. |
+| HelpSteer2's failures are the models' | The annotators' own ceiling: an oracle using the other annotators' ratings of the same response reaches +0.021 against a +0.05 gate; half-panels predict each other at −0.024. On Brier every run beats the marginal, the spike by ~5.5%, Qwen by up to 9.4%. |
+| A naive oracle puts HelpSteer2's ceiling at +0.18 | It let the labelling annotator vote for itself. Leave one out and it is +0.021. Caught before anything was built on it. |
 | HelpSteer2's spike at 12,000 cases was under-trained | 12 epochs: median lift +0.0188 against +0.0189 at 6; validation bottomed at epoch 6–11 on every seed. It is at its ceiling. |
 | HelpSteer2 collapsed for want of data | Partly. 8.6× the data took lift from +0.0023 to +0.0189 and taught two questions of five; the three that judge quality did not move, and every seed kept its last epoch. |
 | The Python tokenizer port is faster than Rust | Only one call at a time, where the binding's per-call overhead dominates. Batched across four cores, Rust is 1.8× ahead. |
@@ -340,6 +342,13 @@ what order, and how each step is known to be done.
   Volume. A run killed after epoch 1 and restarted in a fresh process ends
   bit-identical to an uninterrupted one on CPU (`tests/test_training.py`).
   Not yet exercised by a real preemption.
+- **`accuracy_over_baseline` cannot certify an annotator-distribution
+  corpus.** On HelpSteer2 no predictor clears +0.05 -- the annotators do not
+  (`reports/helpsteer2/ceiling.md`). `CLAUDE.md` requires every gate set to
+  keep a term that fails a model ignoring its input; for such corpora that
+  term would have to be a proper score against the marginal distribution
+  (Brier or NLL), which every report now prints beside the gates. Whether to
+  gate on it is a decision, not made here.
 - **$/MTok is unmeasured.** The whole cost argument beyond ~2× rests on it.
   Needs the L4 burn-in.
 - ~~The KV cache is off by default because nobody has timed it.~~ **Closed.**
