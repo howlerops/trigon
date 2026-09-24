@@ -107,6 +107,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--lora-rank", type=int, default=16)
     parser.add_argument(
+        "--hard-labels",
+        action="store_true",
+        help="train on each annotator distribution's majority vote (the ablation)",
+    )
+    parser.add_argument(
         "--resume-path",
         default=None,
         help="write a resume file each epoch and continue from it if present",
@@ -244,6 +249,30 @@ def baseline_accuracy(train: list, evaluation: list) -> dict[str, float]:
     return out
 
 
+def majority_labels(cases: list) -> list:
+    """The same cases with each annotator distribution replaced by its mode.
+
+    The ablation for `--hard-labels`: training on the majority vote instead of
+    the distribution, on identical splits, so the target is the only thing that
+    differs. Ties go to the lower rating -- a fixed rule, so two runs agree.
+    Only the training split is rewritten; calibration and evaluation keep the
+    drawn-annotator outcome both arms are scored against.
+    """
+    import dataclasses
+
+    from trigon.evals.harness import Expectation
+
+    def mode(expectation):
+        d = expectation.distribution
+        if d is None:
+            return expectation
+        return Expectation(label=max(range(len(d)), key=lambda k: (d[k], -k)))
+
+    return [
+        dataclasses.replace(c, expected={q: mode(e) for q, e in c.expected.items()}) for c in cases
+    ]
+
+
 def marginal_scores(train: list, evaluation: list) -> tuple[float, float]:
     """Brier and NLL of the model that ignores its input, pooled like the suite's.
 
@@ -335,7 +364,8 @@ def header(
             f"--d-model {args.d_model} --layers {args.layers} --seed {args.seed} "
             f"--device {args.device}"
             + (f" --backbone {args.backbone} --lora-rank {args.lora_rank}" if args.backbone else "")
-            + (f" --max-batch-cells {args.max_batch_cells}" if args.max_batch_cells else ""),
+            + (f" --max-batch-cells {args.max_batch_cells}" if args.max_batch_cells else "")
+            + (" --hard-labels" if args.hard_labels else ""),
             "```",
             "",
             *(
@@ -410,7 +440,7 @@ def main(argv: list[str] | None = None) -> int:
     if not args.weights:
         report = run_training(
             backend,
-            train,
+            majority_labels(train) if args.hard_labels else train,
             TrainingConfig(
                 epochs=args.epochs,
                 learning_rate=args.lr,
