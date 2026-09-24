@@ -32,7 +32,12 @@ noise 0.2, `--option-scoring auto`. Clears every blocking gate on all four
 seeds tried: ECE 0.0084–0.0247, adaptive 0.0153–0.0289, lift over the marginal
 predictor +0.1614 to +0.2277. Evidence in `reports/iso/`.
 
-**What the model can and cannot do.** `plan` (copy a value from the state) is
+**What the pretrained backbone does on the synthetic suite.** All three
+questions far above their marginals on four seeds of four -- `size` included,
+at +0.57–0.59, after seven failed interventions on the spike
+(`reports/synthetic/README.md`).
+
+**What the spike can and cannot do.** `plan` (copy a value from the state) is
 learned to Bayes-optimal, +0.57 lift. `at_risk` (a conjunction plus a threshold
 over 13 values) is learned on three seeds of four, +0.09. `size` (a threshold
 over 500 values) is **not learned by any of seven interventions over
@@ -161,6 +166,7 @@ twenty-two runs** — the investigation is closed and the evidence is in
 | HelpSteer2, four seeds, 12,000 cases, 12 epochs | No change from 6: lift +0.0170 to +0.0202; the same three quality questions on their marginals; ECE 0.0187–0.0232 |
 | HelpSteer2, four seeds, 12,000 cases, on a GPU | **Fails, and is no longer a collapse.** Lift +0.0189 median, +0.0155 to +0.0203; `complexity` +0.06–0.08 and `verbosity` +0.02 on every seed, `coherence`, `correctness`, `helpfulness` on their marginals; ECE 0.0082–0.0139, calibrator declined on all four |
 | `size`, across 7 interventions and 22 runs | Below its own marginal on every seed; median −0.0095 |
+| **`size` on Qwen2.5-1.5B, four seeds** | **+0.571 to +0.594 over its marginal on every seed**; `plan` +0.57–0.60, `at_risk` +0.13–0.14; every blocking gate passes; best validation loss 0.5556–0.6037 against a Bayes floor of 0.5585 |
 | Banking77 accuracy (pilot, 2 seeds) | 0.4640 / 0.4193 against a 1.8% marginal — **it transfers** |
 
 ---
@@ -181,6 +187,7 @@ The most useful section. Each of these was argued for before it was measured.
 | `size` fails because arithmetic is a non-goal | Never measured. A threshold over 13 values *is* learned. |
 | The tokenizer hid the numbers, so splitting digits fixes it | `size` did not move; two certified seeds regressed. |
 | Not enough capacity | 256×4 leaves it exactly where it was. |
+| `size` cannot be learned by this architecture | It can. On a pretrained 1.5B backbone under the same layout, mask and heads, +0.57–0.59 on four seeds of four. The spike was the bottleneck, as the last standing explanation said. |
 | The Score head was the constraint, +0.2425 proves it | Did not reproduce. The vocabulary had changed underneath. |
 | One readout slot carrying two bits is the bottleneck | A slot per level: median −0.0095. The last structural hypothesis, dead. |
 | Stage 4.1 is blocked on the incumbent's wire format | It is published. `decisions.md` had already cited that source. |
@@ -317,7 +324,10 @@ Errors that flattered the project, found by re-measuring rather than by review:
 `docs/plan.md` is the execution plan for closing these: what has to be true, in
 what order, and how each step is known to be done.
 
-- **`size` is unlearned, and the investigation is closed.** Seven
+- ~~`size` is unlearned.~~ **Closed: the backbone learns it** (+0.57–0.59, four
+  seeds of four; `reports/synthetic/README.md`). The record below stands as
+  what was true of the spike.
+- **`size` was unlearned on the spike, and the investigation is closed.** Seven
   interventions, twenty-two runs, below its own marginal on every seed
   (`reports/perlevel/README.md`). What is established is narrow: *this* model
   does not learn *this* question and six attempts to fix it inside the model

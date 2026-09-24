@@ -114,8 +114,12 @@ and the machine is a 4-core Xeon with 15 GB and no accelerator.
 **This invalidates every number in `reports/`.** Sequence it after A.1 and A.2
 so there is a real-data baseline to compare against, not only a synthetic one.
 
-🟡 **Banking77 certifies on the backbone; the synthetic half and HelpSteer2 are
-open.** Qwen2.5-1.5B with LoRA rank 16 at lr 1e-4: median accuracy 0.9009
+✅ **Done.** The synthetic suite certifies on four seeds of four with all
+three questions far above their marginals -- `size` at +0.57–0.59, where the
+spike never left it (`reports/synthetic/README.md`) -- and per-corpus ECE holds
+on Banking77 and HelpSteer2. C.1 is unblocked.
+
+**Banking77 certifies on the backbone.** Qwen2.5-1.5B with LoRA rank 16 at lr 1e-4: median accuracy 0.9009
 over four seeds, every seed through every blocking gate, against the spike's
 0.7248 (`reports/banking77/README.md`). At lr 3e-4 one seed of four collapsed
 to chance at the peak of warmup. The done-condition below also asks for the
