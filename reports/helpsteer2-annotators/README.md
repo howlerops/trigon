@@ -56,7 +56,36 @@ annotators can predict: the text carries more about a response's length and
 difficulty than a second rater's opinion does. `coherence` does not move, and
 cannot -- even the oracle is below its marginal.
 
-**Not yet established:** that the soft targets are *why*. No hard-label model
-has been trained on these splits, and the averaged-label models evaluated
-elsewhere had a different target and overlapping prompts. The ablation --
-same data, same splits, majority-vote labels -- is the next run.
+## The ablation: the soft targets are why — `qwen15b-annotators-e3-lr1e-4-hard-seed*`
+
+The same model, data, splits, calibration split, evaluation and outcome, with
+one change: each training pair's distribution replaced by its majority vote
+(`--hard-labels`, ties to the lower rating). Commit `69c626c`, four seeds on
+`NVIDIA A10`, 3.2–3.3 hours each.
+
+| Seed | Raw ECE, soft | Raw ECE, **hard** | ECE after calibrator, soft | …hard | Brier, soft | Brier, hard |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 0 | 0.0082 | **0.0432** | 0.0082 | 0.0243 | **0.5923** | 0.6020 |
+| 1 | 0.0271 | **0.0800** | 0.0271 | 0.0065 | **0.5982** | 0.5989 |
+| 2 | 0.0083 | **0.0447** | 0.0083 | 0.0126 | **0.5996** | 0.6083 |
+| 3 | 0.0110 | **0.0673** | 0.0110 | 0.0226 | **0.5989** | 0.6058 |
+| median | 0.0096 | 0.0560 | 0.0096 | 0.0176 | 0.5985 | 0.6039 |
+
+**Majority-vote training makes a confident model; distribution training makes
+a calibrated one, before any calibrator runs.** Raw ECE against a random
+annotator is six times higher on the hard-label arm, and two of its four seeds
+would fail the 0.05 gate uncalibrated. The post-hoc calibrator repairs most of
+that -- which is what it is for -- and still leaves the hard-label model
+behind on the proper score: soft targets win Brier on **all four seeds**. The
+distribution arm never needed its calibrator at all.
+
+The quality questions follow: on the hard-label arm `helpfulness` and
+`correctness` move on three seeds and sit on the marginal on the fourth
+(+0.0015, −0.0015); on the distribution arm they move on all four. Accuracy
+lift is +0.0188 median against +0.0207 -- both at the annotators' ceiling,
+because that is where accuracy stops meaning anything here.
+
+This is the contract's own reasoning, measured rather than asserted:
+`Expectation.distribution` was documented as "the whole point of that data
+stream", and a model trained on hard labels "learns to be confident; a model
+trained on annotator disagreement learns what disagreement looks like."
