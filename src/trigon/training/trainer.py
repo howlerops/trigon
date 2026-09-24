@@ -26,6 +26,7 @@ import sys
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import torch
 
@@ -68,6 +69,13 @@ class TrainingConfig:
     #: allocation and died four minutes in. A CPU has the same problem with
     #: more room, which is why this is off by default rather than tuned for it.
     max_batch_cells: int | None = None
+    #: A file to write at the end of every epoch and to resume from if it
+    #: exists: the trainable weights, the optimizer, the step, the RNG state,
+    #: the best epoch so far and the per-epoch reports. A preempted GPU
+    #: container restarts its seed from the top, and before this existed three
+    #: seeds in one day went back to step 0 -- up to two hours each. With it,
+    #: a preemption costs at most the epoch in flight.
+    resume_path: str | None = None
     grad_clip: float = 1.0
     seed: int = 0
     ordinal: OrdinalConfig = field(default_factory=OrdinalConfig)
@@ -190,7 +198,28 @@ def train(
     counted_questions = 0
     best: tuple[float, int, dict] | None = None
 
-    for epoch in range(config.epochs):
+    first_epoch = 0
+    if config.resume_path and Path(config.resume_path).exists():
+        saved = torch.load(config.resume_path, map_location="cpu", weights_only=False)
+        model.load_state_dict(
+            {k: v.to(next(model.parameters()).device) for k, v in saved["weights"].items()},
+            strict=False,
+        )
+        optimizer.load_state_dict(saved["optimizer"])
+        rng.setstate(saved["rng"])
+        order = saved["order"]
+        step = saved["step"]
+        best = saved["best"]
+        counted_questions = saved["counted_questions"]
+        epoch_reports = [EpochReport(**e) for e in saved["epochs"]]
+        first_epoch = len(epoch_reports)
+        print(
+            f"  resuming after epoch {first_epoch}/{config.epochs} from {config.resume_path}",
+            file=sys.stderr,
+            flush=True,
+        )
+
+    for epoch in range(first_epoch, config.epochs):
         rng.shuffle(order)
         epoch_started = time.perf_counter()
         total, seen = 0.0, 0
@@ -295,6 +324,18 @@ def train(
             file=sys.stderr,
             flush=True,
         )
+        if config.resume_path:
+            _write_resume(
+                config.resume_path,
+                model,
+                optimizer,
+                rng,
+                order,
+                step,
+                best,
+                counted_questions,
+                epoch_reports,
+            )
 
     kept = len(epoch_reports)
     if best is not None and best[1] != kept:
@@ -322,6 +363,42 @@ def train(
         n_questions=counted_questions,
         seconds=time.perf_counter() - started,
     )
+
+
+def _write_resume(path, model, optimizer, rng, order, step, best, counted, reports) -> None:
+    """Everything a restarted process needs to continue, written atomically.
+
+    Written beside itself and renamed, so a container killed mid-write leaves
+    the previous epoch's file rather than half of this one.
+    """
+    trainable = {name for name, p in model.named_parameters() if p.requires_grad}
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    partial = target.with_suffix(target.suffix + ".partial")
+    torch.save(
+        {
+            "weights": {
+                k: v.detach().cpu() for k, v in model.state_dict().items() if k in trainable
+            },
+            "optimizer": optimizer.state_dict(),
+            "rng": rng.getstate(),
+            "order": list(order),
+            "step": step,
+            "best": best,
+            "counted_questions": counted,
+            "epochs": [
+                {
+                    "epoch": e.epoch,
+                    "mean_loss": e.mean_loss,
+                    "seconds": e.seconds,
+                    "validation_loss": e.validation_loss,
+                }
+                for e in reports
+            ],
+        },
+        partial,
+    )
+    partial.replace(target)
 
 
 @torch.no_grad()

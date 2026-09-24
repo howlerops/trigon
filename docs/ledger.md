@@ -330,11 +330,13 @@ what order, and how each step is known to be done.
   and declined it (ECE 0.0473) in another. On a 77-way head that check sits
   at the edge of its noise, so whether a model ships calibrated is close to a
   coin toss. The rule did what it says; the rule is what is open.
-- **Preemption costs a whole seed.** Three Modal containers were preempted
-  today and each restarted its seed from step 0, because training does not
-  checkpoint mid-run -- up to two hours of a HelpSteer2 seed each time.
-  Resuming from a per-epoch checkpoint on the Volume would bound it to one
-  epoch.
+- ~~Preemption costs a whole seed.~~ **Closed in code.** Three Modal
+  containers restarted their seeds from step 0 on the first day, up to two
+  hours each. The trainer now writes a resume file every epoch and continues
+  from it (`TrainingConfig.resume_path`); every Modal seed gets its own on the
+  Volume. A run killed after epoch 1 and restarted in a fresh process ends
+  bit-identical to an uninterrupted one on CPU (`tests/test_training.py`).
+  Not yet exercised by a real preemption.
 - **$/MTok is unmeasured.** The whole cost argument beyond ~2× rests on it.
   Needs the L4 burn-in.
 - ~~The KV cache is off by default because nobody has timed it.~~ **Closed.**

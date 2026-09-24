@@ -107,6 +107,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--lora-rank", type=int, default=16)
     parser.add_argument(
+        "--resume-path",
+        default=None,
+        help="write a resume file each epoch and continue from it if present",
+    )
+    parser.add_argument(
         "--max-batch-cells",
         type=int,
         default=0,
@@ -370,6 +375,7 @@ def main(argv: list[str] | None = None) -> int:
                 log_every=args.log_every,
                 validation_fraction=args.validation_fraction,
                 max_batch_cells=args.max_batch_cells or None,
+                resume_path=args.resume_path,
             ),
             compiler=compiler,
         )

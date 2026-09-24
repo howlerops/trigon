@@ -119,13 +119,18 @@ def train_one(corpus: str, seed: int, flags: list[str], run: dict) -> dict:
     # to this seed's own path on the Volume, which is the only place a trained
     # model outlives the job that trained it.
     flags = list(flags)
+    # Every seed resumes from its own last finished epoch. A preempted
+    # container restarts this function from the top; without this, that meant
+    # step 0 -- three seeds lost up to two hours each on the first day.
+    flags += ["--resume-path", str(target / f"seed{seed}.resume.pt")]
     if "--save-model" in flags:
         flags[flags.index("--save-model") + 1] = str(target / f"seed{seed}.pt")
 
     started = time.time()
     # Streamed to the Volume as it runs, so `status` can show a live epoch
     # line instead of nothing until the seed returns.
-    with log_path.open("w") as log:
+    # Appended, so a preempted and restarted seed shows both lives in its log.
+    with log_path.open("a") as log:
         process = subprocess.Popen(
             [
                 sys.executable,

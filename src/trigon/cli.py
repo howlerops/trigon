@@ -609,6 +609,105 @@ def _help_is_real(unscaled, rescaled, labels, *, resamples: int = 200, seed: int
     return counted > 0 and better >= ACCEPT_CONFIDENCE * counted
 
 
+def _choose_calibrator(primitive, data, scaler, isotonic) -> str:
+    """Fit both calibrators on half of ``data``, check on the other half, apply one or neither.
+
+    The per-primitive decision `_fit_calibration` makes, taken out of it so
+    that a study can call exactly the rule that ships -- `scripts/decline_power.py`
+    scores it on heads whose true calibration is known. Mutates ``scaler`` and
+    ``isotonic`` the way the decision says and returns the verdict line.
+    """
+    import math
+
+    from .calibration.isotonic import MIN_ISOTONIC_SAMPLES, IsotonicCalibrator
+
+    cut = max(1, len(data) // 2)
+    fit_rows, check_rows = data[:cut], data[cut:]
+    if not check_rows:
+        # Nothing to check on. Serve unscaled rather than apply an
+        # unverified calibrator: the failure being prevented is
+        # precisely a fit nobody checked.
+        return "none -- too few answers to check a fit on"
+
+    labels = [y for _, y in check_rows]
+    unscaled = [_scaled(x, 1.0) for x, _ in check_rows]
+    baseline = _calibration_error(unscaled, labels)
+
+    # Candidate 1: a temperature.
+    if primitive == "noul":
+        value = scaler.fit_binary([r[0][1] - r[0][0] for r in fit_rows], [y for _, y in fit_rows])
+    else:
+        value = scaler.fit(primitive, [x for x, _ in fit_rows], [y for _, y in fit_rows])
+    warmed = [_scaled(x, value) for x, _ in check_rows]
+    warm_ece = _calibration_error(warmed, labels)
+    warm_ok = _help_is_real(unscaled, warmed, labels)
+
+    # Candidate 2: an isotonic map, where there is enough data for one.
+    # `fit` refuses below its minimum rather than memorising the split.
+    iso_ok, iso_ece, mapped = False, float("nan"), None
+    if len(fit_rows) >= MIN_ISOTONIC_SAMPLES:
+        candidate = IsotonicCalibrator()
+        fit_probs = [_scaled(x, 1.0) for x, _ in fit_rows]
+        if primitive == "noul":
+            # A Noul is calibrated on P(yes) against whether yes
+            # happened -- the standard binary calibration, and the
+            # quantity the engine actually maps at serving time.
+            #
+            # It was fitted on max(p) against correctness, which lives
+            # in [0.5, 1], and applied to P(yes), which lives in
+            # [0, 1]. Every answer below even odds fell off the left
+            # end of the fitted range and took the leftmost knot. That
+            # is the same shape of defect as compiling with one
+            # tokenizer and running tensors built by another, and it
+            # cost a factor of thirteen: this head's ECE read 0.3313
+            # against 0.0251 unscaled.
+            candidate.fit(
+                primitive,
+                [p[1] for p in fit_probs],
+                [int(y == 1) for _, y in fit_rows],
+            )
+        else:
+            candidate.fit(
+                primitive,
+                [max(p) for p in fit_probs],
+                [
+                    int(max(range(len(p)), key=lambda i: p[i]) == y)
+                    for p, (_, y) in zip(fit_probs, fit_rows, strict=True)
+                ],
+            )
+        mapped = (
+            [
+                [
+                    1.0 - candidate.confidence(primitive, p[1]),
+                    candidate.confidence(primitive, p[1]),
+                ]
+                for p in unscaled
+            ]
+            if primitive == "noul"
+            else [candidate.apply(primitive, p) for p in unscaled]
+        )
+        iso_ece = _calibration_error(mapped, labels)
+        iso_ok = _help_is_real(unscaled, mapped, labels)
+
+    # Prefer whichever helps more, among those that demonstrably help.
+    if iso_ok and (not warm_ok or iso_ece < warm_ece):
+        isotonic.knots[primitive] = candidate.knots[primitive]
+        isotonic.fitted_on[primitive] = candidate.fitted_on[primitive]
+        scaler.primitive.pop(primitive, None)
+        scaler.fitted_on.pop(primitive, None)
+        return f"isotonic ({baseline:.4f} -> {iso_ece:.4f})"
+    elif warm_ok:
+        return f"temperature T={value:.4f} ({baseline:.4f} -> {warm_ece:.4f})"
+    else:
+        # `fitted_on` is what a reader checks to see whether a
+        # primitive was calibrated at all, so a declined fit must not
+        # leave a count behind claiming it was.
+        scaler.primitive.pop(primitive, None)
+        scaler.fitted_on.pop(primitive, None)
+        best = warm_ece if math.isnan(iso_ece) else min(warm_ece, iso_ece)
+        return f"none -- unscaled is {baseline:.4f}, the best fit {best:.4f}"
+
+
 def _fit_calibration(engine, cases):
     """Fit both calibrators per primitive and apply whichever demonstrably helps.
 
@@ -646,7 +745,7 @@ def _fit_calibration(engine, cases):
     import math
     import warnings
 
-    from .calibration.isotonic import MIN_ISOTONIC_SAMPLES, IsotonicCalibrator
+    from .calibration.isotonic import IsotonicCalibrator
     from .calibration.temperature import CalibrationWarning, TemperatureScaler
     from .evals import run_cases
 
@@ -671,94 +770,7 @@ def _fit_calibration(engine, cases):
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always", CalibrationWarning)
         for primitive, data in sorted(rows.items()):
-            cut = max(1, len(data) // 2)
-            fit_rows, check_rows = data[:cut], data[cut:]
-            if not check_rows:
-                # Nothing to check on. Serve unscaled rather than apply an
-                # unverified calibrator: the failure being prevented is
-                # precisely a fit nobody checked.
-                chosen[primitive] = "none -- too few answers to check a fit on"
-                continue
-
-            labels = [y for _, y in check_rows]
-            unscaled = [_scaled(x, 1.0) for x, _ in check_rows]
-            baseline = _calibration_error(unscaled, labels)
-
-            # Candidate 1: a temperature.
-            if primitive == "noul":
-                value = scaler.fit_binary(
-                    [r[0][1] - r[0][0] for r in fit_rows], [y for _, y in fit_rows]
-                )
-            else:
-                value = scaler.fit(primitive, [x for x, _ in fit_rows], [y for _, y in fit_rows])
-            warmed = [_scaled(x, value) for x, _ in check_rows]
-            warm_ece = _calibration_error(warmed, labels)
-            warm_ok = _help_is_real(unscaled, warmed, labels)
-
-            # Candidate 2: an isotonic map, where there is enough data for one.
-            # `fit` refuses below its minimum rather than memorising the split.
-            iso_ok, iso_ece, mapped = False, float("nan"), None
-            if len(fit_rows) >= MIN_ISOTONIC_SAMPLES:
-                candidate = IsotonicCalibrator()
-                fit_probs = [_scaled(x, 1.0) for x, _ in fit_rows]
-                if primitive == "noul":
-                    # A Noul is calibrated on P(yes) against whether yes
-                    # happened -- the standard binary calibration, and the
-                    # quantity the engine actually maps at serving time.
-                    #
-                    # It was fitted on max(p) against correctness, which lives
-                    # in [0.5, 1], and applied to P(yes), which lives in
-                    # [0, 1]. Every answer below even odds fell off the left
-                    # end of the fitted range and took the leftmost knot. That
-                    # is the same shape of defect as compiling with one
-                    # tokenizer and running tensors built by another, and it
-                    # cost a factor of thirteen: this head's ECE read 0.3313
-                    # against 0.0251 unscaled.
-                    candidate.fit(
-                        primitive,
-                        [p[1] for p in fit_probs],
-                        [int(y == 1) for _, y in fit_rows],
-                    )
-                else:
-                    candidate.fit(
-                        primitive,
-                        [max(p) for p in fit_probs],
-                        [
-                            int(max(range(len(p)), key=lambda i: p[i]) == y)
-                            for p, (_, y) in zip(fit_probs, fit_rows, strict=True)
-                        ],
-                    )
-                mapped = (
-                    [
-                        [
-                            1.0 - candidate.confidence(primitive, p[1]),
-                            candidate.confidence(primitive, p[1]),
-                        ]
-                        for p in unscaled
-                    ]
-                    if primitive == "noul"
-                    else [candidate.apply(primitive, p) for p in unscaled]
-                )
-                iso_ece = _calibration_error(mapped, labels)
-                iso_ok = _help_is_real(unscaled, mapped, labels)
-
-            # Prefer whichever helps more, among those that demonstrably help.
-            if iso_ok and (not warm_ok or iso_ece < warm_ece):
-                isotonic.knots[primitive] = candidate.knots[primitive]
-                isotonic.fitted_on[primitive] = candidate.fitted_on[primitive]
-                scaler.primitive.pop(primitive, None)
-                scaler.fitted_on.pop(primitive, None)
-                chosen[primitive] = f"isotonic ({baseline:.4f} -> {iso_ece:.4f})"
-            elif warm_ok:
-                chosen[primitive] = f"temperature T={value:.4f} ({baseline:.4f} -> {warm_ece:.4f})"
-            else:
-                # `fitted_on` is what a reader checks to see whether a
-                # primitive was calibrated at all, so a declined fit must not
-                # leave a count behind claiming it was.
-                scaler.primitive.pop(primitive, None)
-                scaler.fitted_on.pop(primitive, None)
-                best = warm_ece if math.isnan(iso_ece) else min(warm_ece, iso_ece)
-                chosen[primitive] = f"none -- unscaled is {baseline:.4f}, the best fit {best:.4f}"
+            chosen[primitive] = _choose_calibrator(primitive, data, scaler, isotonic)
 
     for primitive, verdict in sorted(chosen.items()):
         print(f"  {primitive}: {verdict}", file=sys.stderr)

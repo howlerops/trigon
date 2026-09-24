@@ -648,3 +648,46 @@ def test_a_step_split_to_fit_memory_is_the_same_step(monkeypatch):
     assert len(steps["whole"]) == len(steps["split"]) == 8
     for whole, split in zip(steps["whole"], steps["split"], strict=True):
         assert (whole - split).norm() <= 1e-5 * whole.norm()
+
+
+def test_a_run_resumed_after_an_epoch_ends_where_an_uninterrupted_one_does(tmp_path):
+    """Preemption resume: kill after epoch 1, restart, and nothing differs.
+
+    On CPU the arithmetic is deterministic, so the resumed run's weights and
+    per-epoch record must equal the uninterrupted run's exactly -- the order,
+    the RNG, the optimizer moments and the learning-rate step all carried over.
+    """
+    cases = synthetic_outcome_cases(n=60, seed=0, noise=0.2)
+    straight = _tiny_backend()
+    report = train(straight, cases, TrainingConfig(epochs=2, accumulate=8, learning_rate=1e-2))
+
+    path = tmp_path / "resume.pt"
+    killed = _tiny_backend()
+    config = TrainingConfig(epochs=2, accumulate=8, learning_rate=1e-2, resume_path=str(path))
+    import trigon.training.trainer as trainer_module
+
+    real_write = trainer_module._write_resume
+
+    class Killed(Exception):
+        pass
+
+    def write_then_die(*args, **kwargs):
+        real_write(*args, **kwargs)
+        raise Killed
+
+    trainer_module._write_resume = write_then_die
+    try:
+        with pytest.raises(Killed):
+            train(killed, cases, config)
+    finally:
+        trainer_module._write_resume = real_write
+
+    restarted = _tiny_backend()  # a fresh process: nothing but the file survives
+    resumed = train(restarted, cases, config)
+
+    assert [e.mean_loss for e in resumed.epochs] == [e.mean_loss for e in report.epochs]
+    assert resumed.kept_epoch == report.kept_epoch
+    for (name, a), (_, b) in zip(
+        straight.model.state_dict().items(), restarted.model.state_dict().items(), strict=True
+    ):
+        assert torch.equal(a, b), name
