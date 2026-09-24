@@ -124,6 +124,9 @@ def train_one(corpus: str, seed: int, flags: list[str], run: dict) -> dict:
     # container restarts this function from the top; without this, that meant
     # step 0 -- three seeds lost up to two hours each on the first day.
     flags += ["--resume-path", str(target / f"seed{seed}.resume.pt")]
+    # `--weights /runs/<run>/seed{seed}.pt` re-gates each seed's own
+    # checkpoint rather than one file for all four.
+    flags = [f.replace("{seed}", str(seed)) for f in flags]
     if "--save-model" in flags:
         flags[flags.index("--save-model") + 1] = str(target / f"seed{seed}.pt")
 
