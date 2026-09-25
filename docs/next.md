@@ -67,7 +67,9 @@ thing has been **checked** or is **assumed**.
 
 This is now the only thing standing between the project and a usable product.
 Wire, envelope, calibration machinery, gates and migration tooling are all
-built; the model answers one synthetic question of three.
+built; the model answers one synthetic question of three. *(Written before
+A.3. The backbone now answers all three, and A.1–A.3 are done: see the table
+at the top.)*
 
 **A.1 Certify Banking77 on a seed spread.** A two-seed pilot is measured and
 `accuracy_over_baseline` passes enormously: +0.4460 and +0.4027 against a

@@ -20,7 +20,7 @@ five obligations, and only the first is close to met:
 | Obligation | State |
 | --- | --- |
 | **Wire compatibility** — same request and response shapes | Built: `docs/compat.md`, both paths asserted identical ✓ |
-| **Semantic compatibility** — the same input yields a usable answer | Model answers one question of three well |
+| **Semantic compatibility** — the same input yields a usable answer | The spike answered one question of three. Qwen2.5-1.5B answers all three and certifies Banking77 at 0.90. Agreement with an incumbent on real traffic is unmeasured |
 | **Envelope compatibility** — accepts anything they accept | `COMPAT_BUDGET` reproduces their limits exactly ✓ |
 | **Operational compatibility** — latency and availability they can deploy on | Gateway measured; no model server, no KV cache |
 | **Economic compatibility** — cheaper, provably | Token layout buys ~2×; $/token unmeasured |
