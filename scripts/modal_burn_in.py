@@ -18,6 +18,7 @@ it -- the model the deployment serves.
 
 from __future__ import annotations
 
+import os
 import pathlib
 import subprocess
 import sys
@@ -32,12 +33,17 @@ MODAL_L4_USD_PER_HOUR = 0.80
 
 
 def _git(*args: str) -> str:
-    return subprocess.run(
-        ["git", *args], cwd=REPO, capture_output=True, text=True, check=True
-    ).stdout.strip()
+    # Modal imports this file again inside the container, which has no git and
+    # no .git; there the image's environment already carries the answer.
+    try:
+        return subprocess.run(
+            ["git", *args], cwd=REPO, capture_output=True, text=True, check=True
+        ).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        return ""
 
 
-COMMIT = _git("rev-parse", "HEAD")
+COMMIT = _git("rev-parse", "HEAD") or os.environ.get("TRIGON_COMMIT", "unknown")
 # Tracked changes only: an untracked file is not part of the commit named.
 DIRTY = bool(_git("status", "--porcelain", "--untracked-files=no"))
 
@@ -67,7 +73,6 @@ weights = modal.Volume.from_name("trigon-weights")
 
 @app.function(image=image, gpu="L4", volumes={"/runs": runs, "/weights": weights}, timeout=3600)
 def burn_in() -> dict[str, str]:
-    import os
     import pathlib as p
 
     out = p.Path("/tmp/burn-in")
