@@ -80,6 +80,7 @@ Rows marked *unchecked* keep the plan's assumption and are still blockers.
 | ChaosNLI | annotator distributions | **no licence field found** | **red** | HF mirror carries no licence |
 | Civil Comments | Noul/Score soft labels | CC0-1.0 | **green** ✓ | HF `google/civil_comments` metadata |
 | measuring_hate_speech | Score distributions | **CC BY 4.0** | **green** ⬆ | HF `ucberkeley-dlab/measuring-hate-speech` |
+| HateXplain | Choice (3) + distributions + **human rationales** | **MIT** (repository LICENSE); **CC BY 4.0** (the authors' dataset card) | **green** ✓ | `punyajoy/HateXplain` LICENSE at `01d74227`; HF `Hate-speech-CNERG/hatexplain` metadata; checked 2026-09-25 |
 | deepset prompt-injection; WildGuardMix; ToxicChat | Noul guardrails | not resolved | **amber** | cards not conclusive |
 | UFET | Choice (~10k types) | **no stated licence; distant-supervision half derives from LDC-licensed Gigaword** | **red** | UT Austin dataset page; `uwnlp/open_type` |
 | Amazon ESCI | Choice (4) | **repo licensed Apache-2.0 as a "project"; no data-specific grant** | **amber** ⬇ | `amazon-science/esci-data` LICENSE + README |
@@ -104,6 +105,7 @@ the drift tests, neither of which has a GPU stack — a Parquet reader here puts
 | GoEmotions | Parquet only | needs a conversion step in `scripts/` |
 | measuring_hate_speech | Parquet only | needs a conversion step in `scripts/` |
 | Circa | Parquet only | needs a conversion step in `scripts/` |
+| HateXplain | one JSON file at a pinned commit, SHA-256 checked | ✅ built — the rationale stream |
 
 **HelpSteer2's main split is not the distribution stream.** It carries
 aggregated integer ratings, 0–4, across five attributes. The per-annotator
@@ -117,6 +119,25 @@ cross-entropy, plus one annotator drawn per case as the outcome the gates
 score. Split by a hash of the prompt, a quarter held out, so no prompt is on
 both sides. The modal rating carries only 67–75% of annotators on any
 question — the disagreement the averaged split erases.
+
+**`hatexplain` is the one corpus whose annotators said why.** Every annotator
+who labelled a post hateful or offensive also marked the tokens that label
+rested on; the loader keeps a token when at least half of them marked it, and
+those spans are the `Expectation.rationale` the evidence head trains on and
+plausibility is scored against (`docs/architecture.md`, *Evidence*). A post
+whose majority is `normal` carries no rationale — nobody was asked — and a
+three-way split has no majority and is dropped, as the authors drop it.
+19,229 posts survive, split by a hash of the post id with a quarter held out;
+the authors' own 8:1:1 split is not used, so published HateXplain numbers are
+not directly comparable with ours.
+
+Its licence was read from both primary sources on 2026-09-25: the repository
+the file is fetched from is MIT, the authors' Hugging Face card says CC BY 4.0,
+and both are green. The caveat worth recording is the one ESCI taught: the
+posts are Twitter and Gab text, and neither source attaches platform terms to
+them. That is the same position as `measuring_hate_speech`, which is also
+social-media text and also green; if counsel reads platform terms onto either,
+both move together.
 
 Net movement: CLINC150 and measuring_hate_speech clear to **green**, DBpedia-14
 resolves to **amber**, AG News separates out as **red** (the two were one row in

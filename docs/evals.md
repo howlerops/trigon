@@ -11,8 +11,10 @@ on a fresh clone with no weights.
 | §3 Cardinality gate | does the prefilter pass the true option through |
 | §4 Reference run | does the whole pipeline close, and do the gates bite |
 | §5 Workflow suite | does it make the right decisions, at what cost and latency |
+| §6 Plausibility | does its evidence match what people highlighted, above a vocabulary floor |
 
-`trigon eval all` runs every one of them and exits non-zero on any failure.
+`trigon eval all` runs §1–§5 and exits non-zero on any failure. §6 needs a
+corpus with human rationales, so it runs in `scripts/train_corpus.py`.
 
 ```bash
 trigon eval all -n 200 --out reports/run.md   # exits non-zero on a failed gate
@@ -440,6 +442,40 @@ which measures the distractor rather than the router. The shipped version gives
 the complaint and the distractor comparable lexical pull, and the floor lands
 at 0.255 against a 0.25 chance baseline. Same rule as the jaggedness suite: run
 the floor against a benchmark before believing it.
+
+## 6. Plausibility of evidence
+
+```bash
+python scripts/train_corpus.py hatexplain --out reports/hatexplain/run.md
+```
+
+When a corpus carries human rationales — HateXplain is the one that does —
+`scripts/train_corpus.py` appends a plausibility table
+(`trigon.evals.rationale`): does the model highlight what the annotators
+highlighted? Token F1 and IOU F1, as ERASER (DeYoung et al., 2020) defines
+them, macro-averaged over cases, scored on **words of the state** so that a
+byte-level tokenizer and a word-level floor are measured on the same units.
+
+Every model row sits above three floors computed on the same rationales, and
+the rule is the jaggedness suite's: run the floor before believing the
+number.
+
+| Floor | What it highlights | Token F1 | IOU F1 |
+| --- | --- | ---: | ---: |
+| lexical floor | state words the question's own text contains | 0.025 | 0.002 |
+| **rationale lexicon** | every word highlighted in at least half its training occurrences | **0.573** | **0.452** |
+| every word | all of them | 0.434 | 0.217 |
+
+Two seeds' evaluation splits, `reports/hatexplain/README.md`. The lexicon is
+the floor that bites: on hate speech it is very nearly a slur list, and it
+beats both the spike's trained span head (0.49 / 0.33) and highlighting
+everything. *Every word* is the other one worth reading — its recall is 1 by
+construction, so its token F1 is set entirely by how much of a post people
+mark (34% of words), and a highlighter below it is worse than not choosing.
+
+Plausibility is not gated. It says whether a person would agree with the
+highlight, not whether the model used it; faithfulness is open
+(`docs/ledger.md`).
 
 ## Baselines
 

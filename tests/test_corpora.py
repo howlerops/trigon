@@ -309,3 +309,106 @@ def test_the_drawn_label_is_the_same_on_every_load(annotated):
     assert [c.expected["helpfulness"].label for c in first] == [
         c.expected["helpfulness"].label for c in again
     ]
+
+
+# -- HateXplain: labels, annotator distributions and human rationales ---------
+
+
+def _post(tokens, labels, rationales):
+    return {
+        "post_tokens": tokens,
+        "annotators": [{"label": label, "annotator_id": i} for i, label in enumerate(labels)],
+        "rationales": rationales,
+    }
+
+
+@pytest.fixture
+def hatexplain(tmp_path: pathlib.Path) -> pathlib.Path:
+    import json
+
+    root = tmp_path / "cache"
+    (root / "hatexplain").mkdir(parents=True)
+    posts = {
+        "a_twitter": _post(
+            ["you", "are", "a", "zorp", "and", "a", "blip"],
+            ["offensive", "offensive", "hatespeech"],
+            [[0, 0, 0, 1, 0, 0, 1], [0, 0, 0, 1, 0, 1, 1], [0, 0, 0, 1, 0, 0, 0]],
+        ),
+        "b_gab": _post(["what", "a", "nice", "day"], ["normal", "normal", "offensive"], []),
+        "c_gab": _post(["three", "way", "split"], ["normal", "offensive", "hatespeech"], []),
+    }
+    for i in range(60):
+        posts[f"filler{i}_twitter"] = _post(
+            ["plain", "words", str(i)], ["normal", "normal", "normal"], []
+        )
+    (root / "hatexplain" / "dataset.json").write_text(json.dumps(posts))
+    return root
+
+
+def _everything(root) -> list:
+    return load("hatexplain", "train", purpose="train", root=root) + load(
+        "hatexplain", "test", purpose="eval", root=root
+    )
+
+
+def test_hatexplain_is_green_on_its_verified_licence_and_credits_it():
+    spec = CORPORA["hatexplain"]
+    assert spec.tier == "green" and spec.permits("train")
+    assert "MIT" in spec.attribution and "CC BY 4.0" in spec.attribution
+    assert "Mathew" in spec.attribution
+    # Pinned to a commit, never a branch.
+    assert "/master/" not in spec.files["all"] and "01d742279dac" in spec.files["all"]
+
+
+def test_a_rationale_is_the_majority_of_the_annotators_who_gave_one(hatexplain):
+    case = next(c for c in _everything(hatexplain) if c.case_id.endswith("/a_twitter"))
+    expected = case.expected["label"]
+    state = case.request.state
+    assert state == "you are a zorp and a blip"
+    # "zorp" by all three; "a" (the second) by one of three; "blip" by two.
+    assert [state[s:e] for s, e in expected.rationale] == ["zorp", "blip"]
+    assert expected.label == 1  # offensive, two of three
+    assert expected.distribution == pytest.approx((0.0, 2 / 3, 1 / 3))
+
+
+def test_adjacent_highlighted_tokens_become_one_span(hatexplain, tmp_path):
+    import json
+
+    path = hatexplain / "hatexplain" / "dataset.json"
+    posts = json.loads(path.read_text())
+    posts["a_twitter"]["rationales"] = [[0, 0, 0, 1, 1, 1, 1]] * 3
+    path.write_text(json.dumps(posts))
+    case = next(c for c in _everything(hatexplain) if c.case_id.endswith("/a_twitter"))
+    state = case.request.state
+    assert [state[s:e] for s, e in case.expected["label"].rationale] == ["zorp and a blip"]
+
+
+def test_a_normal_post_has_no_rationale_and_a_split_post_is_dropped(hatexplain):
+    cases = {c.case_id.rsplit("/", 1)[1]: c for c in _everything(hatexplain)}
+    assert cases["b_gab"].expected["label"].rationale is None
+    assert cases["b_gab"].expected["label"].label == 0
+    assert "c_gab" not in cases
+
+
+def test_the_hatexplain_split_is_by_post_id_and_disjoint(hatexplain):
+    train_ids = {
+        c.case_id.rsplit("/", 1)[1]
+        for c in load("hatexplain", "train", purpose="train", root=hatexplain)
+    }
+    test_ids = {
+        c.case_id.rsplit("/", 1)[1]
+        for c in load("hatexplain", "test", purpose="eval", root=hatexplain)
+    }
+    assert train_ids and test_ids and not train_ids & test_ids
+    again = {
+        c.case_id.rsplit("/", 1)[1]
+        for c in load("hatexplain", "test", purpose="eval", root=hatexplain)
+    }
+    assert again == test_ids
+
+
+def test_the_licence_check_runs_before_the_hatexplain_loader(hatexplain, monkeypatch):
+    red = dataclasses.replace(CORPORA["hatexplain"], tier="red", licence="no stated licence")
+    monkeypatch.setitem(CORPORA, "hatexplain", red)
+    with pytest.raises(CorpusLicenceError):
+        load("hatexplain", "test", purpose="eval", root=hatexplain)

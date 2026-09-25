@@ -1230,3 +1230,67 @@ and it is the honest bottom of every Pareto plot. It also earns its keep: it
 caught three benchmarks in the jaggedness suite that it could ace by surface
 statistics (label-correlated length in literal reading, keyword leakage in
 indirection and context rot). A benchmark the floor aces measures nothing.
+
+### Evidence is attribution until it is supervised, and a vocabulary is its floor
+
+**Decision.** An answer's evidence (`docs/architecture.md`, *Evidence*) comes
+from one of two sources, and the response names which. A small span head,
+scoring each state token against the question's readout, serves only from a
+checkpoint whose trainer fitted it to human rationales
+(`ReadoutConfig.evidence_supervised`). Every other checkpoint serves
+**gradient × input**: the gradient of the selected label's log-probability
+with respect to each state token's input embedding, dotted with that
+embedding, positive part, scaled by the answer's largest.
+
+**Why not always the head.** It exists in every checkpoint, initialised at
+random, and a random projection's spans look exactly as confident as a
+trained one's. Serving it untrained would be the silent default this project
+refuses everywhere else — an uncalibrated deployment is allowed, a silently
+uncalibrated one is not, and the same goes for evidence.
+
+**Why gradient × input rather than attention rollout.** Rollout needs the
+attention weights, which the spike's `nn.TransformerEncoderLayer` never returns
+and the Qwen2 forward never materialises (it calls fused SDPA); restricting it
+to the question's block would be new code per backend, and through the schema
+prefix cache the schema rows' attention was never computed at all. Gradient ×
+input is one `autograd.grad` per question through the graph both backends
+already build, works unchanged through the cache, and is independent of the
+other questions for the same reason the answer is. Integrated gradients would
+be the principled upgrade and costs a forward and backward per interpolation
+step; it is the first thing to try if the falsifier below fires.
+
+**What measurement said.** On HateXplain, on CPU, with the spike
+(`reports/hatexplain/README.md`, two seeds per arm):
+
+| | Token F1 | IOU F1 |
+| --- | ---: | ---: |
+| span head, trained on rationales | 0.488–0.495 | 0.330–0.331 |
+| gradient × input, same weights | 0.299–0.325 | 0.246–0.264 |
+| gradient × input, never shown a rationale | 0.308–0.317 | 0.259 |
+| *rationale lexicon* (floor) | 0.573–0.574 | 0.452–0.454 |
+| *every word* (floor) | 0.434–0.436 | 0.217–0.219 |
+| *lexical floor* | 0.025–0.026 | 0.002 |
+
+Supervision is worth +0.17–0.20 token F1 over attribution on the same weights,
+and it is not enough: **a word list beats the trained head on both metrics.**
+Every word highlighted in at least half its training occurrences — on hate
+speech, very nearly a slur list — scores 0.57 and 0.45. Gradient × input does
+not even beat highlighting everything on token F1. The spike is a 128-wide,
+two-layer model whose 1,164-token vocabulary splits 64% of HateXplain's words, so this
+is a floor for the mechanism, not a verdict on it; the backbone run is what
+decides it.
+
+**What would change our mind.**
+
+- *The head is learning a vocabulary, not a reading*, if on Qwen2.5-1.5B its
+  median over three or more seeds does not beat the rationale lexicon on both
+  token F1 and IOU F1. Then `span_head` is a slur list with extra steps and
+  should not be served under a name that implies more.
+- *Gradient × input is the wrong attribution*, if on the backbone it does not
+  beat *every word* on token F1. Integrated gradients is then the next
+  candidate, scored the same way.
+- *Plausibility is the wrong target*, if a faithfulness measurement —
+  comprehensiveness and sufficiency, deleting the highlighted spans and
+  measuring the answer move — shows the head's spans are not what the answer
+  used. Plausibility says a person would agree; it does not say the model
+  looked there. That measurement does not exist yet and is recorded as open.

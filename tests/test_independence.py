@@ -33,7 +33,7 @@ import pytest
 
 torch = pytest.importorskip("torch", reason="the reference model needs the 'train' extra")
 
-from conftest import assert_answer_unmoved  # noqa: E402
+from conftest import assert_answer_unmoved, assert_evidence_unmoved  # noqa: E402
 from trigon.backends.torch_readout import TorchReadoutBackend  # noqa: E402
 from trigon.engine import Engine  # noqa: E402
 from trigon.schema import SegmentKind, materialize_mask  # noqa: E402
@@ -267,3 +267,198 @@ def test_the_vectorized_mask_matches_the_specification_exactly():
             assert torch.equal(backend._mask_tensor(compiled), expected), (
                 f"the vectorized mask differs at {compiled.total_tokens} tokens"
             )
+
+
+# -- evidence inherits the answer's independence -----------------------------
+#
+# A question's evidence may depend only on what its answer is allowed to see:
+# the state's hidden states and the question's own schema and readout. Both
+# sources read nothing else -- the span head is a bilinear product of exactly
+# those, and gradient x input differentiates the question's own log-probability,
+# which no other question's tokens reach -- so the mask that makes the answer
+# independent makes the evidence independent too.
+#
+# **Across shapes these run in float64, and that is a finding, not a
+# convenience.** In float32, adding one question moved gradient x input by
+# 1.7e-06 on this model while the logits it differentiates moved 1.2e-07: a
+# backward pass amplifies the forward's rounding about fourteenfold, past the
+# bound the answers are held to. In float64 the same comparison reads exactly
+# 0.0 on the evidence and 4e-16 on the logits. So the rounding is rounding,
+# and the claim is tested where rounding cannot hide a leak: a real leak moves
+# a score by orders of magnitude more than 1e-12. Comparisons at a fixed shape
+# stay in float32, the served dtype, and stay exact.
+
+EVIDENCE_METHODS = ["gradient_x_input", "span_head"]
+#: Across shapes, in float64. See above for why not float32's `ROUNDING`.
+EVIDENCE_ROUNDING_F64 = 1e-12
+
+
+def _token_evidence(backend, compiler, questions: dict, state: str = STATE) -> dict:
+    request = SystemOneRequest(state=state, questions=questions, options={"include_evidence": True})
+    output = backend.infer(compiler.compile_request(request), request)
+    return {qid: out.evidence for qid, out in output.outputs.items()}
+
+
+def _backend(method: str, *, double: bool = False, cache: bool = False) -> TorchReadoutBackend:
+    """The spike under one evidence method, its span head untrained.
+
+    Untrained is the harder case for this claim, not the easier one: a random
+    projection reads every direction of its input, so a leak into the state or
+    the readout would show in it at full strength.
+    """
+    backend = TorchReadoutBackend(seed=0, cache_prefixes=cache)
+    backend.evidence_mode = method
+    if double:
+        backend.model.double()
+    return backend
+
+
+def _unmoved(before, after, qid):
+    assert_evidence_unmoved(before, after, qid, bound=EVIDENCE_ROUNDING_F64)
+
+
+@pytest.fixture(scope="module", params=EVIDENCE_METHODS)
+def evidence_backend(request):
+    backend = _backend(request.param, double=True)
+    return backend, backend.make_compiler()
+
+
+def test_evidence_does_not_move_when_a_question_is_added(evidence_backend):
+    backend, compiler = evidence_backend
+    before = _token_evidence(backend, compiler, BASE)
+    after = _token_evidence(
+        backend,
+        compiler,
+        {
+            **BASE,
+            "unrelated": ChoiceQuestion(
+                instructions="Something entirely different about weather.",
+                options=[{"name": "rain"}, {"name": "sun"}],
+            ),
+        },
+    )
+    for qid in BASE:
+        _unmoved(before[qid], after[qid], qid)
+
+
+def test_evidence_does_not_move_when_every_other_question_is_removed(evidence_backend):
+    backend, compiler = evidence_backend
+    before = _token_evidence(backend, compiler, BASE)
+    for qid in BASE:
+        alone = _token_evidence(backend, compiler, {qid: BASE[qid]})
+        _unmoved(before[qid], alone[qid], qid)
+
+
+def test_evidence_survives_twenty_extra_questions(evidence_backend):
+    backend, compiler = evidence_backend
+    before = _token_evidence(backend, compiler, {"urgent": BASE["urgent"]})
+    crowd = {
+        f"filler_{i}": NoulQuestion(instructions=f"Is fact number {i} present?") for i in range(20)
+    }
+    after = _token_evidence(backend, compiler, {"urgent": BASE["urgent"], **crowd})
+    _unmoved(before["urgent"], after["urgent"], "urgent")
+
+
+@pytest.mark.parametrize("method", EVIDENCE_METHODS)
+def test_evidence_is_exact_when_another_question_changes_at_the_same_shape(method):
+    """The fixed-shape case, in float32, and exact: another question's *words*
+    change and its token count does not, so every tensor has the same shape,
+    the same kernels reduce in the same order, and any difference is real.
+    """
+    backend = _backend(method)
+    compiler = backend.make_compiler()
+    original = BASE["urgent"].instructions
+    count = backend.tokenizer.count(original)
+    candidates = [
+        "Does this need a person within the hour?",
+        "Does this need a human within the day?",
+        "Does this want a human within the hour?",
+        "Could this need a human within the hour?",
+    ]
+    rewrite = next((c for c in candidates if backend.tokenizer.count(c) == count), None)
+    assert rewrite is not None, "no same-length rewrite; add a candidate"
+
+    before = _token_evidence(backend, compiler, BASE)
+    after = _token_evidence(
+        backend, compiler, {**BASE, "urgent": NoulQuestion(instructions=rewrite)}
+    )
+    for qid in ("intent", "severity"):
+        assert_evidence_unmoved(before[qid], after[qid], qid, bound=0.0)
+    # And the question that did change is not trivially constant.
+    assert before["urgent"] != after["urgent"]
+
+
+@pytest.mark.parametrize("method", EVIDENCE_METHODS)
+def test_evidence_agrees_with_the_schema_prefix_cache_on_and_off(method):
+    """On against off is two kernel paths, so float64 and the bound; a hit
+    against the miss that filled it is one path at one shape, so float32 and
+    exact."""
+    off = _backend(method, double=True)
+    on = _backend(method, double=True, cache=True)
+    compiler = off.make_compiler()
+    plain, cached = _token_evidence(off, compiler, BASE), _token_evidence(on, compiler, BASE)
+    for qid in BASE:
+        _unmoved(plain[qid], cached[qid], qid)
+
+    served = _backend(method, cache=True)
+    miss = _token_evidence(served, compiler, BASE)
+    assert served._last_cached_tokens == 0
+    hit = _token_evidence(served, compiler, BASE)
+    assert served._last_cached_tokens > 0, "the second request should hit the cache"
+    for qid in BASE:
+        assert_evidence_unmoved(miss[qid], hit[qid], qid, bound=0.0)
+
+
+def test_asking_for_evidence_does_not_move_the_answer(engine):
+    """Evidence builds the forward graph with autograd on, which takes
+    `nn.TransformerEncoder` off its no-grad fast path: same shape, different
+    kernel, so the answers agree to the float32 bound rather than exactly --
+    measured at 2e-08. What must not change is anything a caller acts on."""
+    plain = engine.answer(SystemOneRequest(state=STATE, questions=BASE))
+    explained = engine.answer(
+        SystemOneRequest(state=STATE, questions=BASE, options={"include_evidence": True})
+    )
+    for qid, answer in plain.answers.items():
+        with_evidence = explained.answers[qid].model_dump()
+        assert with_evidence.pop("evidence") is not None
+        assert with_evidence.pop("evidence_method") == "gradient_x_input"
+        without = answer.model_dump()
+        without.pop("evidence"), without.pop("evidence_method")
+        assert_answer_unmoved(without, with_evidence, qid)
+
+
+def test_answers_with_evidence_do_not_move_when_a_question_is_added():
+    """The same claim at the contract, spans and all, through the engine."""
+    backend = _backend("gradient_x_input", double=True)
+    engine = Engine(backend, compiler=backend.make_compiler())
+    options = {"include_evidence": True}
+    before = engine.answer(SystemOneRequest(state=STATE, questions=BASE, options=options))
+    after = engine.answer(
+        SystemOneRequest(
+            state=STATE,
+            questions={**BASE, "extra": NoulQuestion(instructions="Is the weather nice?")},
+            options=options,
+        )
+    )
+    for qid in BASE:
+        assert before.answers[qid].evidence, f"{qid}: no spans to compare"
+        assert_answer_unmoved(
+            before.answers[qid].model_dump(), after.answers[qid].model_dump(), qid
+        )
+
+
+@pytest.mark.parametrize("method", EVIDENCE_METHODS)
+def test_the_evidence_tests_can_see_a_leak(method):
+    """The positive control. With `state_attends_to_schema` on, adding a
+    question changes the state's hidden states and so every other question's
+    evidence -- the leak the default layout forbids. Measured at 1e-03 to
+    7e-03, nine orders of magnitude over the bound the tests above apply, so a
+    pass above is the mask's doing and not a comparison too blunt to fail."""
+    backend = _backend(method, double=True)
+    compiler = backend.make_compiler(state_attends_to_schema=True)
+    before = _token_evidence(backend, compiler, BASE)
+    after = _token_evidence(
+        backend, compiler, {**BASE, "extra": NoulQuestion(instructions="Is the weather nice?")}
+    )
+    moved = max(abs(a[2] - b[2]) for q in BASE for a, b in zip(before[q], after[q], strict=True))
+    assert moved > 1e6 * EVIDENCE_ROUNDING_F64
