@@ -102,6 +102,10 @@ weights = modal.Volume.from_name("trigon-weights", create_if_missing=True)
     gpu="A10G",
     timeout=60 * 60 * 20,
     volumes={RUNS: runs, WEIGHTS: weights},
+    # A container that dies -- a host failure, an OOM kill, `modal container
+    # stop` -- reruns the seed, which picks up its resume file below. A failed
+    # gate is a returned payload, not an exception, so it is never retried.
+    retries=modal.Retries(max_retries=2, initial_delay=10.0),
 )
 def train_one(corpus: str, seed: int, flags: list[str], run: dict) -> dict:
     """One seed, one container. Writes its reports to the Volume and returns them."""
