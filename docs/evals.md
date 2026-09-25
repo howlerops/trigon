@@ -35,12 +35,14 @@ that made `worst_question_over_baseline` advisory rather than absent.
 | --- | ---: | --- |
 | `sample_size` | ≥ 5,000 | the run is large enough for ECE to mean anything |
 | `gate_is_testable` | floor p95 ≤ ½ × limit | a calibrated model would clear the gate with room |
-| `accuracy_over_baseline` | ≥ +0.05 | the model uses its input at all |
+| `accuracy_over_baseline` | ≥ +0.05 | the model uses its input at all; advisory on a drawn-annotator corpus, where no predictor can pass it |
+| `brier_over_marginal` | ≥ +0.02 | the same, on a drawn-annotator corpus: 1 − Brier / the training marginal's Brier |
 | Workhorse ECE (and adaptive ECE) | ≤ 0.05 | the model |
 | Premium ECE | ≤ 0.03 | the model |
 | Quantized-vs-BF16 ECE delta | ≤ 0.01 | the serving path |
 | `conformal_coverage` | ≥ target − 3σ | the wrapper's only promise |
-| `worst_primitive_*_ece` | ≤ tier limit | advisory; the pooled ECE cancels |
+| `worst_question_over_baseline` | ≥ +0.05 | blocking on a backbone run, advisory on the spike; the pooled lift hides a question answered by rote |
+| `worst_primitive_*_ece` | ≤ tier limit | blocking on a backbone run, advisory on the spike; the pooled ECE cancels |
 
 The first three gate the *measurement and the premise*, not the model, and they
 run first. Two of them exist because a run failed to catch something: see §4
@@ -113,6 +115,15 @@ for exactly the reason `worst_question_over_baseline` is: at a 128-wide
 two-layer spike no per-primitive gate passes, and a gate nothing can pass
 measures capacity rather than honesty. Both flip with the same
 `require_per_question` switch, so they cannot drift apart.
+
+**They block on a backbone run, since 2026-09-25.** Q16 promised the flip "the
+moment a real backbone lands", and `trigon train`, `scripts/train_corpus.py`
+and `scripts/regate.py` now set `require_per_question` whenever the model is a
+pretrained backbone. It costs one committed seed its certificate: the
+synthetic suite's seed 0 has a Score head at ECE 0.0551, which the pooled
+0.0408 hid (`reports/synthetic/README.md`). On a drawn-annotator corpus the
+per-question *accuracy* gate stays advisory with the pooled one, for the
+reason `brier_over_marginal` exists.
 
 ### Conformal coverage is gated, and its power is stated
 

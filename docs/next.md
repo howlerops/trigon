@@ -11,12 +11,12 @@ next, and what each step would have to show to count.
 
 ---
 
-## Where it stands, 2026-09-24
+## Where it stands, 2026-09-25
 
 | Item | State |
 | --- | --- |
 | A.1 Banking77 | ✅ **Certified twice** — the spike at 0.7248, then Qwen2.5-1.5B at **0.9009**, four seeds, every blocking gate (`reports/banking77/`). Deployed behind auth |
-| A.2 annotator distributions | ✅ **Built and measured.** HelpSteer2's per-annotator split; the model is calibrated against a random annotator and the soft targets are shown to be why (`reports/helpsteer2-annotators/`). Its accuracy gate cannot be passed by any predictor on this data — a gate decision, open |
+| A.2 annotator distributions | ✅ **Certified.** HelpSteer2's per-annotator split. The model is calibrated against a random annotator, and the soft targets are shown to be why. It clears `brier_over_marginal` on four seeds of four, the gate decided for drawn-annotator corpora (Q20) (`reports/helpsteer2-annotators/`) |
 | A.3 real backbone | ✅ **Done.** All three synthetic questions certify on four seeds, `size` included (`reports/synthetic/`) |
 | A.4 CI's hardware | Blocked on Actions billing |
 | A.5 length bucketing | Implemented; its before/after timing is still owed |
@@ -118,7 +118,9 @@ HelpSteer2's per-annotator ratings, soft targets, four seeds: calibrated
 against a random annotator (ECE 0.0082–0.0271) and at the annotators' own
 accuracy ceiling (`reports/helpsteer2-annotators/README.md`). It fails
 `accuracy_over_baseline`, which no predictor on this data can pass
-(`reports/helpsteer2/ceiling.md`) -- the gate question is open.
+(`reports/helpsteer2/ceiling.md`). **Decided 2026-09-25 (Q20):** such a
+corpus certifies on `brier_over_marginal`, and this one does, at a median
+skill of +0.0559 against +0.02.
 
 **HelpSteer2 at 12,000 cases has an answer, and it is still a failure — a
 different one.** Four seeds on Modal: median lift +0.0189, range +0.0155 to

@@ -236,6 +236,28 @@ MAX_FLOOR_FRACTION_OF_GATE = 0.5
 MIN_ACCURACY_OVER_BASELINE = 0.05
 
 
+# The same floor for a corpus whose outcome is ONE ANNOTATOR drawn per case,
+# where argmax accuracy is the wrong instrument: the label is noisy by design
+# and an oracle that knows the other annotators' ratings of the same response
+# beats the marginal by +0.021 on HelpSteer2 (`reports/helpsteer2/ceiling.md`)
+# -- so `accuracy_over_baseline` fails every predictor there, a perfect one
+# included, and a gate nothing can pass measures the data rather than the model.
+#
+# A proper scoring rule still separates a model that reports each response's
+# spread of opinion from one that reports the population's. This reads the
+# Brier skill against the marginal distribution of the TRAINING split, scored
+# on the evaluation outcomes: 1 - Brier(model) / Brier(marginal). A model that
+# ignores its input scores 0 by construction, so the term CLAUDE.md requires
+# -- one that fails such a model -- is kept, and on these corpora it replaces
+# the accuracy term rather than joining it. Decided 2026-09-25 by the owner.
+#
+# 0.02 is a floor, not a target, read the same way as the accuracy margin. The
+# committed annotator runs score 0.054-0.066 on four seeds; a model that
+# learned nothing sits at about 0.000 -- the add-one-smoothed marginal of the
+# training split scored on held-out prompts.
+MIN_BRIER_SKILL_OVER_MARGINAL = 0.02
+
+
 # How far below its target a conformal predictor's measured coverage may fall
 # before the fit is rejected, in standard deviations of the sampling noise.
 #

@@ -19,6 +19,7 @@ from ..limits import (
     CALIBRATION_GATES,
     MAX_FLOOR_FRACTION_OF_GATE,
     MIN_ACCURACY_OVER_BASELINE,
+    MIN_BRIER_SKILL_OVER_MARGINAL,
     MIN_CALIBRATION_SAMPLES,
 )
 from .harness import Case, CaseOutcome, SuiteResult, run_cases, summarize
@@ -130,6 +131,7 @@ def check_gates(
     *,
     require_per_question: bool = False,
     slices: dict[str, CalibrationReport] | None = None,
+    marginal_brier: float | None = None,
 ) -> list[GateResult]:
     """Apply the release gates from the build plan.
 
@@ -137,8 +139,16 @@ def check_gates(
     delta gate exists because probabilities degrade well before argmax does --
     an accuracy-only check would wave through a KV bit-width that quietly
     destroyed calibration.
+
+    ``marginal_brier`` marks a corpus scored against one annotator drawn per
+    case, and is the Brier score of the training split's marginal distribution
+    on the evaluation outcomes. There the accuracy gates cannot be passed by
+    any predictor, so they are reported as advisory and ``brier_over_marginal``
+    is the blocking term that rejects a model ignoring its input
+    (``limits.MIN_BRIER_SKILL_OVER_MARGINAL``).
     """
     gates: list[GateResult] = []
+    drawn_annotator = marginal_brier is not None
     if result.calibration is None:
         raise ValueError("calibration suite produced no scored questions")
 
@@ -186,6 +196,28 @@ def check_gates(
                     f"model {result.accuracy:.4f} vs marginal predictor "
                     f"{result.baseline_accuracy:.4f}; calibration cannot reject a "
                     f"model that ignores the state"
+                    + (
+                        "; advisory: a drawn annotator caps every predictor"
+                        if drawn_annotator
+                        else ""
+                    )
+                ),
+                advisory=drawn_annotator,
+            )
+        )
+    if drawn_annotator:
+        if not marginal_brier > 0:
+            raise ValueError(f"marginal Brier must be positive, got {marginal_brier}")
+        skill = 1.0 - cal.brier / marginal_brier
+        gates.append(
+            GateResult(
+                "brier_over_marginal",
+                skill,
+                MIN_BRIER_SKILL_OVER_MARGINAL,
+                skill >= MIN_BRIER_SKILL_OVER_MARGINAL,
+                note=(
+                    f"Brier {cal.brier:.4f} vs the training marginal's {marginal_brier:.4f}; "
+                    f"the term that fails a model ignoring its input, on a drawn-annotator corpus"
                 ),
             )
         )
@@ -216,7 +248,7 @@ def check_gates(
                     f"worst is {offender.question_id!r} at {offender.accuracy:.4f} vs its own "
                     f"marginal {offender.baseline_accuracy:.4f}; the pooled gate hides this"
                 ),
-                advisory=not require_per_question,
+                advisory=drawn_annotator or not require_per_question,
             )
         )
 

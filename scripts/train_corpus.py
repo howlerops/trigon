@@ -485,7 +485,16 @@ def main(argv: list[str] | None = None) -> int:
     after, slices = run_calibration_suite(
         calibrated, evaluation, suite=f"{spec.name}/calibrated", floor_trials=args.floor_trials
     )
-    gates = check_gates(after, slices=slices)
+    # Scored against one annotator drawn per case: argmax accuracy is capped
+    # below its gate for every predictor, so the proper score carries the
+    # "uses its input" term instead (limits.MIN_BRIER_SKILL_OVER_MARGINAL).
+    gates = check_gates(
+        after,
+        slices=slices,
+        marginal_brier=marginal_scores(train, evaluation)[0] if spec.annotator_lists else None,
+        # Q16: blocking once a real backbone lands, which a backbone run is.
+        require_per_question=bool(args.backbone),
+    )
     markdown = header(
         spec, args, train, calibration, evaluation, marginal, topped_up, hardware
     ) + render_markdown([before, after], gates, slices, gated=after)

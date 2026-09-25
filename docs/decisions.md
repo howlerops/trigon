@@ -23,6 +23,22 @@ written up there: compute and verification bind where engineer-hours used to,
 the eval harness stops being only a differentiator and becomes the mechanism
 that catches unfinished work, and parallelism buys breadth rather than depth.
 
+## Sign-off, 2026-09-25
+
+Taken once the pretrained backbone existed and had been measured.
+
+| | Question | Resolution |
+| --- | --- | --- |
+| Q16 | When the per-question gates stop being advisory | **Now, for backbone runs.** `trigon train`, `scripts/train_corpus.py` and `scripts/regate.py` set `require_per_question` whenever the model is a pretrained backbone. The spike keeps them advisory |
+| Q20 | How a corpus scored against one drawn annotator certifies | **On `brier_over_marginal` ≥ +0.02** (1 − Brier / the training marginal's Brier). The accuracy gates are reported there as advisory, because no predictor can pass them: the annotators beat their own marginal by +0.021 (`reports/helpsteer2/ceiling.md`). A model that ignores its input scores 0 on the Brier term, so the rule in `CLAUDE.md` holds |
+| Q21 | C.1, publishing weights | **A GitHub Release on this repository**, private to the organisation and tied to a commit. It holds the certified Banking77 adapter, its calibrators and a model card. Nothing goes to a public hub yet |
+
+**What would change Q20:** a drawn-annotator corpus on which a model clears
++0.02 by learning the marginal *per domain* rather than per response. The
+training split's marginal is global, and a domain-conditional marginal is a
+cheaper baseline that could still be mistaken for understanding. If the gate
+cannot tell those two apart, the baseline has to become conditional.
+
 ---
 
 ## 1. Per-request option/token budget before the retrieval stage

@@ -26,6 +26,7 @@ from trigon.limits import (
     DEFAULT_BUDGET,
     MAX_FLOOR_FRACTION_OF_GATE,
     MIN_ACCURACY_OVER_BASELINE,
+    MIN_BRIER_SKILL_OVER_MARGINAL,
     MIN_CALIBRATION_SAMPLES,
 )
 
@@ -84,6 +85,7 @@ def test_the_prose_option_trigger_and_shortlist_match():
     [
         (r"\| `sample_size` \| ≥ ([\d,]+) \|", MIN_CALIBRATION_SAMPLES),
         (r"\| `accuracy_over_baseline` \| ≥ \+([\d.]+) \|", MIN_ACCURACY_OVER_BASELINE),
+        (r"\| `brier_over_marginal` \| ≥ \+([\d.]+) \|", MIN_BRIER_SKILL_OVER_MARGINAL),
         (
             r"\| Workhorse ECE \(and adaptive ECE\) \| ≤ ([\d.]+) \|",
             CALIBRATION_GATES["workhorse_max_ece"],

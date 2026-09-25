@@ -18,7 +18,7 @@ narrative sections are a discipline, not a test.
 | Tests | 514 |
 | Python files (`src`, `tests`, `scripts`) | 111 |
 | Lines in `src/` | 12,090 |
-| Release gates | 8 |
+| Release gates | 9 |
 | Green-tier corpora in the licence audit | 9 |
 | Committed use cases | 3 |
 | Real corpora loadable | 3 |
@@ -84,6 +84,13 @@ twenty-two runs** — the investigation is closed and the evidence is in
 
 ### Evaluation
 - Four suites, one runner, release gates that exit non-zero.
+- **`brier_over_marginal`, the gate for a drawn-annotator corpus** (Q20,
+  2026-09-25). On such a corpus no predictor can pass the accuracy gates, so
+  they are reported there as advisory. The Brier skill over the training
+  marginal, at least +0.02, is the blocking term that fails a model ignoring
+  its input. **The per-question and per-primitive gates now block on every
+  backbone run** (Q16), which ends the "advisory until a real backbone"
+  arrangement.
 - `scripts/seed_sweep.py` — certify on the spread, not the best draw.
 - `scripts/regate.py` — refit calibration on a saved checkpoint and re-gate in
   a minute instead of retraining for twenty.
@@ -170,6 +177,8 @@ twenty-two runs** — the investigation is closed and the evidence is in
 | HelpSteer2, four seeds, 12,000 cases, on a GPU | **Fails, and is no longer a collapse.** Lift +0.0189 median, +0.0155 to +0.0203; `complexity` +0.06–0.08 and `verbosity` +0.02 on every seed, `coherence`, `correctness`, `helpfulness` on their marginals; ECE 0.0082–0.0139, calibrator declined on all four |
 | `size`, across 7 interventions and 22 runs | Below its own marginal on every seed; median −0.0095 |
 | **`size` on Qwen2.5-1.5B, four seeds** | **+0.571 to +0.594 over its marginal on every seed**; `plan` +0.57–0.60, `at_risk` +0.13–0.14; every blocking gate passes; best validation loss 0.5556–0.6037 against a Bayes floor of 0.5585 |
+| **HelpSteer2 annotator distributions under `brier_over_marginal`** | **Certified, four seeds of four**: skill +0.0543 to +0.0658, median +0.0559, against +0.02. The hard-label ablation clears it too (median +0.0475), but only after its calibrator ran |
+| The synthetic suite on Qwen, with the per-primitive gate blocking | **Three seeds of four.** Seed 0's Score head is at ECE 0.0551, which its pooled 0.0408 hid. The median worst primitive is 0.0303, so the configuration still certifies. Banking77 passes on all four seeds (worst 0.0448) |
 | Banking77 accuracy (pilot, 2 seeds) | 0.4640 / 0.4193 against a 1.8% marginal — **it transfers** |
 
 ---
@@ -362,7 +371,11 @@ what order, and how each step is known to be done.
   annotator 0.0560 median against 0.0096, two seeds of four failing the gate
   uncalibrated, and Brier worse on every seed even after the calibrator
   (`reports/helpsteer2-annotators/README.md`).
-- **`accuracy_over_baseline` cannot certify an annotator-distribution
+- ~~`accuracy_over_baseline` cannot certify an annotator-distribution
+  corpus.~~ **Closed by decision Q20**: `brier_over_marginal` is the blocking
+  term there, and HelpSteer2's annotator distributions certify on four seeds
+  of four (`reports/helpsteer2-annotators/README.md`). The record:
+  **`accuracy_over_baseline` cannot certify an annotator-distribution
   corpus.** On HelpSteer2 no predictor clears +0.05 -- the annotators do not
   (`reports/helpsteer2/ceiling.md`). `CLAUDE.md` requires every gate set to
   keep a term that fails a model ignoring its input; for such corpora that
@@ -375,8 +388,11 @@ what order, and how each step is known to be done.
   Timed on an idle machine: 6× at the served shape, 23× at 256 options
   (`reports/cache/README.md`). It is on by default now and `/healthz` reports
   it.
-- **Semantic compatibility is unmet.** The wire, envelope and status codes now
-  line up (`docs/compat.md`); the model answers one question of three well. An
+- **Semantic compatibility is unmeasured.** The wire, envelope and status
+  codes line up (`docs/compat.md`). The backbone now answers all three
+  synthetic questions and certifies Banking77. But agreement with an
+  incumbent on real traffic has never been run: `scripts/migrate.py` needs
+  that traffic and an incumbent endpoint, and neither is here. An
   adapter cannot fix that, and calibration makes a wrong answer credible.
 - **Training pads accumulation chunks to their longest member**, which costs
   2.82× of the attention work on a corpus whose lengths run 253–3,647 tokens.
@@ -387,9 +403,13 @@ what order, and how each step is known to be done.
   +0.0155 to +0.0203. `complexity` and `verbosity` are learned on every seed;
   `coherence`, `correctness` and `helpfulness` — the three that judge quality
   rather than surface — sit on their marginals. Twelve epochs changed
-  nothing (+0.0188), so this is the spike's ceiling, not under-training; the
-  open question is whether a pretrained backbone moves the three quality
-  questions, which is A.3 and is running.
+  nothing (+0.0188), so this is the spike's ceiling, not under-training.
+  **Qwen2.5-1.5B answers it partly**: lift +0.024 to +0.029, and Brier 7.9–8.8%
+  better than the marginal. On the per-annotator split, `helpfulness` and
+  `correctness` move on every seed and `coherence` moves on none. The
+  aggregated labels still fail +0.05. How far anything can reach there is
+  bounded only loosely: one half-panel predicts the other at −0.024
+  (`reports/helpsteer2/ceiling.md`).
   `reports/helpsteer2/README.md`.
 - **A run longer than a session's idle window cannot finish here.** It was
   moved to Modal, and the 12,000-case HelpSteer2 run finished there — but only
@@ -402,11 +422,10 @@ what order, and how each step is known to be done.
   26 predates the only workflow change since. Metered Actions minutes on a
   private organization repository is the likeliest explanation and cannot be
   confirmed without billing access. A.4 is blocked on it.
-- **Three of five data streams unbuilt.** Two corpora load. The
-  *annotator-distribution* data — the stream that teaches a model what
-  disagreement looks like, which is the product — is still not among them:
-  HelpSteer2's main split carries aggregated integer ratings, and its
-  `disagreements/` split is a separate thing to load.
+- **Two of five data streams unbuilt.** Three corpora load, and the
+  annotator-distribution stream is one of them now: HelpSteer2's
+  `disagreements/` split, trained on soft targets and certified. The
+  remaining two streams wait on the Parquet question below.
 - **GoEmotions, measuring_hate_speech and Circa are Parquet-only.** A reader
   for them would put a compiled dependency in the import path of the
   calibration math and the drift tests. They get converted in `scripts/`
