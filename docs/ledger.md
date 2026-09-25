@@ -199,6 +199,7 @@ The most useful section. Each of these was argued for before it was measured.
 | p99 under load would show GIL pauses | p99/p50 *narrows* under pressure. Falsifier did not fire. |
 | CLIP-style cosine would fix the dot-product head | Did nothing alone; cancels the residual's gain. |
 | The reference configuration works | It decides its own outcome by seed. Led to the sweep rule. |
+| Sortish batching would cut training time by ~2.82× on HelpSteer2 | **1.13×** (1.09–1.18×, four seeds each arm). 2.82× was the padded *attention work*, and on the spike attention is a small share of a step. Outcomes unchanged (`reports/helpsteer2/README.md`, A.5) |
 | Fitting temperature on the training split is the discipline | It is the bug. Raised ECE on half the seeds. |
 | A Score temperature of 0.20 is a degenerate fit | Constructed test: sharpening is correct for an underconfident head. |
 | Burden of proof belongs on *declining* a calibrator | Seven constructed heads say the opposite, on six of them. |
@@ -400,10 +401,10 @@ what order, and how each step is known to be done.
   incumbent on real traffic has never been run: `scripts/migrate.py` needs
   that traffic and an incumbent endpoint, and neither is here. An
   adapter cannot fix that, and calibration makes a wrong answer credible.
-- **Training pads accumulation chunks to their longest member**, which costs
-  2.82× of the attention work on a corpus whose lengths run 253–3,647 tokens.
-  Sortish batching would fix it and changes which cases share a gradient step,
-  so it is `docs/next.md` A.5 rather than a quiet edit mid-certification.
+- ~~Training pads accumulation chunks to their longest member.~~ **Closed
+  (A.5).** Bucketing is on by default and measured: 1.13× faster on
+  HelpSteer2, with outcomes indistinguishable from the unbucketed arm. The
+  2.82× it was sized by was attention work, not wall clock (see *disproved*).
 - **HelpSteer2 fails at 12,000 cases, and has stopped collapsing.** Four
   seeds on a GPU, median lift +0.0189 against the +0.05 gate, spread
   +0.0155 to +0.0203. `complexity` and `verbosity` are learned on every seed;

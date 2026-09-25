@@ -19,7 +19,7 @@ next, and what each step would have to show to count.
 | A.2 annotator distributions | ✅ **Certified.** HelpSteer2's per-annotator split. The model is calibrated against a random annotator, and the soft targets are shown to be why. It clears `brier_over_marginal` on four seeds of four, the gate decided for drawn-annotator corpora (Q20) (`reports/helpsteer2-annotators/`) |
 | A.3 real backbone | ✅ **Done.** All three synthetic questions certify on four seeds, `size` included (`reports/synthetic/`) |
 | A.4 CI's hardware | Blocked on Actions billing |
-| A.5 length bucketing | Implemented; its before/after timing is still owed |
+| A.5 length bucketing | ✅ **Measured.** 1.13× faster (1.09–1.18×) with outcomes unchanged, four seeds per arm; not the 2.82× it was sized by (`reports/helpsteer2/README.md`) |
 | B.1 L4 burn-in | Written and handed over (`scripts/burn_in.py`); needs a rented L4 |
 | B.2 / B.3 | Done |
 | C.1 publish weights | 🟡 **Decided and packaged (Q21).** The certified adapter, calibrators and model card are in `releases/banking77-qwen15b-v1/` and on the Modal Volume. What is left is attaching the bundle to a GitHub Release, which needs a token or the UI |
@@ -236,7 +236,13 @@ step, and making that change mid-certification would invalidate the comparison
 it exists to speed up. There is no certification in flight now — the three
 HelpSteer2 attempts all died — so the objection is spent.
 
-**The before-and-after is still owed** and this item is not closed without it.
+✅ **Closed, 2026-09-25.** Four seeds per arm on one commit and one GPU type:
+1,697 s against 1,917 s median training time, **1.13×**, and lift +0.0189
+against +0.0188. The done-condition's "certifies" cannot be read literally
+on HelpSteer2, because neither arm clears `accuracy_over_baseline` on the
+aggregated labels. What it guarded against was bucketing changing the
+outcome, and the outcomes match seed for seed. The 2.82× was attention work
+quoted as if it were wall clock (`docs/ledger.md`, *disproved*).
 
 **Done when** a four-seed sweep at the same configuration certifies with the
 bucketing on, and the wall clock is published beside the unbucketed run.
