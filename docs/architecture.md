@@ -156,6 +156,7 @@ sources mean different things and a caller acting on them has to know which:
 | --- | --- | --- |
 | `span_head` | a bilinear head scoring each state token against the question's readout, **trained on human rationales** | the head's probability that a person would highlight the token |
 | `gradient_x_input` | the gradient of the selected label's log-probability with respect to each state token's input embedding, dotted with that embedding; positive part only | relative within this answer: 1 is its most influential token. Not a probability |
+| `integrated_gradients` | that gradient integrated along the straight path from a zero embedding to each state token's (state tokens only), times the embedding; positive part only. Served only when the deployment asks for it | as `gradient_x_input` |
 | `lexical_overlap` | the lexical floor: state words the question's own text contains | 1 for a match |
 | `unavailable` | a backend that cannot attribute (the prompted LLM) | — the list is empty for that reason, not because nothing mattered |
 
@@ -163,18 +164,40 @@ sources mean different things and a caller acting on them has to know which:
 checkpoint, and a random projection's spans would look exactly as confident as
 a trained one's. So a checkpoint serves `span_head` only when the trainer
 fitted it to human rationales — `ReadoutConfig.evidence_supervised`, set by
-`trigon.training` and saved with the weights — and `gradient_x_input`
-otherwise, including every checkpoint written before the head existed. The
+`trigon.training` and saved with the weights — and an attribution otherwise,
+including every checkpoint written before the head existed. The
 attribution is a statement about the model, not a prediction of what a person
 would highlight, and the label says so.
 
+**Which attribution** is a serving choice, not a property of the weights:
+`gradient_x_input` by default, `integrated_gradients` when
+`TRIGON_UNSUPERVISED_EVIDENCE` (or `--unsupervised-evidence`, or
+`TorchReadoutBackend.unsupervised_evidence`) says so, and `/healthz` reports
+which. The default is gradient × input until integrated gradients is measured
+to beat highlighting every word on the backbone — the rule and the
+measurement that fired it are in `docs/decisions.md`, *Evidence is
+attribution until it is supervised*. The knob cannot select the span head.
+
+Integrated gradients' baseline is the zero embedding: position and segment
+are still added, so it is the state with its words taken out rather than a
+state of some real token, and gradient × input is the same method with one
+step at the input — the two differ in the path and nothing else. Its 32
+points (`IG_STEPS`) are spaced as `u³` towards the baseline, because a
+pre-norm transformer barely notices a token being scaled until it is nearly
+zero; evenly spaced, 32 points on a tiny Qwen2 summed 12–91% away from the
+log-probability difference they must add up to, and `u³`-spaced 0.04%.
+Completeness is asserted on both backbones' forwards and measured on every
+plausibility report.
+
 **Evidence is exactly as independent as the answer.** The span head reads the
 state's final hidden states and the question's own readout; gradient × input
-differentiates the question's own log-probability. Neither reads anything the
-answer could not, so the mask that isolates the answer isolates its evidence,
-with no new path to prove. `tests/test_independence.py` holds both methods to
-it, with the prefix cache on and off, plus a positive control showing a real
-leak (`state_attends_to_schema`) moves evidence by 1e-3.
+differentiates the question's own log-probability, and integrated gradients
+does the same at points where only the state's embeddings have moved. None
+reads anything the answer could not, so the mask that isolates the answer
+isolates its evidence, with no new path to prove. `tests/test_independence.py`
+holds all three methods to it, with the prefix cache on and off, plus a
+positive control showing a real leak (`state_attends_to_schema`) moves
+evidence by 1e-3.
 
 Those tests compare across shapes **in float64**, which is a measurement rather
 than a convenience: a backward pass amplifies the forward's rounding, so adding
@@ -191,6 +214,15 @@ fast path, so its answers agree with the plain ones to rounding (2e-08) rather
 than exactly. Batched requests that ask for evidence are answered one at a
 time, so no two callers share a graph.
 
+Integrated gradients is the expensive one: the answer stays on the no-grad
+pass, bit-identical to the plain one, and the path costs two more batched
+forward passes of 16 points each, with a backward pass per question per pass.
+On the spike, HateXplain, one question, one thread: p50 81 ms against
+gradient × input's 5.0 ms and 2.4 ms with no evidence — 16× gradient × input,
+linear in the points (16 points: 39 ms), and unchanged by how they are
+batched, because one saturated CPU thread does the same work either way.
+What batching buys on a GPU is unmeasured.
+
 **From token scores to spans**, one rule for every backend
 (`trigon.evidence`), so a model and a floor are never measured under two
 definitions of a span:
@@ -199,6 +231,8 @@ definitions of a span:
 | --- | --- | --- |
 | Score a token needs to be evidence | 0.5 | `trigon.evidence.EVIDENCE_THRESHOLD` |
 | Longest word a subword token is widened to | 32 | `trigon.evidence.MAX_WORD_CHARS` |
+| Integrated gradients' points on the path | 32 | `trigon.backends.torch_readout.IG_STEPS` |
+| Power they are spaced by, `alpha = u ** p` | 3 | `trigon.backends.torch_readout.IG_POWER` |
 | IOU at which a predicted span matches a human one | 0.5 | `trigon.evals.rationale.IOU_MATCH` |
 
 A token is kept at the threshold, trimmed of whitespace (a byte-level token's

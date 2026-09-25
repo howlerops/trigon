@@ -146,15 +146,31 @@ def test_the_evidence_constants_are_published_as_they_are_enforced():
     from trigon.evals.rationale import IOU_MATCH
     from trigon.evidence import EVIDENCE_THRESHOLD, MAX_WORD_CHARS
 
+    published = _evidence_constants()
+    assert {k: v for k, v in published.items() if not k.startswith("trigon.backends.")} == {
+        "trigon.evidence.EVIDENCE_THRESHOLD": EVIDENCE_THRESHOLD,
+        "trigon.evidence.MAX_WORD_CHARS": MAX_WORD_CHARS,
+        "trigon.evals.rationale.IOU_MATCH": IOU_MATCH,
+    }
+
+
+def _evidence_constants() -> dict[str, float]:
     text = (DOCS / "architecture.md").read_text()
-    published = {
+    return {
         name: float(value)
         for value, name in re.findall(
             r"^\| [^|]+ \| ([\d.]+) \| `(trigon\.[\w.]+)` \|$", text, re.M
         )
     }
-    assert published == {
-        "trigon.evidence.EVIDENCE_THRESHOLD": EVIDENCE_THRESHOLD,
-        "trigon.evidence.MAX_WORD_CHARS": MAX_WORD_CHARS,
-        "trigon.evals.rationale.IOU_MATCH": IOU_MATCH,
+
+
+def test_the_integrated_gradients_quadrature_is_published_as_it_is_served():
+    """The same table's backend rows, which need torch to read."""
+    pytest.importorskip("torch")
+    from trigon.backends.torch_readout import IG_POWER, IG_STEPS
+
+    published = _evidence_constants()
+    assert {k: v for k, v in published.items() if k.startswith("trigon.backends.")} == {
+        "trigon.backends.torch_readout.IG_STEPS": IG_STEPS,
+        "trigon.backends.torch_readout.IG_POWER": IG_POWER,
     }
