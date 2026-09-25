@@ -3,7 +3,7 @@
 
     python scripts/price.py
     python scripts/price.py --use-case sentiment --verbose
-    python scripts/price.py --typed-usd-per-mtok 0.007 --llm-usd-per-mtok 0.25
+    python scripts/price.py --typed-usd-per-mtok 0.0574 --llm-usd-per-mtok 0.25
 
 **The measured part and the assumed part are kept apart on purpose.** Token
 counts on both sides are exact: the typed path is counted by `SchemaCompiler`,
@@ -11,7 +11,10 @@ and the prompted-LLM path is counted by building the prompt a caller would
 actually send and running it through the same tokenizer. Prices per token are
 *not* measured here and are not defaulted to anything that looks sourced --
 `docs/roadmap.md` records the one cost figure this project inherited
-($0.007/MTok on an L4) as arithmetic over unsourced inputs, pending a burn-in.
+($0.007/MTok on an L4) as arithmetic over unsourced inputs. A preliminary
+burn-in of the certified model on Modal's L4 measured **$0.0574/MTok billed**
+at batch 1 (`reports/burn-in/modal-l4/`), eight times that; the example
+command above uses it.
 
 So the headline this prints is the **token ratio**, which needs no price at
 all, and the **break-even rate**: the $/MTok at which the typed path stops
@@ -190,9 +193,13 @@ def main() -> int:
             f"{'prompted $/mo':>14} {'saving':>9}"
         )
         print("-" * 68)
-        for item, _cold, cached, _prompt_cold, prompt_cached, output_tokens in rows:
+        for item, cold, _cached, _prompt_cold, prompt_cached, output_tokens in rows:
             n = item.monthly_volume
-            typed = n * cached / 1e6 * args.typed_usd_per_mtok
+            # Per BILLED token, the whole request, schema included: that is how
+            # scripts/burn_in.py quotes $/MTok, and its tokens-per-second already
+            # has the schema cache's saving in it. Multiplying that rate by the
+            # post-cache count would take the saving twice.
+            typed = n * cold / 1e6 * args.typed_usd_per_mtok
             prompted = (
                 n * prompt_cached / 1e6 * args.llm_usd_per_mtok + n * output_tokens / 1e6 * out_rate
             )
@@ -201,9 +208,9 @@ def main() -> int:
                 f"{prompted / typed if typed else float('inf'):>8.1f}x"
             )
         print()
-        print("Typed uses the CACHED column, which this repository does not yet")
-        print("do -- the layout permits it and phase 3 builds it. Quote the cold")
-        print("column for what ships today.")
+        print("Typed is billed on every token it is sent (the cold count), at a")
+        print("rate per billed token -- the unit burn_in.py measures, with the")
+        print("schema cache's saving already inside it.")
 
     if args.verbose:
         for item, *_ in rows:

@@ -152,9 +152,13 @@ draw. `scripts/seed_sweep.py` exists to stop that happening again, and a
 configuration should now be certified on the median and range across seeds
 rather than on one run. This model predates that rule.
 
-**The cost argument is unmeasured.** The $0.007/MTok figure the project's
-economics rest on is arithmetic over unsourced inputs. It is labelled an
-assumption everywhere it appears and needs a burn-in on real hardware.
+**The cost argument has a preliminary measurement, and it is eight times
+the inherited figure.** The $0.007/MTok the project's economics rested on
+was arithmetic over unsourced inputs. On Modal's L4 the certified Qwen2.5-1.5B
+Banking77 model costs **$0.0574 per million billed tokens** at batch 1, at a
+$0.80/hour price taken as an input (`reports/burn-in/modal-l4/`). That is a
+serverless L4 rather than the dedicated one the cost model assumes, so B.1
+stays open.
 
 ## How it was evaluated
 

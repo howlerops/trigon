@@ -91,7 +91,7 @@ are unsourced**, and this is the entire cost argument, so it needs a measured
 figure from our own phase-3 burn-in. See `docs/roadmap.md`, "what did not
 resolve". An 80B-A3B MoE needs H100-class memory per replica regardless of
 active parameters — the wrong workhorse whatever its active-parameter count
-says, and that part does not depend on the pricing.
+says, and that part does not depend on the pricing. *(Measured, preliminarily, 2026-09-25: $0.0574/MTok for the certified 1.5B model on Modal's L4, eight times this. See `docs/pricing.md`.)*
 
 | Tier | Model | Role | Hardware |
 | --- | --- | --- | --- |

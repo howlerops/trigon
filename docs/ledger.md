@@ -238,6 +238,7 @@ The most useful section. Each of these was argued for before it was measured.
 | p99 under load would show GIL pauses | p99/p50 *narrows* under pressure. Falsifier did not fire. |
 | CLIP-style cosine would fix the dot-product head | Did nothing alone; cancels the residual's gain. |
 | The reference configuration works | It decides its own outcome by seed. Led to the sweep rule. |
+| Latency and throughput depend on a model's shape, not its weights, so a random encoder at 1.5B's shape stands in for the real one (`burn_in.py`) | The certified adapter is **1.45× slower** than its stand-in at batch 1 (102.9 against 71.2 ms): GQA, SwiGLU, a bf16 backbone and LoRA are different kernels from `nn.TransformerEncoderLayer`. The shape rows now sit beside a row of the real model |
 | Sortish batching would cut training time by ~2.82× on HelpSteer2 | **1.13×** (1.09–1.18×, four seeds each arm). 2.82× was the padded *attention work*, and on the spike attention is a small share of a step. Outcomes unchanged (`reports/helpsteer2/README.md`, A.5) |
 | Fitting temperature on the training split is the discipline | It is the bug. Raised ECE on half the seeds. |
 | A Score temperature of 0.20 is a degenerate fit | Constructed test: sharpening is correct for an underconfident head. |
@@ -299,6 +300,15 @@ to hold.
 ## Corrected in our own favour
 
 Errors that flattered the project, found by re-measuring rather than by review:
+
+- **The cost figure was the spike's, and the savings it printed were 15–20×
+  too high.** The inherited $0.007/MTok assumed ~30k prefill tokens a second
+  on an L4. Measured on Modal's L4, the 0.5M-parameter spike does 35k and
+  costs $0.0063; the certified 1.5B model does 3.9k and costs **$0.0574**.
+  `price.py` turned the old figure into savings of 63–96× against a
+  $0.25/MTok LLM, and also multiplied that rate by post-cache tokens, taking
+  the cache's saving twice. Measured and counted once, the savings are
+  **4.2–4.5×** (`docs/pricing.md`).
 
 - **Circa was cleared green on its Hugging Face card alone.** The repository
   it links to names CC BY 4.0 and gives the BY-SA 4.0 text as the licence.
@@ -447,8 +457,14 @@ what order, and how each step is known to be done.
 - **Faithfulness of evidence is unmeasured.** Plausibility says a person would
   agree with a highlight, not that the model used it. Comprehensiveness and
   sufficiency — delete the spans, measure the answer move — are not built.
-- **$/MTok is unmeasured.** The whole cost argument beyond ~2× rests on it.
-  Needs the L4 burn-in.
+- **$/MTok has a preliminary measurement: $0.0574, not $0.007.** Modal's L4,
+  the certified model, batch 1, $0.80/h as an input
+  (`reports/burn-in/modal-l4/`). It closes on a rented, dedicated L4.
+- **The batched serving path does not use the schema cache.** At batch 8 and
+  32 the burn-in's computed tokens equal its billed ones. Every batched row
+  is slower per request than batch 1 and fails the latency target. So
+  `Engine.answer_many` pays full price for the 97% of the sequence that
+  batch 1 reads from the cache.
 - ~~The KV cache is off by default because nobody has timed it.~~ **Closed.**
   Timed on an idle machine: 6× at the served shape, 23× at 256 options
   (`reports/cache/README.md`). It is on by default now and `/healthz` reports
