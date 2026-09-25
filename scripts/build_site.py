@@ -114,6 +114,7 @@ DOC_GROUPS: tuple[tuple[str, tuple[Doc, ...]], ...] = (
         "Running it",
         (
             Doc("gpu-access", "docs/gpu-access.md", "Getting onto a GPU"),
+            Doc("security", "docs/security.md", "Security and going public"),
             Doc("pricing", "docs/pricing.md", "Pricing a use case"),
         ),
     ),
