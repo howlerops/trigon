@@ -217,6 +217,8 @@ twenty-two runs** — the investigation is closed and the evidence is in
 | HelpSteer2, four seeds, 12,000 cases, on a GPU | **Fails, and is no longer a collapse.** Lift +0.0189 median, +0.0155 to +0.0203; `complexity` +0.06–0.08 and `verbosity` +0.02 on every seed, `coherence`, `correctness`, `helpfulness` on their marginals; ECE 0.0082–0.0139, calibrator declined on all four |
 | `size`, across 7 interventions and 22 runs | Below its own marginal on every seed; median −0.0095 |
 | **`size` on Qwen2.5-1.5B, four seeds** | **+0.571 to +0.594 over its marginal on every seed**; `plan` +0.57–0.60, `at_risk` +0.13–0.14; every blocking gate passes; best validation loss 0.5556–0.6037 against a Bayes floor of 0.5585 |
+| **measuring_hate_speech on Qwen2.5-1.5B, four seeds** | **Certified, four of four**: Brier skill +0.1709 to +0.1778 against +0.02; every gate passes. The severe items are the weak ones: `genocide` about +0.01 and `violence` about +0.03 lift (`reports/measuring_hate_speech/README.md`) |
+| **Evidence on Qwen2.5-1.5B, HateXplain, four seeds per arm** | The supervised span head beats the rationale lexicon on both metrics on every seed: token F1 0.715–0.720 against 0.571–0.574, IOU F1 0.614–0.621 against 0.449–0.454. Gradient × input is below *every word* on both arms (0.179–0.308 against 0.434–0.437). Rationale supervision also narrows the accuracy spread from 0.115 to 0.012, median 0.6934 against 0.6625 (`reports/hatexplain/README.md`) |
 | **GoEmotions on Qwen2.5-1.5B, four seeds** | **Certified, four of four**: Brier skill +0.2857 to +0.3010 against the +0.02 limit; ECE 0.0034–0.0076 at a floor p95 of 0.0029–0.0033. `joy` carries it (+0.21 lift); `fear` and `disgust` sit barely off their marginals on every seed (`reports/goemotions/README.md`) |
 | **HelpSteer2 annotator distributions under `brier_over_marginal`** | **Certified, four seeds of four**: skill +0.0543 to +0.0658, median +0.0559, against +0.02. The hard-label ablation clears it too (median +0.0475), but only after its calibrator ran |
 | The synthetic suite on Qwen, with the per-primitive gate blocking | **Three seeds of four.** Seed 0's Score head is at ECE 0.0551, which its pooled 0.0408 hid. The median worst primitive is 0.0303, so the configuration still certifies. Banking77 passes on all four seeds (worst 0.0448) |
@@ -451,10 +453,13 @@ what order, and how each step is known to be done.
   term would have to be a proper score against the marginal distribution
   (Brier or NLL), which every report now prints beside the gates. Whether to
   gate on it is a decision, not made here.
-- **Evidence on the backbone is unmeasured.** The spike's trained span head
-  loses to a word list on HateXplain (`reports/hatexplain/README.md`). Whether
-  Qwen2.5-1.5B's beats it — on both token F1 and IOU F1, over three or more
-  seeds — is the falsifier in `docs/decisions.md`, and needs a GPU run.
+- ~~Evidence on the backbone is unmeasured.~~ **Closed, 2026-09-25**: on
+  Qwen2.5-1.5B the supervised span head beats the word list on both metrics on
+  four seeds of four (token F1 0.715–0.720 against 0.571–0.574). What opened in
+  its place: **no validated unsupervised attribution.** Gradient × input falls
+  below highlighting every word on the backbone, and it is what every checkpoint
+  without rationales serves. Integrated gradients is next
+  (`reports/hatexplain/README.md`).
 - **Faithfulness of evidence is unmeasured.** Plausibility says a person would
   agree with a highlight, not that the model used it. Comprehensiveness and
   sufficiency — delete the spans, measure the answer move — are not built.

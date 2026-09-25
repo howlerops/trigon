@@ -17,6 +17,7 @@ next, and what each step would have to show to count.
 | --- | --- |
 | A.1 Banking77 | ✅ **Certified twice** — the spike at 0.7248, then Qwen2.5-1.5B at **0.9009**, four seeds, every blocking gate (`reports/banking77/`). Deployed behind auth |
 | A.2 annotator distributions | ✅ **Certified.** HelpSteer2's per-annotator split. The model is calibrated against a random annotator, and the soft targets are shown to be why. It clears `brier_over_marginal` on four seeds of four, the gate decided for drawn-annotator corpora (Q20) (`reports/helpsteer2-annotators/`) |
+| A.2b three more annotator corpora | ✅ **GoEmotions and measuring_hate_speech certified on four seeds each** (Brier skill medians +0.295 and +0.175); Circa is evaluation-only (CC BY-SA). Evidence spans: the supervised head beats the word-list floor on the backbone; unsupervised attribution (gradient × input) does not beat *every word*, and integrated gradients is next |
 | A.3 real backbone | ✅ **Done.** All three synthetic questions certify on four seeds, `size` included (`reports/synthetic/`) |
 | A.4 CI's hardware | Blocked on Actions billing |
 | A.5 length bucketing | ✅ **Measured.** 1.13× faster (1.09–1.18×) with outcomes unchanged, four seeds per arm; not the 2.82× it was sized by (`reports/helpsteer2/README.md`) |
