@@ -127,6 +127,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--bucket-window",
+        type=int,
+        default=8,
+        help=(
+            "sort each window of accumulate x this many shuffled cases by length "
+            "before cutting chunks; 1 turns bucketing off (docs/next.md A.5)"
+        ),
+    )
+    parser.add_argument(
         "--device",
         default="auto",
         help=(
@@ -450,6 +459,7 @@ def main(argv: list[str] | None = None) -> int:
                 validation_fraction=args.validation_fraction,
                 max_batch_cells=args.max_batch_cells or None,
                 resume_path=args.resume_path,
+                bucket_window=args.bucket_window,
             ),
             compiler=compiler,
         )
