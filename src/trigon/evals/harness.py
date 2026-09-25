@@ -57,10 +57,19 @@ class Expectation:
     label: int | None = None
     probability: float | None = None
     distribution: tuple[float, ...] | None = None
+    #: What a person highlighted as the reason for the answer: character spans
+    #: ``(start, end)`` of the rendered state. ``None`` means nobody was asked,
+    #: which is different from ``()``, a person who looked and marked nothing.
+    #: Trains the evidence head (`trigon.training`) and scores plausibility
+    #: (`trigon.evals.rationale`). Never a label on its own.
+    rationale: tuple[tuple[int, int], ...] | None = None
 
     def __post_init__(self) -> None:
         if self.label is None and self.probability is None and self.distribution is None:
             raise ValueError("an expectation needs a label, a probability or a distribution")
+        for start, end in self.rationale or ():
+            if not 0 <= start < end:
+                raise ValueError(f"a rationale span must be non-empty, got [{start}, {end})")
 
     @property
     def hard_label(self) -> int | None:

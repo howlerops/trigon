@@ -309,3 +309,386 @@ def test_the_drawn_label_is_the_same_on_every_load(annotated):
     assert [c.expected["helpfulness"].label for c in first] == [
         c.expected["helpfulness"].label for c in again
     ]
+
+
+# -- Share-alike: evaluates, never trains (docs/decisions.md Q17) -------------
+
+
+def test_a_share_alike_corpus_evaluates_and_never_trains(fake, monkeypatch):
+    """The owner's decision of 2026-09-25, enforced on the licence itself.
+
+    Built as amber here, the tier a share-alike corpus must have; the next
+    test shows the licence refuses training even where a tier would not.
+    """
+    share_alike = dataclasses.replace(CORPORA["banking77"], tier="amber", licence="CC BY-SA 3.0")
+    monkeypatch.setitem(CORPORA, "banking77", share_alike)
+    assert load("banking77", "test", purpose="eval", root=fake)
+    with pytest.raises(CorpusLicenceError, match="share-alike"):
+        load("banking77", "train", purpose="train", root=fake)
+    with pytest.raises(CorpusLicenceError, match="share-alike"):
+        load("banking77", "train", purpose="redistribute", root=fake)
+
+
+def test_a_share_alike_corpus_cannot_be_declared_green():
+    """A tier is a field somebody types. The licence is what Q17 is about."""
+    with pytest.raises(ValueError, match="share-alike"):
+        dataclasses.replace(CORPORA["banking77"], licence="CC BY-SA 4.0")
+
+
+def test_share_alike_is_read_off_the_licence_whatever_the_version():
+    from trigon.evals.corpora import is_share_alike
+
+    for licence in ("CC BY-SA 3.0", "CC BY-SA 4.0", "cc-by-sa-4.0", "CC BY-SA 3.0 + GFDL"):
+        assert is_share_alike(licence), licence
+    for licence in ("CC BY 4.0", "CC BY 3.0", "Apache-2.0", "CC0-1.0", "MIT"):
+        assert not is_share_alike(licence), licence
+
+
+def test_circa_is_share_alike_and_refuses_training():
+    """Its README names CC BY 4.0 and links the BY-SA 4.0 text; the stricter binds."""
+    circa = corpus("circa")
+    assert circa.share_alike and circa.tier == "amber"
+    assert circa.permits("eval")
+    assert not circa.permits("train")
+    with pytest.raises(CorpusLicenceError, match="share-alike"):
+        load("circa", "train", purpose="train")
+
+
+def test_no_share_alike_row_in_the_licence_audit_is_green():
+    """BoolQ and FEVER are rows in docs/data.md, not loaders, and the rule is theirs too.
+
+    Every audit row whose licence column names a share-alike licence must be
+    amber or stricter, so a share-alike corpus cannot be cleared to train by
+    editing a table.
+    """
+    from trigon.evals.corpora import is_share_alike
+
+    audit = (pathlib.Path(__file__).resolve().parent.parent / "docs" / "data.md").read_text()
+    rows = [
+        [cell.strip() for cell in line.strip().strip("|").split("|")]
+        for line in audit.splitlines()
+        if line.startswith("| ") and line.count("|") >= 6
+    ]
+    header = next(r for r in rows if r[:2] == ["Dataset", "Primitive"])
+    licence, tier = header.index("Licence found"), header.index("Tier")
+    share_alike = [r for r in rows if r is not header and is_share_alike(r[licence])]
+    names = {r[0] for r in share_alike}
+    assert {"BoolQ", "FEVER", "Circa"} <= names, names
+    for row in share_alike:
+        assert "**green**" not in row[tier], f"{row[0]} is share-alike and green: {row}"
+
+
+# -- Rater-row and per-item annotator corpora ----------------------------------
+
+
+def test_verify_refuses_a_download_that_is_not_the_pinned_content():
+    from trigon.evals.corpora import verify
+
+    with pytest.raises(ValueError, match="pinned sha256"):
+        verify(corpus("circa"), "all", b"not the circa data")
+
+
+def test_a_parquet_corpus_asks_for_its_conversion_rather_than_fetching(tmp_path):
+    """The loader never downloads a format it cannot read."""
+    from trigon.evals.corpora import CorpusNotConverted
+
+    with pytest.raises(CorpusNotConverted, match="convert_corpus.py measuring_hate_speech"):
+        load("measuring_hate_speech", "train", purpose="train", root=tmp_path)
+
+
+GOEMOTIONS_HEADER = (
+    "text,id,author,subreddit,link_id,parent_id,created_utc,rater_id,example_very_unclear,"
+    "admiration,amusement,anger,annoyance,approval,caring,confusion,curiosity,desire,"
+    "disappointment,disapproval,disgust,embarrassment,excitement,fear,gratitude,grief,joy,"
+    "love,nervousness,optimism,pride,realization,relief,remorse,sadness,surprise,neutral"
+)
+_EMOTIONS = GOEMOTIONS_HEADER.split(",")[9:]
+
+
+def _goemotions_row(text, cid, rater, marked=(), unclear=False):
+    flags = ",".join("1" if e in marked else "0" for e in _EMOTIONS)
+    return f'"{text}",{cid},a,s,l,p,0.0,{rater},{unclear},{flags}'
+
+
+@pytest.fixture
+def goemotions(tmp_path: pathlib.Path) -> pathlib.Path:
+    """Three part files, one row per rater, a comment's raters split across parts."""
+    root = tmp_path / "cache"
+    (root / "goemotions").mkdir(parents=True)
+    parts: dict[int, list[str]] = {1: [], 2: [], 3: []}
+    for c in range(60):
+        text = f"comment {c % 50}"  # ten texts posted under two ids each
+        parts[1].append(_goemotions_row(text, f"id{c}", 1, marked=("annoyance",)))
+        parts[2].append(_goemotions_row(text, f"id{c}", 2, marked=("joy", "anger")))
+        parts[3].append(_goemotions_row(text, f"id{c}", 3, unclear=True))
+    # One usable rater and one abstention: below min_raters, dropped.
+    parts[1].append(_goemotions_row("lonely", "solo", 1, marked=("fear",)))
+    parts[2].append(_goemotions_row("lonely", "solo", 2, unclear=True))
+    for i, lines in parts.items():
+        (root / "goemotions" / f"part{i}.csv").write_text(
+            "\n".join([GOEMOTIONS_HEADER, *lines]) + "\n"
+        )
+    return root
+
+
+def test_goemotions_groups_raters_into_one_noul_per_ekman_group(goemotions):
+    cases = load("goemotions", "train", purpose="train", root=goemotions)
+    cases += load("goemotions", "test", purpose="eval", root=goemotions)
+    assert len(cases) == 60, "every comment once, the one-rater comment dropped"
+    assert list(cases[0].request.questions) == [
+        "anger",
+        "disgust",
+        "fear",
+        "joy",
+        "sadness",
+        "surprise",
+        "neutral",
+    ]
+    assert all(q.type == "noul" for q in cases[0].request.questions.values())
+    for case in cases:
+        # Rater 1 marked annoyance (anger's group), rater 2 joy and anger;
+        # rater 3 abstained, which is not a "no" to everything.
+        assert case.expected["anger"].distribution == (0.0, 1.0)
+        assert case.expected["joy"].distribution == (0.5, 0.5)
+        assert case.expected["fear"].distribution == (1.0, 0.0)
+        assert case.expected["joy"].label in (0, 1)
+
+
+def test_goemotions_holds_out_by_text_so_a_duplicate_never_straddles(goemotions):
+    train = load("goemotions", "train", purpose="train", root=goemotions)
+    test = load("goemotions", "test", purpose="eval", root=goemotions)
+    assert train and test
+    assert not {c.request.state for c in train} & {c.request.state for c in test}
+
+
+def _jsonl_gz(path: pathlib.Path, rows: list[dict]) -> None:
+    import gzip
+    import json
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with gzip.open(path, "wt") as handle:
+        for row in rows:
+            handle.write(json.dumps(row) + "\n")
+
+
+_MHS = (
+    "sentiment",
+    "respect",
+    "insult",
+    "humiliate",
+    "status",
+    "dehumanize",
+    "violence",
+    "genocide",
+    "attack_defend",
+)
+
+
+@pytest.fixture
+def hate_speech(tmp_path: pathlib.Path) -> pathlib.Path:
+    """Converted rows as scripts/convert_corpus.py writes them: floats, one per rater."""
+    root = tmp_path / "cache"
+    rows = []
+    for c in range(80):
+        for rater, level in ((10, 1.0), (11, 3.0), (12, 3.0)):
+            rows.append(
+                {
+                    "comment_id": c,
+                    "text": f"post {c}",
+                    "annotator_id": rater,
+                    **dict.fromkeys(_MHS, level),
+                    "hatespeech": 2.0 if level == 3.0 else 0.0,
+                }
+            )
+    # A rating outside hatespeech's three levels: that rater is dropped whole.
+    rows.append({**rows[0], "annotator_id": 13, "hatespeech": 3.0})
+    # A comment rated once is one answer, not a distribution: dropped.
+    rows.append({**rows[0], "comment_id": 999, "text": "rated once"})
+    _jsonl_gz(root / "measuring_hate_speech" / "all.jsonl.gz", rows)
+    return root
+
+
+def test_measuring_hate_speech_is_ten_score_items_per_annotator(hate_speech):
+    cases = load("measuring_hate_speech", "train", purpose="train", root=hate_speech)
+    cases += load("measuring_hate_speech", "test", purpose="eval", root=hate_speech)
+    assert len(cases) == 80
+    questions = cases[0].request.questions
+    assert list(questions) == [*_MHS, "hatespeech"]
+    assert [lv.name for lv in questions["sentiment"].levels] == ["0", "1", "2", "3", "4"]
+    assert [lv.name for lv in questions["hatespeech"].levels] == ["0", "1", "2"]
+    # The instructions say which end is which: a level named "3" means nothing alone.
+    assert "4 strongly" in questions["violence"].instructions
+    for case in cases:
+        assert case.expected["insult"].distribution == pytest.approx((0, 1 / 3, 0, 2 / 3, 0))
+        assert case.expected["hatespeech"].distribution == pytest.approx((1 / 3, 0, 2 / 3))
+
+
+def test_measuring_hate_speech_keeps_every_rater_of_a_comment_together(hate_speech):
+    train = load("measuring_hate_speech", "train", purpose="train", root=hate_speech)
+    test = load("measuring_hate_speech", "test", purpose="eval", root=hate_speech)
+    assert train and test
+    assert not {c.request.state for c in train} & {c.request.state for c in test}
+    ids = [c.case_id.rsplit("/", 1)[1] for c in train + test]
+    assert len(ids) == len(set(ids)), "a comment became two cases"
+
+
+CIRCA_HEADER = "\t".join(
+    [
+        "id",
+        "context",
+        "question-X",
+        "canquestion-X",
+        "answer-Y",
+        "judgements",
+        "goldstandard1",
+        "goldstandard2",
+    ]
+)
+
+
+@pytest.fixture
+def circa(tmp_path: pathlib.Path) -> pathlib.Path:
+    root = tmp_path / "cache"
+    (root / "circa").mkdir(parents=True)
+    lines = [CIRCA_HEADER]
+    for i in range(90):
+        judgements = "Yes#Yes#No#Probably no#Other" if i % 3 else "No#No#No#No"
+        lines.append(
+            f"{i}\tX wants to know about Y's food preferences.\tDo you like dish {i % 30}?\t"
+            f"I like dish {i % 30}.\tanswer {i}\t{judgements}\tYes\tYes"
+        )
+    # A judgement outside the declared set drops the pair; never mapped to a neighbour.
+    lines.append("90\tctx\tDo you swim?\tI swim.\tsometimes\tYes#Maybe-ish#No\tNA\tNA")
+    (root / "circa" / "all.tsv").write_text("\n".join(lines) + "\n")
+    return root
+
+
+def test_circa_is_one_choice_over_eight_interpretations(circa):
+    cases = load("circa", "train", purpose="eval", root=circa)
+    cases += load("circa", "test", purpose="eval", root=circa)
+    assert len(cases) == 90
+    question = cases[0].request.questions["interpretation"]
+    assert question.names[0] == "Yes" and question.names[-1] == "Other"
+    assert len(question.names) == 8
+    by_answer = {c.request.state.rsplit("\n", 1)[1]: c for c in cases}
+    mixed = by_answer["answer 1"].expected["interpretation"]
+    # Yes, Yes, No, Probably no, Other -- in the declared order.
+    assert mixed.distribution == pytest.approx((0.4, 0, 0, 0.2, 0.2, 0, 0, 0.2))
+    four = by_answer["answer 0"].expected["interpretation"]
+    assert four.distribution[3] == 1.0 and four.label == 3
+    assert "QUESTION-X:" in cases[0].request.state and "ANSWER-Y:" in cases[0].request.state
+
+
+def test_circa_holds_out_by_question_so_its_answers_stay_together(circa):
+    """Each question has several answers; a pair-level split tests on seen questions."""
+    train = load("circa", "train", purpose="eval", root=circa)
+    test = load("circa", "test", purpose="eval", root=circa)
+    assert train and test
+
+    def questions(cases):
+        return {c.request.state.split("QUESTION-X:\n")[1].split("\n")[0] for c in cases}
+
+    assert not questions(train) & questions(test)
+
+
+# -- HateXplain: labels, annotator distributions and human rationales ---------
+
+
+def _post(tokens, labels, rationales):
+    return {
+        "post_tokens": tokens,
+        "annotators": [{"label": label, "annotator_id": i} for i, label in enumerate(labels)],
+        "rationales": rationales,
+    }
+
+
+@pytest.fixture
+def hatexplain(tmp_path: pathlib.Path) -> pathlib.Path:
+    import json
+
+    root = tmp_path / "cache"
+    (root / "hatexplain").mkdir(parents=True)
+    posts = {
+        "a_twitter": _post(
+            ["you", "are", "a", "zorp", "and", "a", "blip"],
+            ["offensive", "offensive", "hatespeech"],
+            [[0, 0, 0, 1, 0, 0, 1], [0, 0, 0, 1, 0, 1, 1], [0, 0, 0, 1, 0, 0, 0]],
+        ),
+        "b_gab": _post(["what", "a", "nice", "day"], ["normal", "normal", "offensive"], []),
+        "c_gab": _post(["three", "way", "split"], ["normal", "offensive", "hatespeech"], []),
+    }
+    for i in range(60):
+        posts[f"filler{i}_twitter"] = _post(
+            ["plain", "words", str(i)], ["normal", "normal", "normal"], []
+        )
+    (root / "hatexplain" / "dataset.json").write_text(json.dumps(posts))
+    return root
+
+
+def _everything(root) -> list:
+    return load("hatexplain", "train", purpose="train", root=root) + load(
+        "hatexplain", "test", purpose="eval", root=root
+    )
+
+
+def test_hatexplain_is_green_on_its_verified_licence_and_credits_it():
+    spec = CORPORA["hatexplain"]
+    assert spec.tier == "green" and spec.permits("train")
+    assert "MIT" in spec.attribution and "CC BY 4.0" in spec.attribution
+    assert "Mathew" in spec.attribution
+    # Pinned to a commit, never a branch.
+    assert "/master/" not in spec.files["all"] and "01d742279dac" in spec.files["all"]
+
+
+def test_a_rationale_is_the_majority_of_the_annotators_who_gave_one(hatexplain):
+    case = next(c for c in _everything(hatexplain) if c.case_id.endswith("/a_twitter"))
+    expected = case.expected["label"]
+    state = case.request.state
+    assert state == "you are a zorp and a blip"
+    # "zorp" by all three; "a" (the second) by one of three; "blip" by two.
+    assert [state[s:e] for s, e in expected.rationale] == ["zorp", "blip"]
+    assert expected.label == 1  # offensive, two of three
+    assert expected.distribution == pytest.approx((0.0, 2 / 3, 1 / 3))
+
+
+def test_adjacent_highlighted_tokens_become_one_span(hatexplain, tmp_path):
+    import json
+
+    path = hatexplain / "hatexplain" / "dataset.json"
+    posts = json.loads(path.read_text())
+    posts["a_twitter"]["rationales"] = [[0, 0, 0, 1, 1, 1, 1]] * 3
+    path.write_text(json.dumps(posts))
+    case = next(c for c in _everything(hatexplain) if c.case_id.endswith("/a_twitter"))
+    state = case.request.state
+    assert [state[s:e] for s, e in case.expected["label"].rationale] == ["zorp and a blip"]
+
+
+def test_a_normal_post_has_no_rationale_and_a_split_post_is_dropped(hatexplain):
+    cases = {c.case_id.rsplit("/", 1)[1]: c for c in _everything(hatexplain)}
+    assert cases["b_gab"].expected["label"].rationale is None
+    assert cases["b_gab"].expected["label"].label == 0
+    assert "c_gab" not in cases
+
+
+def test_the_hatexplain_split_is_by_post_id_and_disjoint(hatexplain):
+    train_ids = {
+        c.case_id.rsplit("/", 1)[1]
+        for c in load("hatexplain", "train", purpose="train", root=hatexplain)
+    }
+    test_ids = {
+        c.case_id.rsplit("/", 1)[1]
+        for c in load("hatexplain", "test", purpose="eval", root=hatexplain)
+    }
+    assert train_ids and test_ids and not train_ids & test_ids
+    again = {
+        c.case_id.rsplit("/", 1)[1]
+        for c in load("hatexplain", "test", purpose="eval", root=hatexplain)
+    }
+    assert again == test_ids
+
+
+def test_the_licence_check_runs_before_the_hatexplain_loader(hatexplain, monkeypatch):
+    red = dataclasses.replace(CORPORA["hatexplain"], tier="red", licence="no stated licence")
+    monkeypatch.setitem(CORPORA, "hatexplain", red)
+    with pytest.raises(CorpusLicenceError):
+        load("hatexplain", "test", purpose="eval", root=hatexplain)

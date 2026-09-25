@@ -49,9 +49,33 @@ token layout contributes a factor of two; the remaining two orders of magnitude
 are entirely the claim that a small typed model serves tokens far more cheaply
 than a frontier one, and that claim is unverified.
 
-At $0.007 against $0.25/MTok the tool prints savings of 75–96×. Those are
-*your* inputs multiplied by *our* exact token counts. The token counts are
-trustworthy. The 0.007 is not, yet.
+At $0.007 against $0.25/MTok the tool used to print savings of 75–96×.
+
+**Measured, preliminarily: $0.0574/MTok, and savings of 4.2–4.5×.** The
+certified Qwen2.5-1.5B Banking77 model on Modal's L4 serves 9.6 requests a
+second at batch 1, p50 102.9 ms, which is 3,869 billed tokens a second. At a
+$0.80/hour price that is $0.0574 per million billed tokens, **eight times the
+inherited figure**. The inherited $0.007 matches what the 0.5M-parameter spike
+costs on the same card ($0.0063), and the spike is not a model anyone would
+ship. `python scripts/price.py --typed-usd-per-mtok 0.0574 --llm-usd-per-mtok 0.25`
+prints 4.4× for moderation, 4.2× for sentiment and 4.5× for support triage.
+That is still cheaper. It is not two orders of magnitude, and nothing in this
+repository should say it is.
+
+Three things keep this preliminary:
+
+- It is Modal's serverless L4, not the dedicated one the cost model assumes.
+- $0.80/hour is an input.
+- The rate per billed token was measured at Banking77's shape, where the
+  schema cache skips 97% of the sequence. A use case with a larger state and
+  a smaller schema pays more per billed token.
+
+B.1 closes on a rented L4 (`reports/burn-in/modal-l4/`).
+
+**The tool double-counted the cache until this measurement.** It multiplied
+the typed rate by the *post-cache* token count. A burn-in's tokens per
+second already have the cache's saving in them, so that took the saving
+twice. `price.py` now bills every sent token at a per-billed-token rate.
 
 **One input to that number has since been measured, and it moves the right
 way.** `$/MTok` is dollars per hour over tokens per second, and the schema KV
@@ -81,9 +105,9 @@ which is the direction errors run when nobody is looking for them.
 | Generated tokens, prompted path | **Measured.** The JSON reply, counted |
 | Attention pairs per request | **Measured.** `scripts/attention_table.py` |
 | Gateway overhead | **Measured.** 2.28 ms, 1.5% of the p50 budget |
-| $/MTok, typed path | **Assumed.** Needs the L4 burn-in |
+| $/MTok, typed path | **Measured, preliminary.** $0.0574 billed, Modal's L4, batch 1 |
 | $/MTok, prompted path | **Yours.** A published list price, not ours to quote |
-| Throughput per GPU | **Unmeasured.** Needs hardware |
+| Throughput per GPU | **Measured, preliminary.** 9.6 req/s at batch 1 for the certified model; batching is slower (the batched path skips the schema cache) |
 
 ## How the comparison is kept fair
 

@@ -43,3 +43,10 @@ reports/iso/iso-seed?-isotonic.json
 # committed: a checked-in copy is a second source of truth that goes stale
 # silently. `trigon.evals.corpora` records provenance and attribution instead.
 corpora/
+
+# The GitHub Pages site, rendered by scripts/build_site.py. Generated from
+# docs/, reports/ and spec/ on every deploy and never committed.
+_site/
+
+# Agent worktrees
+.claude/worktrees/

@@ -1,8 +1,9 @@
 name: CI
 
-# Every branch, not just `main`. This said `branches: [main]` and this
-# repository has no `main` -- its default branch is the one the work is on --
-# so the workflow had never run once. A CI configuration that cannot fire is
+# Every branch, not just `main`. This once said `branches: [main]` while the
+# repository had no `main` -- its default branch was the one the work was on --
+# so the workflow never ran once. `main` exists now (2026-09-25), and the
+# lesson stands: every branch. A CI configuration that cannot fire is
 # indistinguishable from a green one, which is the worse half of that.
 on:
   push:
@@ -22,9 +23,22 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
 
+# The token every job gets can read the repository and nothing else. No job
+# here writes to it, and a public repository's workflows should not be able to.
+permissions:
+  contents: read
+
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # Which machine runs this. `vars.CI_RUNNER` (a repository variable, e.g.
+    # the label of the self-hosted fly.io runner) when it is set, GitHub's
+    # otherwise -- and **always GitHub's for a pull request from a fork**. A
+    # public repository's fork PRs run code nobody here has reviewed, and on a
+    # self-hosted runner that code runs on our machine, with its network and
+    # whatever it can reach. GitHub's own guidance is never to expose a
+    # self-hosted runner to them, so the expression below does not leave it
+    # to a setting.
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork) && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     strategy:
       fail-fast: false
       matrix:
@@ -85,7 +99,8 @@ jobs:
     # The eval harness is the durable asset, so it runs on every change. The
     # lexical floor fails the calibration gates by design, which is why this
     # job reports the suites rather than gating on them.
-    runs-on: ubuntu-latest
+    # The same runner rule as `test`: never self-hosted for a fork's PR.
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork) && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -115,7 +130,9 @@ jobs:
     # The closed loop: train the reference model, calibrate it, run the gates.
     # Minutes rather than seconds, so it is not on the pull-request path.
     if: github.event_name == 'push'
-    runs-on: ubuntu-latest
+    # Push only, so only people who can push reach it: the self-hosted runner
+    # is safe here without the fork check.
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     # Its own group, and **not** cancel-in-progress. A half-hour sweep that is
     # discarded by the next docs commit never finishes, which is what happened
     # to every attempt at A.4's measurement. Sweeps queue behind each other

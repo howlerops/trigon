@@ -181,6 +181,41 @@ def test_a_marginal_predictor_passes_every_calibration_gate():
     assert "ignores the state" in gates["accuracy_over_baseline"].note
 
 
+def test_on_a_drawn_annotator_corpus_the_proper_score_rejects_the_marginal():
+    """The owner's decision of 2026-09-25, and the term CLAUDE.md requires.
+
+    Where the outcome is one annotator drawn per case no predictor clears
+    ``accuracy_over_baseline``, so passing ``marginal_brier`` makes the
+    accuracy gates advisory -- and only because ``brier_over_marginal`` takes
+    their place: the same marginal predictor must still fail a blocking gate.
+    """
+    cases = _noul_only(synthetic_outcome_cases(n=6000, noise=0.5))
+    base_rate = sum(1 for c in cases if c.expected["at_risk"].hard_label == 1) / len(cases)
+    result, _ = run_calibration_suite(Engine(FixedNoul(base_rate)), cases, floor_trials=40)
+
+    # Scored against its own marginal: skill zero, and it may not ship.
+    gates = check_gates(result, marginal_brier=result.calibration.brier)
+    by_name = {g.name: g for g in gates}
+    assert by_name["brier_over_marginal"].value == pytest.approx(0.0, abs=1e-9)
+    assert not by_name["brier_over_marginal"].passed
+    assert by_name["accuracy_over_baseline"].advisory
+    assert "brier_over_marginal" in {g.name for g in blocking(gates) if not g.passed}
+
+    # A model a tenth better than the marginal on the proper score clears it.
+    gates = check_gates(result, marginal_brier=result.calibration.brier * 1.1)
+    by_name = {g.name: g for g in gates}
+    assert by_name["brier_over_marginal"].passed
+    assert "accuracy_over_baseline" not in {g.name for g in blocking(gates)}
+
+    # And a label corpus keeps the accuracy gate blocking, with no Brier term.
+    by_name = {g.name: g for g in check_gates(result)}
+    assert not by_name["accuracy_over_baseline"].advisory
+    assert "brier_over_marginal" not in by_name
+
+    with pytest.raises(ValueError):
+        check_gates(result, marginal_brier=0.0)
+
+
 def test_baseline_is_the_per_question_majority_label():
     cases = _noul_only(synthetic_outcome_cases(n=400, noise=0.5))
     truths = [c.expected["at_risk"].hard_label for c in cases]

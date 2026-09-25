@@ -14,14 +14,14 @@ narrative sections are a discipline, not a test.
 
 | | |
 | --- | ---: |
-| Commits | 184 |
-| Tests | 514 |
-| Python files (`src`, `tests`, `scripts`) | 111 |
-| Lines in `src/` | 12,090 |
-| Release gates | 8 |
+| Commits | 190 |
+| Tests | 537 |
+| Python files (`src`, `tests`, `scripts`) | 113 |
+| Lines in `src/` | 12,633 |
+| Release gates | 9 |
 | Green-tier corpora in the licence audit | 9 |
 | Committed use cases | 3 |
-| Real corpora loadable | 3 |
+| Real corpora loadable | 7 |
 
 **Certified on real data: Qwen2.5-1.5B on Banking77**, LoRA rank 16, lr
 1e-4, 4 epochs — median accuracy 0.9009 against the spike's 0.7248, every seed
@@ -73,6 +73,14 @@ twenty-two runs** — the investigation is closed and the evidence is in
 - **Schema KV prefix cache** — per-layer pre-attention normed states plus the
   schema block's outputs, keyed on `schema_hash`. Off by default; see
   *Corrected in our own favour*.
+- **Evidence** (2026-09-25). `options.include_evidence` returns, per answer,
+  the spans of the state that drove it — character offsets, text, score — and
+  `evidence_method` saying where they came from: a span head only when the
+  checkpoint was trained on human rationales, gradient × input otherwise,
+  `unavailable` from a backend that cannot attribute. Off by default and
+  absent from the default response. Independence of evidence across questions
+  is asserted for both methods, cache on and off, with a positive control
+  that sees a real leak (`docs/architecture.md`, *Evidence*).
 
 ### Calibration
 - Temperature scaling and isotonic calibration, **selected per primitive** on a
@@ -84,6 +92,13 @@ twenty-two runs** — the investigation is closed and the evidence is in
 
 ### Evaluation
 - Four suites, one runner, release gates that exit non-zero.
+- **`brier_over_marginal`, the gate for a drawn-annotator corpus** (Q20,
+  2026-09-25). On such a corpus no predictor can pass the accuracy gates, so
+  they are reported there as advisory. The Brier skill over the training
+  marginal, at least +0.02, is the blocking term that fails a model ignoring
+  its input. **The per-question and per-primitive gates now block on every
+  backbone run** (Q16), which ends the "advisory until a real backbone"
+  arrangement.
 - `scripts/seed_sweep.py` — certify on the spread, not the best draw.
 - `scripts/regate.py` — refit calibration on a saved checkpoint and re-gate in
   a minute instead of retraining for twenty.
@@ -99,6 +114,11 @@ twenty-two runs** — the investigation is closed and the evidence is in
 - `scripts/train_corpus.py` — train, calibrate and gate on a real corpus, with
   the marginal predictor as the floor since a human-labelled corpus has no
   Bayes-optimal loss to quote.
+- **Plausibility of evidence** (`trigon.evals.rationale`): token F1 and IOU F1
+  against human rationales, on words of the state, printed beside three
+  floors — the lexical floor, a word list fitted to the training split's
+  highlights, and every word. `train_corpus.py` appends it for any corpus
+  with rationales and trains the evidence head on them.
 - **Training on a GPU, from this sandbox.** `scripts/modal_train.py` runs one
   Modal container per seed and writes each seed's reports to a Volume before
   returning, so a `--detach`ed run outlives the VM that launched it and
@@ -109,6 +129,12 @@ twenty-two runs** — the investigation is closed and the evidence is in
 - **A deployed model.** The certified Banking77 adapter behind the real
   gateway on Modal (`scripts/modal_serve.py`): API-key auth, calibrated,
   schema cache on, scale to zero; 81–108 ms model time warm.
+- **C.1, the weights, packaged** (Q21). `releases/banking77-qwen15b-v1/` holds
+  the model card and checksums, pinned to the committed calibrators and
+  report by `tests/test_release.py`. The bundle, adapter included, is on the
+  `trigon-runs` Volume. It is not yet a GitHub Release: this session's git
+  proxy refused every push that was not to its working branch, a tag
+  included.
 - `scripts/burn_in.py` — B.1, written and handed over. Times the serving path
   at 0.5B and 1.5B backbone shapes rather than the spike's, because the spike
   would flatter `$/MTok` by the ratio of the models' compute.
@@ -122,6 +148,27 @@ twenty-two runs** — the investigation is closed and the evidence is in
   ~1.3%) and HelpSteer2 (Score, five ordered ratings over one state) — the
   first real exercise of the Score primitive and of multi-question
   independence on data the generator did not write.
+- **Three more annotator-distribution corpora load, one per primitive.**
+  GoEmotions as seven Nouls (Ekman groups plus neutral) over 57,877 comments,
+  grouped from one row per rater; measuring_hate_speech as ten Score survey
+  items over 29,488 comments, 7,912 annotators; Circa as one eight-way Choice
+  over 34,268 question–answer pairs, five judgements each. Every one is held
+  out by a hash of its grouping text, pinned by URL revision and SHA-256, and
+  runs end to end through `scripts/train_corpus.py` on the CPU spike. Only
+  measuring_hate_speech needed converting from Parquet
+  (`scripts/convert_corpus.py`). The first Noul with a distribution exposed
+  that the Noul loss ignored it and trained on the one drawn annotator; it
+  now fits the share of annotators who said yes.
+- **CC BY-SA evaluates and never trains** (owner's decision, 2026-09-25, Q17).
+  Enforced on the licence string, not the tier: a share-alike corpus refuses
+  `purpose="train"` whatever tier it carries, cannot be declared green, and a
+  test holds every row of `docs/data.md`'s audit — BoolQ, FEVER, DBpedia-14,
+  Circa — to it. `train_corpus.py` refuses such a corpus before building a
+  model, since a calibrator fitted on it ships too.
+- **HateXplain**, the rationale stream (2026-09-25): three-way labels,
+  annotator distributions, and the tokens annotators marked as the reason.
+  Licence read from both primary sources — MIT on the repository, CC BY 4.0 on
+  the authors' dataset card — so green; pinned to a commit and a SHA-256.
 
 ### Reference model
 - Prefill-only transformer, byte-level BPE trained on the project's own data,
@@ -170,7 +217,15 @@ twenty-two runs** — the investigation is closed and the evidence is in
 | HelpSteer2, four seeds, 12,000 cases, on a GPU | **Fails, and is no longer a collapse.** Lift +0.0189 median, +0.0155 to +0.0203; `complexity` +0.06–0.08 and `verbosity` +0.02 on every seed, `coherence`, `correctness`, `helpfulness` on their marginals; ECE 0.0082–0.0139, calibrator declined on all four |
 | `size`, across 7 interventions and 22 runs | Below its own marginal on every seed; median −0.0095 |
 | **`size` on Qwen2.5-1.5B, four seeds** | **+0.571 to +0.594 over its marginal on every seed**; `plan` +0.57–0.60, `at_risk` +0.13–0.14; every blocking gate passes; best validation loss 0.5556–0.6037 against a Bayes floor of 0.5585 |
+| **GoEmotions on Qwen2.5-1.5B, four seeds** | **Certified, four of four**: Brier skill +0.2857 to +0.3010 against the +0.02 limit; ECE 0.0034–0.0076 at a floor p95 of 0.0029–0.0033. `joy` carries it (+0.21 lift); `fear` and `disgust` sit barely off their marginals on every seed (`reports/goemotions/README.md`) |
+| **HelpSteer2 annotator distributions under `brier_over_marginal`** | **Certified, four seeds of four**: skill +0.0543 to +0.0658, median +0.0559, against +0.02. The hard-label ablation clears it too (median +0.0475), but only after its calibrator ran |
+| The synthetic suite on Qwen, with the per-primitive gate blocking | **Three seeds of four.** Seed 0's Score head is at ECE 0.0551, which its pooled 0.0408 hid. The median worst primitive is 0.0303, so the configuration still certifies. Banking77 passes on all four seeds (worst 0.0448) |
 | Banking77 accuracy (pilot, 2 seeds) | 0.4640 / 0.4193 against a 1.8% marginal — **it transfers** |
+| **Evidence on HateXplain, the spike, two seeds** | The trained span head: token F1 0.488–0.495, IOU F1 0.330–0.331. **A word list beats it**: 0.573 / 0.452 — every word highlighted in half its training occurrences, very nearly a slur list. Gradient × input 0.30–0.32 token F1, below highlighting every word (0.434) |
+| HateXplain accuracy, the spike, with and without rationale supervision | 0.5798 on both supervised seeds, 0.5664 / 0.5702 without, against a 0.408 marginal; every blocking gate passes on all four. Two seeds a side: not an effect |
+| Evidence cost, the spike, one question | p50 2.68 ms plain, 3.36 ms span head, 5.16 ms gradient × input; the span head's answers bit-identical to the plain ones |
+| Evidence across shapes | float32 gradient × input moves 1.7e-06 when a question is added, 14× the logits' 1.2e-07; float64 reads exactly 0.0. A real leak moves it 1e-03 |
+| Qwen2.5 offsets against `tokenizers` | Offset for offset on NFC text; on text NFC changes, ours cover the whole composed character and the reference drops the combining mark |
 
 ---
 
@@ -184,6 +239,8 @@ The most useful section. Each of these was argued for before it was measured.
 | p99 under load would show GIL pauses | p99/p50 *narrows* under pressure. Falsifier did not fire. |
 | CLIP-style cosine would fix the dot-product head | Did nothing alone; cancels the residual's gain. |
 | The reference configuration works | It decides its own outcome by seed. Led to the sweep rule. |
+| Latency and throughput depend on a model's shape, not its weights, so a random encoder at 1.5B's shape stands in for the real one (`burn_in.py`) | The certified adapter is **1.45× slower** than its stand-in at batch 1 (102.9 against 71.2 ms): GQA, SwiGLU, a bf16 backbone and LoRA are different kernels from `nn.TransformerEncoderLayer`. The shape rows now sit beside a row of the real model |
+| Sortish batching would cut training time by ~2.82× on HelpSteer2 | **1.13×** (1.09–1.18×, four seeds each arm). 2.82× was the padded *attention work*, and on the spike attention is a small share of a step. Outcomes unchanged (`reports/helpsteer2/README.md`, A.5) |
 | Fitting temperature on the training split is the discipline | It is the bug. Raised ECE on half the seeds. |
 | A Score temperature of 0.20 is a degenerate fit | Constructed test: sharpening is correct for an underconfident head. |
 | Burden of proof belongs on *declining* a calibrator | Seven constructed heads say the opposite, on six of them. |
@@ -203,7 +260,8 @@ The most useful section. Each of these was argued for before it was measured.
 | The mask build is cheap next to the forward pass | It was 208 of 399 ms. Banking77's uniform lengths hid it behind a cache hit. |
 | Removing 2.82× of padding waste makes training 2.82× faster | 1.63×. Attention is not the whole step; everything linear is unaffected. |
 | A.3 and B.1 are blocked on hardware *(assumed)* | Checked. No GPU is present or reachable. Still blocked, now on evidence. |
-| The distribution corpora need a Parquet reader | HelpSteer2 is gzipped JSONL. Three of four do; it does not. |
+| The distribution corpora need a Parquet reader | HelpSteer2 is gzipped JSONL. Then GoEmotions' authors publish raw per-rater CSV and Circa's repository a TSV: only the Hugging Face mirrors are Parquet-only. One of four needs converting. |
+| Circa is CC BY 4.0, so green | Its README says CC BY 4.0 and links the BY-SA 4.0 text as the full licence. Read as the stricter: amber, evaluation only. |
 | "ECE ≤ 0.05 per corpus" is a reachable done-condition | Not on a corpus whose test split is below the 5,000-sample floor. |
 | Modal is reachable from here: `api.modal.com` answers 200 | A `GET` is not the client. It speaks gRPC and behind this proxy needs `python-socks`; without it, 50 ms to "could not connect", the cause two exceptions down. |
 | `scripts/modal_train.py` is ready and waiting on a token | It would have trained on the CPU. Nothing in the backend or trainer moved a tensor to a device; `--gpu` was ignored; results lived only on the VM that gets reclaimed. |
@@ -218,6 +276,8 @@ The most useful section. Each of these was argued for before it was measured.
 | `modal run --detach` plus a Volume survives this VM | It keeps the app, not the calls. The container restarted twelve minutes into a 12-epoch sweep; Modal cancelled all four `starmap` inputs and nothing was written. Now deploy + `spawn`, and the launcher exits at once. |
 | Accepting a calibrator at 95% of resamples is the right burden of proof | At four classes, yes. At 77 classes on a 500-answer check it is more power than the check has: worst-case gate error 0.0844 over five known heads, three of them failing. 0.80 keeps all five under 0.05 (0.0438) and is identical at four classes. |
 | A chunk of eight fits on a 24 GB GPU | HelpSteer2's longest case is 7,171 tokens; the chunk asked a 22 GiB A10 for 6.13 GiB at once and died four minutes in. |
+| Evidence can be held to the answers' float32 bound across shapes | Gradient × input moved 1.7e-06 when one question was added, past the 1e-06 bound: a backward pass amplifies the forward's rounding ~14×. In float64 it reads 0.0, so the tests compare there. |
+| Asking for evidence leaves the answer bit-identical | Not under gradient × input: autograd takes `nn.TransformerEncoder` off its no-grad fast path, and the answer moves 2e-08. The span head, which needs no gradients, now stays on that path and is exact. |
 
 ---
 
@@ -241,6 +301,21 @@ to hold.
 ## Corrected in our own favour
 
 Errors that flattered the project, found by re-measuring rather than by review:
+
+- **The cost figure was the spike's, and the savings it printed were 15–20×
+  too high.** The inherited $0.007/MTok assumed ~30k prefill tokens a second
+  on an L4. Measured on Modal's L4, the 0.5M-parameter spike does 35k and
+  costs $0.0063; the certified 1.5B model does 3.9k and costs **$0.0574**.
+  `price.py` turned the old figure into savings of 63–96× against a
+  $0.25/MTok LLM, and also multiplied that rate by post-cache tokens, taking
+  the cache's saving twice. Measured and counted once, the savings are
+  **4.2–4.5×** (`docs/pricing.md`).
+
+- **Circa was cleared green on its Hugging Face card alone.** The repository
+  it links to names CC BY 4.0 and gives the BY-SA 4.0 text as the licence.
+  Green would have let it into a training mix and put a ShareAlike question
+  on the weights; it is amber now, eval only. Caught on the second source,
+  before anything trained on it.
 
 - **`gateway_cost.py` charged the test client to the gateway.** httpx costs
   1.35 ms/call; a third of the published figure was the instrument.
@@ -356,42 +431,73 @@ what order, and how each step is known to be done.
   from it (`TrainingConfig.resume_path`); every Modal seed gets its own on the
   Volume. A run killed after epoch 1 and restarted in a fresh process ends
   bit-identical to an uninterrupted one on CPU (`tests/test_training.py`).
-  Not yet exercised by a real preemption.
+  **Exercised on Modal, 2026-09-25**: a container killed mid-epoch 3 was
+  restarted by Modal in about 8 s and resumed after epoch 2/8
+  (`reports/resilience/README.md`). A Modal-initiated preemption has still not
+  been observed.
 - ~~Whether soft targets cause the calibrated disagreement.~~ **Closed: they
   do.** Same splits, majority-vote targets: raw ECE against a random
   annotator 0.0560 median against 0.0096, two seeds of four failing the gate
   uncalibrated, and Brier worse on every seed even after the calibrator
   (`reports/helpsteer2-annotators/README.md`).
-- **`accuracy_over_baseline` cannot certify an annotator-distribution
+- ~~`accuracy_over_baseline` cannot certify an annotator-distribution
+  corpus.~~ **Closed by decision Q20**: `brier_over_marginal` is the blocking
+  term there, and HelpSteer2's annotator distributions certify on four seeds
+  of four (`reports/helpsteer2-annotators/README.md`). The record:
+  **`accuracy_over_baseline` cannot certify an annotator-distribution
   corpus.** On HelpSteer2 no predictor clears +0.05 -- the annotators do not
   (`reports/helpsteer2/ceiling.md`). `CLAUDE.md` requires every gate set to
   keep a term that fails a model ignoring its input; for such corpora that
   term would have to be a proper score against the marginal distribution
   (Brier or NLL), which every report now prints beside the gates. Whether to
   gate on it is a decision, not made here.
-- **$/MTok is unmeasured.** The whole cost argument beyond ~2× rests on it.
-  Needs the L4 burn-in.
+- **Evidence on the backbone is unmeasured.** The spike's trained span head
+  loses to a word list on HateXplain (`reports/hatexplain/README.md`). Whether
+  Qwen2.5-1.5B's beats it — on both token F1 and IOU F1, over three or more
+  seeds — is the falsifier in `docs/decisions.md`, and needs a GPU run.
+- **Faithfulness of evidence is unmeasured.** Plausibility says a person would
+  agree with a highlight, not that the model used it. Comprehensiveness and
+  sufficiency — delete the spans, measure the answer move — are not built.
+- **$/MTok has a preliminary measurement: $0.0574, not $0.007.** Modal's L4,
+  the certified model, batch 1, $0.80/h as an input
+  (`reports/burn-in/modal-l4/`). It closes on a rented, dedicated L4.
+- **The batched serving path does not use the schema cache.** At batch 8 and
+  32 the burn-in's computed tokens equal its billed ones. Every batched row
+  is slower per request than batch 1 and fails the latency target. So
+  `Engine.answer_many` pays full price for the 97% of the sequence that
+  batch 1 reads from the cache.
 - ~~The KV cache is off by default because nobody has timed it.~~ **Closed.**
   Timed on an idle machine: 6× at the served shape, 23× at 256 options
   (`reports/cache/README.md`). It is on by default now and `/healthz` reports
   it.
-- **Semantic compatibility is unmet.** The wire, envelope and status codes now
-  line up (`docs/compat.md`); the model answers one question of three well. An
+- **Semantic compatibility is unmeasured.** The wire, envelope and status
+  codes line up (`docs/compat.md`). The backbone now answers all three
+  synthetic questions and certifies Banking77. But agreement with an
+  incumbent on real traffic has never been run: `scripts/migrate.py` needs
+  that traffic and an incumbent endpoint, and neither is here. An
   adapter cannot fix that, and calibration makes a wrong answer credible.
-- **Training pads accumulation chunks to their longest member**, which costs
-  2.82× of the attention work on a corpus whose lengths run 253–3,647 tokens.
-  Sortish batching would fix it and changes which cases share a gradient step,
-  so it is `docs/next.md` A.5 rather than a quiet edit mid-certification.
+- ~~Training pads accumulation chunks to their longest member.~~ **Closed
+  (A.5).** Bucketing is on by default and measured: 1.13× faster on
+  HelpSteer2, with outcomes indistinguishable from the unbucketed arm. The
+  2.82× it was sized by was attention work, not wall clock (see *disproved*).
 - **HelpSteer2 fails at 12,000 cases, and has stopped collapsing.** Four
   seeds on a GPU, median lift +0.0189 against the +0.05 gate, spread
   +0.0155 to +0.0203. `complexity` and `verbosity` are learned on every seed;
   `coherence`, `correctness` and `helpfulness` — the three that judge quality
   rather than surface — sit on their marginals. Twelve epochs changed
-  nothing (+0.0188), so this is the spike's ceiling, not under-training; the
-  open question is whether a pretrained backbone moves the three quality
-  questions, which is A.3 and is running.
+  nothing (+0.0188), so this is the spike's ceiling, not under-training.
+  **Qwen2.5-1.5B answers it partly**: lift +0.024 to +0.029, and Brier 7.9–8.8%
+  better than the marginal. On the per-annotator split, `helpfulness` and
+  `correctness` move on every seed and `coherence` moves on none. The
+  aggregated labels still fail +0.05. How far anything can reach there is
+  bounded only loosely: one half-panel predicts the other at −0.024
+  (`reports/helpsteer2/ceiling.md`).
   `reports/helpsteer2/README.md`.
-- **A run longer than a session's idle window cannot finish here.** It was
+- ~~A run longer than a session's idle window cannot finish here.~~
+  **Closed, 2026-09-25.** A run launched by another cloud session, which was
+  then archived and its container released, was collected by id from this one:
+  return code 0, reports and checkpoint intact (`reports/resilience/README.md`).
+  The record of how it got here: **A run longer than a session's idle window cannot finish here.** It was
   moved to Modal, and the 12,000-case HelpSteer2 run finished there — but only
   because this container outlived it. **Reopened by the first real reclamation**: the next sweep lost all
   four seeds to it (see *disproved*). Closes again when a spawned run is
@@ -402,15 +508,16 @@ what order, and how each step is known to be done.
   26 predates the only workflow change since. Metered Actions minutes on a
   private organization repository is the likeliest explanation and cannot be
   confirmed without billing access. A.4 is blocked on it.
-- **Three of five data streams unbuilt.** Two corpora load. The
-  *annotator-distribution* data — the stream that teaches a model what
-  disagreement looks like, which is the product — is still not among them:
-  HelpSteer2's main split carries aggregated integer ratings, and its
-  `disagreements/` split is a separate thing to load.
-- **GoEmotions, measuring_hate_speech and Circa are Parquet-only.** A reader
-  for them would put a compiled dependency in the import path of the
-  calibration math and the drift tests. They get converted in `scripts/`
-  first, or not at all.
+- **Two of five data streams unbuilt.** Six corpora load. The
+  annotator-distribution stream has four now — HelpSteer2's `disagreements/`
+  split (trained and certified), GoEmotions and measuring_hate_speech
+  (loadable, green, smoke-run on the CPU spike, **never trained at size**) and
+  Circa (evaluation only). Nothing on the new three is a result yet: it needs
+  a backbone sweep on Modal. Synthetic workflows with teacher labels, and the
+  adversarial and paired stream, remain unbuilt.
+- ~~GoEmotions, measuring_hate_speech and Circa are Parquet-only.~~ **Closed.**
+  Only measuring_hate_speech is; it is converted once by
+  `scripts/convert_corpus.py`, and the loader stays stdlib.
 - **"Certified on four seeds" means four seeds on one machine.** The
   configuration failed its gates on GitHub's hardware: choice accuracy 0.530
   against 0.648–0.849 across the certified four, and choice ECE 0.1076 against
@@ -422,4 +529,5 @@ what order, and how each step is known to be done.
   was never swept. The CI job publishes rather than blocks, because a single
   draw on unswept hardware is not evidence either way; sweeping four seeds
   there is `docs/next.md` A.4.
-- **CC BY-SA on a derived model** — counsel opinion requested, unresolved.
+- ~~CC BY-SA on a derived model.~~ **Closed by the owner, 2026-09-25 (Q17):**
+  evaluation only, never training, enforced in `trigon.evals.corpora`.

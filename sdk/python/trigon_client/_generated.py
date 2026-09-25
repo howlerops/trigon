@@ -52,7 +52,7 @@ class Usage:
 
     @classmethod
     def from_dict(cls, payload: dict) -> Usage:
-        return cls(**{k: v for k, v in payload.items() if k in _FIELDS[cls]})
+        return cls(**{k: _nested(cls, k, v) for k, v in payload.items() if k in _FIELDS[cls]})
 
 
 @dataclass(frozen=True)
@@ -68,7 +68,29 @@ class Timing:
 
     @classmethod
     def from_dict(cls, payload: dict) -> Timing:
-        return cls(**{k: v for k, v in payload.items() if k in _FIELDS[cls]})
+        return cls(**{k: _nested(cls, k, v) for k, v in payload.items() if k in _FIELDS[cls]})
+
+
+@dataclass(frozen=True)
+class EvidenceSpan:
+    """One span of the state that drove an answer."""
+
+    #: One past the last character, so `state[start:end]` is the span.
+    end: int
+    #: How strongly this span drove the answer. Under `span_head` it is the
+    #: head's probability that the span is part of a human rationale, fitted
+    #: with a proper scoring rule and never calibrated or gated; under
+    #: `gradient_x_input` it is relative within this answer, 1 being its
+    #: strongest token, and is not a probability at all.
+    score: float
+    #: First character of the span in the state string.
+    start: int
+    #: `state[start:end]`, so a caller need not slice it.
+    text: str
+
+    @classmethod
+    def from_dict(cls, payload: dict) -> EvidenceSpan:
+        return cls(**{k: _nested(cls, k, v) for k, v in payload.items() if k in _FIELDS[cls]})
 
 
 @dataclass(frozen=True)
@@ -87,6 +109,18 @@ class ChoiceAnswer:
     selected: str
     #: The coverage that prediction set guarantees.
     coverage_target: float | None = None
+    #: Present when `include_evidence` was asked for: the spans of the state
+    #: that drove this answer, in order of position. Empty means nothing
+    #: cleared the threshold, which is an answer, not an error.
+    evidence: list[EvidenceSpan] | None = None
+    #: How `evidence` was produced. `span_head`: a head trained on human
+    #: rationales. `gradient_x_input`: attribution of the selected label to
+    #: each state token, from a model never shown a rationale -- a statement
+    #: about the model, not a prediction of what a person would highlight.
+    #: `lexical_overlap`: the lexical floor's word matches. `unavailable`: this
+    #: backend cannot attribute, and `evidence` is empty for that reason rather
+    #: than because nothing mattered.
+    evidence_method: str | None = None
     #: Present when a conformal profile was applied: the options that survive
     #: at the profile's coverage target. A singleton set is the useful case; an
     #: empty one means abstain, not that no answer exists.
@@ -110,7 +144,7 @@ class ChoiceAnswer:
 
     @classmethod
     def from_dict(cls, payload: dict) -> ChoiceAnswer:
-        return cls(**{k: v for k, v in payload.items() if k in _FIELDS[cls]})
+        return cls(**{k: _nested(cls, k, v) for k, v in payload.items() if k in _FIELDS[cls]})
 
 
 @dataclass(frozen=True)
@@ -130,6 +164,18 @@ class ScoreAnswer:
     score: float
     #: The coverage that prediction set guarantees.
     coverage_target: float | None = None
+    #: Present when `include_evidence` was asked for: the spans of the state
+    #: that drove this answer, in order of position. Empty means nothing
+    #: cleared the threshold, which is an answer, not an error.
+    evidence: list[EvidenceSpan] | None = None
+    #: How `evidence` was produced. `span_head`: a head trained on human
+    #: rationales. `gradient_x_input`: attribution of the selected label to
+    #: each state token, from a model never shown a rationale -- a statement
+    #: about the model, not a prediction of what a person would highlight.
+    #: `lexical_overlap`: the lexical floor's word matches. `unavailable`: this
+    #: backend cannot attribute, and `evidence` is empty for that reason rather
+    #: than because nothing mattered.
+    evidence_method: str | None = None
     #: Levels surviving the conformal profile, if one was applied.
     prediction_set: list[str] | None = None
     #: How much of the distribution survived trimming.
@@ -143,7 +189,7 @@ class ScoreAnswer:
 
     @classmethod
     def from_dict(cls, payload: dict) -> ScoreAnswer:
-        return cls(**{k: v for k, v in payload.items() if k in _FIELDS[cls]})
+        return cls(**{k: _nested(cls, k, v) for k, v in payload.items() if k in _FIELDS[cls]})
 
 
 @dataclass(frozen=True)
@@ -156,13 +202,25 @@ class NoulAnswer:
     #: everything a confidence statistic could summarise, and 0.5 is the model
     #: saying it does not know.
     probability: float
+    #: Present when `include_evidence` was asked for: the spans of the state
+    #: that drove this answer, in order of position. Empty means nothing
+    #: cleared the threshold, which is an answer, not an error.
+    evidence: list[EvidenceSpan] | None = None
+    #: How `evidence` was produced. `span_head`: a head trained on human
+    #: rationales. `gradient_x_input`: attribution of the selected label to
+    #: each state token, from a model never shown a rationale -- a statement
+    #: about the model, not a prediction of what a person would highlight.
+    #: `lexical_overlap`: the lexical floor's word matches. `unavailable`: this
+    #: backend cannot attribute, and `evidence` is empty for that reason rather
+    #: than because nothing mattered.
+    evidence_method: str | None = None
     #: The pre-calibration probability, if you asked for it.
     raw_probability: float | None = None
     type: str = "noul"
 
     @classmethod
     def from_dict(cls, payload: dict) -> NoulAnswer:
-        return cls(**{k: v for k, v in payload.items() if k in _FIELDS[cls]})
+        return cls(**{k: _nested(cls, k, v) for k, v in payload.items() if k in _FIELDS[cls]})
 
 
 #: Discriminated on ``type``, exactly as the contract declares it: a
@@ -176,8 +234,22 @@ _ANSWERS = {
 
 _FIELDS = {
     cls: {f.name for f in fields(cls)}
-    for cls in (Usage, Timing, ChoiceAnswer, ScoreAnswer, NoulAnswer)
+    for cls in (Usage, Timing, EvidenceSpan, ChoiceAnswer, ScoreAnswer, NoulAnswer)
 }
+
+#: Fields holding a list of another schema, parsed into it.
+_NESTED = {
+    (ChoiceAnswer, "evidence"): EvidenceSpan,
+    (ScoreAnswer, "evidence"): EvidenceSpan,
+    (NoulAnswer, "evidence"): EvidenceSpan,
+}
+
+
+def _nested(cls: type, name: str, value: Any) -> Any:
+    inner = _NESTED.get((cls, name))
+    if inner is None or value is None:
+        return value
+    return [inner.from_dict(item) for item in value]
 
 
 def parse_answer(payload: dict) -> ChoiceAnswer | ScoreAnswer | NoulAnswer:
@@ -322,6 +394,7 @@ class TrigonClient:
 __all__ = [
     "CONTRACT_VERSION",
     "ChoiceAnswer",
+    "EvidenceSpan",
     "NoulAnswer",
     "Response",
     "ScoreAnswer",

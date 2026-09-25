@@ -11,18 +11,18 @@ next, and what each step would have to show to count.
 
 ---
 
-## Where it stands, 2026-09-24
+## Where it stands, 2026-09-25
 
 | Item | State |
 | --- | --- |
 | A.1 Banking77 | ✅ **Certified twice** — the spike at 0.7248, then Qwen2.5-1.5B at **0.9009**, four seeds, every blocking gate (`reports/banking77/`). Deployed behind auth |
-| A.2 annotator distributions | ✅ **Built and measured.** HelpSteer2's per-annotator split; the model is calibrated against a random annotator and the soft targets are shown to be why (`reports/helpsteer2-annotators/`). Its accuracy gate cannot be passed by any predictor on this data — a gate decision, open |
+| A.2 annotator distributions | ✅ **Certified.** HelpSteer2's per-annotator split. The model is calibrated against a random annotator, and the soft targets are shown to be why. It clears `brier_over_marginal` on four seeds of four, the gate decided for drawn-annotator corpora (Q20) (`reports/helpsteer2-annotators/`) |
 | A.3 real backbone | ✅ **Done.** All three synthetic questions certify on four seeds, `size` included (`reports/synthetic/`) |
 | A.4 CI's hardware | Blocked on Actions billing |
-| A.5 length bucketing | Implemented; its before/after timing is still owed |
-| B.1 L4 burn-in | Written and handed over (`scripts/burn_in.py`); needs a rented L4 |
+| A.5 length bucketing | ✅ **Measured.** 1.13× faster (1.09–1.18×) with outcomes unchanged, four seeds per arm; not the 2.82× it was sized by (`reports/helpsteer2/README.md`) |
+| B.1 L4 burn-in | 🟡 **Preliminary, on Modal's L4.** The certified model: p50 102.9 ms, **$0.0574/MTok** billed at $0.80/h, which is 8× the inherited $0.007. Savings against a $0.25/MTok LLM are **4.2–4.5×**, not 63–96× (`reports/burn-in/modal-l4/`). A rented, dedicated L4 still closes it |
 | B.2 / B.3 | Done |
-| C.1 publish weights | **Unblocked by A.3.** Outward-facing and licence-bearing; waits on a decision |
+| C.1 publish weights | 🟡 **Decided and packaged (Q21).** The certified adapter, calibrators and model card are in `releases/banking77-qwen15b-v1/` and on the Modal Volume. What is left is attaching the bundle to a GitHub Release, which needs a token or the UI |
 | C.2 / C.3 | Done |
 
 Two findings changed what a number means here. **The calibrator's accept
@@ -41,7 +41,7 @@ Brier and NLL beside the gates (`reports/helpsteer2/ceiling.md`).
 | 1.3 real backbone | Not started. Needs a GPU |
 | 2.1 data streams | **One of five built.** Banking77 loads, licence-gated in code |
 | 2.2 per-corpus calibration | Machinery built (`scripts/train_corpus.py`); one corpus measured |
-| 2.3 CC BY-SA | Unresolved. Needs counsel |
+| 2.3 CC BY-SA | **Resolved 2026-09-25 (Q17):** evaluation only, enforced in code |
 | 3.1 KV cache | **Built, off by default**, for a measured reason |
 | 3.2 model server | Not started |
 | 3.3 L4 burn-in | Not started. Needs an L4 |
@@ -67,7 +67,9 @@ thing has been **checked** or is **assumed**.
 
 This is now the only thing standing between the project and a usable product.
 Wire, envelope, calibration machinery, gates and migration tooling are all
-built; the model answers one synthetic question of three.
+built; the model answers one synthetic question of three. *(Written before
+A.3. The backbone now answers all three, and A.1–A.3 are done: see the table
+at the top.)*
 
 **A.1 Certify Banking77 on a seed spread.** A two-seed pilot is measured and
 `accuracy_over_baseline` passes enormously: +0.4460 and +0.4027 against a
@@ -118,7 +120,9 @@ HelpSteer2's per-annotator ratings, soft targets, four seeds: calibrated
 against a random annotator (ECE 0.0082–0.0271) and at the annotators' own
 accuracy ceiling (`reports/helpsteer2-annotators/README.md`). It fails
 `accuracy_over_baseline`, which no predictor on this data can pass
-(`reports/helpsteer2/ceiling.md`) -- the gate question is open.
+(`reports/helpsteer2/ceiling.md`). **Decided 2026-09-25 (Q20):** such a
+corpus certifies on `brier_over_marginal`, and this one does, at a median
+skill of +0.0559 against +0.02.
 
 **HelpSteer2 at 12,000 cases has an answer, and it is still a failure — a
 different one.** Four seeds on Modal: median lift +0.0189, range +0.0155 to
@@ -232,7 +236,13 @@ step, and making that change mid-certification would invalidate the comparison
 it exists to speed up. There is no certification in flight now — the three
 HelpSteer2 attempts all died — so the objection is spent.
 
-**The before-and-after is still owed** and this item is not closed without it.
+✅ **Closed, 2026-09-25.** Four seeds per arm on one commit and one GPU type:
+1,697 s against 1,917 s median training time, **1.13×**, and lift +0.0189
+against +0.0188. The done-condition's "certifies" cannot be read literally
+on HelpSteer2, because neither arm clears `accuracy_over_baseline` on the
+aggregated labels. What it guarded against was bucketing changing the
+outcome, and the outcomes match seed for seed. The 2.82× was attention work
+quoted as if it were wall clock (`docs/ledger.md`, *disproved*).
 
 **Done when** a four-seed sweep at the same configuration certifies with the
 bucketing on, and the wall clock is published beside the unbucketed run.

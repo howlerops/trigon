@@ -78,5 +78,36 @@ def assert_answer_unmoved(before: dict, after: dict, qid: str) -> None:
         elif isinstance(value, float):
             moved = abs(value - other)
             assert moved < ROUNDING, f"{qid}.{field} moved by {moved:.3e}, which is not rounding"
+        elif isinstance(value, list) and value and isinstance(value[0], dict):
+            # Evidence spans: where they are is a decision and stays exact;
+            # how strongly is arithmetic and gets the rounding bound.
+            assert len(value) == len(other), f"{qid}.{field}: {value!r} became {other!r}"
+            for span, moved_span in zip(value, other, strict=True):
+                assert_answer_unmoved(span, moved_span, f"{qid}.{field}")
         else:
             assert value == other, f"{qid}.{field} changed from {value!r} to {other!r}"
+
+
+def assert_evidence_unmoved(before, after, qid: str, *, bound: float) -> None:
+    """One question's token-level evidence, compared across two requests.
+
+    ``(start, end, score)`` per state token, from `QuestionOutput.evidence`.
+    Compared before the threshold turns them into spans, because that is where
+    the claim lives: a span is a decision taken on these numbers, and a token
+    sitting within an ulp of the threshold could flip on rounding alone, which
+    would be a flaky test and not a leak. Offsets exact always; scores within
+    ``bound``, which is 0.0 -- exact -- at a fixed shape. The bound across
+    shapes is the caller's, because it depends on the dtype: see
+    `tests/test_independence.py` on why evidence is compared in float64 there.
+    """
+    assert before is not None and after is not None, f"{qid}: no evidence returned"
+    assert [t[:2] for t in before] == [t[:2] for t in after], f"{qid}: evidence offsets moved"
+    assert any(t[2] for t in before), f"{qid}: every score is 0, which compares nothing"
+    for (start, end, a), (_, _, b) in zip(before, after, strict=True):
+        if bound == 0.0:
+            assert a == b, f"{qid}: evidence at [{start}, {end}) moved from {a!r} to {b!r}"
+        else:
+            assert abs(a - b) < bound, (
+                f"{qid}: evidence at [{start}, {end}) moved by {abs(a - b):.3e}, "
+                "which is not rounding"
+            )

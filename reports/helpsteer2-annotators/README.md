@@ -34,6 +34,41 @@ Per question, lift over each question's own marginal:
 The ceiling column is the leave-one-out oracle from `reports/helpsteer2/ceiling.md`:
 predicting one annotator from the other annotators of the same response.
 
+## Certified, under the gate this corpus needed
+
+On 2026-09-25 the owner decided how a drawn-annotator corpus certifies
+(`docs/decisions.md`, Q20). Argmax accuracy cannot be the instrument here:
+the annotators themselves clear their marginal by only +0.021. So on such a
+corpus the accuracy gates are reported as advisory, and the blocking term that
+fails a model ignoring its input is **`brier_over_marginal`**. It reads
+1 − Brier / Brier of the training split's marginal distribution and must reach
++0.02 (`limits.MIN_BRIER_SKILL_OVER_MARGINAL`).
+
+These are re-gated from the committed reports' own numbers: the gated suite's
+Brier against the marginal's 0.6340. `accuracy_over_baseline` was the only
+blocking gate that failed on any of the eight runs.
+
+| Seed | Brier skill, soft | Brier skill, hard |
+| ---: | ---: | ---: |
+| 0 | **+0.0658** | +0.0504 |
+| 1 | +0.0564 | +0.0554 |
+| 2 | +0.0543 | +0.0406 |
+| 3 | +0.0553 | +0.0445 |
+| median | **+0.0559** | +0.0475 |
+
+**The soft-target configuration certifies on all four seeds**, with a margin
+of at least 0.034 over the limit. That margin is about three times the
+0.0115 spread between its seeds. **The hard-label ablation also clears the
+gate**, but only after its calibrator ran; two of its seeds would fail ECE
+raw. The gate asks whether the model uses its input. The ECE columns below
+say which arm learned the disagreement.
+
+The gate is pooled over five questions, and pooling hides the same thing
+here that it does for accuracy. `coherence` does not move off its marginal,
+on the model or on the oracle. A pooled Brier skill cannot say that; the
+per-question lift table below does. The next run's report prints
+`brier_over_marginal` among its gates directly.
+
 ## How to read it
 
 **Calibrated against the disagreement itself.** ECE 0.0082–0.0271 against a

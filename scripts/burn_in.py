@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import pathlib
 import platform
 import statistics
@@ -95,6 +96,12 @@ def _hardware(device: str) -> dict:
             ).stdout.strip()
         except (OSError, subprocess.CalledProcessError) as exc:
             info["nvidia_smi"] = f"unavailable: {exc}"
+    # A container built from the tree has no .git; its launcher says which
+    # commit and whether it was clean, the same way the Modal training runs do.
+    if os.environ.get("TRIGON_COMMIT"):
+        info["commit"] = os.environ["TRIGON_COMMIT"]
+        info["dirty"] = os.environ.get("TRIGON_DIRTY") == "1"
+        return info
     for key, args in (("commit", ["rev-parse", "HEAD"]), ("dirty", ["status", "--porcelain"])):
         try:
             out = subprocess.run(
@@ -118,10 +125,18 @@ def measure(name: str, device: str, args) -> dict:
 
     from trigon.backends.torch_readout import ReadoutConfig, TorchReadoutBackend
 
-    d_model, layers, heads, d_ff = SHAPES[name]
-    backend = TorchReadoutBackend(
-        ReadoutConfig(d_model=d_model, n_layers=layers, n_heads=heads, d_ff=d_ff), seed=0
-    ).to(device)
+    if name == "certified":
+        # The shipped model itself, not a shape standing in for it: a frozen
+        # bf16 backbone with LoRA, whose kernels (GQA, SwiGLU, RMSNorm) differ
+        # from the stand-in encoder's. Only possible since A.3 produced one.
+        backend = TorchReadoutBackend.load(args.weights).to(device)
+        cfg = backend.config
+        d_model, layers, heads, d_ff = cfg.d_model, cfg.n_layers, cfg.n_heads, cfg.d_ff
+    else:
+        d_model, layers, heads, d_ff = SHAPES[name]
+        backend = TorchReadoutBackend(
+            ReadoutConfig(d_model=d_model, n_layers=layers, n_heads=heads, d_ff=d_ff), seed=0
+        ).to(device)
     backend.cache_prefixes = True
     parameters = sum(p.numel() for p in backend.model.parameters())
     engine = Engine(backend, compiler=backend.make_compiler())
@@ -203,7 +218,8 @@ def render(hardware: dict, results: list[dict], args) -> str:
         "",
         f"{args.options} options, one Choice, schema KV cache on, "
         f"{args.requests} requests per row after {args.warmup} warm rounds. "
-        "Weights are random at each shape; latency and throughput depend on shape only.",
+        "Weights are random at each shape; latency and throughput depend on shape only. "
+        "The `certified` row, when present, is the trained checkpoint itself.",
         "",
         f"Latency target: p50 ≤ {target.p50_ms:.0f} ms, p99 ≤ {target.p99_ms:.0f} ms.",
         "",
@@ -243,7 +259,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--usd-per-hour", type=float, default=None, help="what the box costs")
     parser.add_argument("--device", default="cuda", help="cuda by default: this is a GPU burn-in")
     parser.add_argument("--out", default=None, help="a directory for burn-in.md and .json")
+    parser.add_argument(
+        "--weights",
+        default=None,
+        help="a trained checkpoint to time as the 'certified' row, beside the shapes",
+    )
     args = parser.parse_args(argv)
+    if args.weights and "certified" not in args.shapes.split(","):
+        args.shapes = f"certified,{args.shapes}"
     args.batch_sizes = [int(b) for b in args.batch_sizes.split(",")]
 
     import torch

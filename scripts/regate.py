@@ -92,7 +92,9 @@ def main() -> int:
             suite="calibration/calibrated",
             floor_trials=args.floor_trials,
         )
-        gates = check_gates(after, slices=slices)
+        # Q16: the per-question gates block on a pretrained backbone.
+        backbone = type(backend).__name__ != "TorchReadoutBackend"
+        gates = check_gates(after, slices=slices, require_per_question=backbone)
         by_name = {g.name: g for g in gates}
         blocked = [g.name for g in blocking(gates) if not g.passed]
         worst += bool(blocked)

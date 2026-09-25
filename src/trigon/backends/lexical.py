@@ -16,15 +16,19 @@ from __future__ import annotations
 
 import hashlib
 import math
+import re
 import time
 from collections import Counter
 
 from ..schema import CompiledRequest, render_state
+from ..text import STOPWORDS, stem
 from ..text import tokenize as _tokenize
 from ..types import ChoiceQuestion, NoulQuestion, ScoreQuestion, SystemOneRequest
 from .base import BackendOutput, QuestionOutput
 
 __all__ = ["LexicalBackend"]
+
+_WORD = re.compile(r"[A-Za-z0-9]+")
 
 
 class LexicalBackend:
@@ -45,6 +49,7 @@ class LexicalBackend:
         state_text = render_state(request.state)
         state_counts = Counter(_tokenize(state_text))
         outputs: dict[str, QuestionOutput] = {}
+        want_evidence = request.options.include_evidence
 
         for compiled_q in compiled.schema.questions:
             question = request.questions[compiled_q.question_id]
@@ -65,7 +70,15 @@ class LexicalBackend:
             else:
                 logits = tuple(s / self.temperature for s in scores)
             outputs[compiled_q.question_id] = QuestionOutput(
-                question_id=compiled_q.question_id, kind=compiled_q.kind, logits=logits
+                question_id=compiled_q.question_id,
+                kind=compiled_q.kind,
+                logits=logits,
+                evidence=(
+                    _overlap_evidence(state_text, [question.instructions, *members])
+                    if want_evidence
+                    else None
+                ),
+                evidence_method="lexical_overlap" if want_evidence else None,
             )
 
         return BackendOutput(
@@ -99,3 +112,23 @@ class LexicalBackend:
 
     def __repr__(self) -> str:
         return f"LexicalBackend(temperature={self.temperature})"
+
+
+def _overlap_evidence(state_text: str, question_texts: list[str]) -> tuple:
+    """The floor's evidence: every state word the question's own text contains.
+
+    The same matching the floor answers with -- lowercased, stemmed, stopwords
+    dropped -- so its evidence is exactly what its answer read. It is the
+    bottom of the evidence table the same way the floor is the bottom of every
+    Pareto plot: a model whose highlights are no better than the words it was
+    asked about has not learned to highlight.
+    """
+    wanted = {token for text in question_texts for token in _tokenize(text)}
+    out = []
+    for match in _WORD.finditer(state_text):
+        raw = match.group().lower()
+        if len(raw) < 2 or raw in STOPWORDS:
+            continue
+        if stem(raw) in wanted:
+            out.append((match.start(), match.end(), 1.0))
+    return tuple(out)

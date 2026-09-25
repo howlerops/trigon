@@ -22,7 +22,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 
-from ..schema import CompiledRequest
+from ..schema import CompiledRequest, SegmentKind
 from ..schema.tokens import TokenEstimator
 from ..types import SystemOneRequest
 
@@ -39,6 +39,13 @@ class QuestionOutput:
     # Filled when the large-cardinality stage scored a shortlist: maps position
     # in ``logits`` to position in the caller's declared option list.
     shortlist_indices: tuple[int, ...] | None = None
+    #: Filled only when the request asked for evidence and this backend can
+    #: attribute: ``(start, end, score)`` per state token, character offsets
+    #: into the rendered state, score in [0, 1]. Tokens, never spans -- the
+    #: engine merges them under one rule for every backend (`trigon.evidence`).
+    evidence: tuple[tuple[int, int, float], ...] | None = None
+    #: How ``evidence`` was produced; one of the contract's `EvidenceMethod`.
+    evidence_method: str | None = None
 
 
 @dataclass(frozen=True)
@@ -84,6 +91,7 @@ def estimator_of(backend: object) -> TokenEstimator | None:
 def validate_output(output: BackendOutput, compiled: CompiledRequest) -> None:
     """Assert the structural guarantee. Raises ``ValueError`` on violation."""
     expected = {q.question_id: q for q in compiled.schema.questions}
+    state_length = sum(len(s.text) for s in compiled.segments if s.kind is SegmentKind.STATE)
     missing = expected.keys() - output.outputs.keys()
     if missing:
         raise ValueError(f"backend returned no logits for {sorted(missing)}")
@@ -113,6 +121,21 @@ def validate_output(output: BackendOutput, compiled: CompiledRequest) -> None:
             raise ValueError(f"question {qid!r}: expected {want} logits, got {len(got.logits)}")
         if any(_is_not_finite(x) for x in got.logits):
             raise ValueError(f"question {qid!r}: non-finite logit")
+        if got.evidence is not None:
+            _validate_evidence(qid, got.evidence, state_length)
+
+
+def _validate_evidence(qid: str, evidence, state_length: int) -> None:
+    """Offsets inside the state, scores in [0, 1]: a span pointing past the
+    state would slice the wrong text and nothing downstream would notice."""
+    for start, end, score in evidence:
+        if not 0 <= start < end <= state_length:
+            raise ValueError(
+                f"question {qid!r}: evidence [{start}, {end}) lies outside the "
+                f"{state_length}-character state"
+            )
+        if _is_not_finite(score) or not 0.0 <= score <= 1.0:
+            raise ValueError(f"question {qid!r}: evidence score {score} is not in [0, 1]")
 
 
 def _is_not_finite(x: float) -> bool:

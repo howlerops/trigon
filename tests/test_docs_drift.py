@@ -26,6 +26,7 @@ from trigon.limits import (
     DEFAULT_BUDGET,
     MAX_FLOOR_FRACTION_OF_GATE,
     MIN_ACCURACY_OVER_BASELINE,
+    MIN_BRIER_SKILL_OVER_MARGINAL,
     MIN_CALIBRATION_SAMPLES,
 )
 
@@ -84,6 +85,7 @@ def test_the_prose_option_trigger_and_shortlist_match():
     [
         (r"\| `sample_size` \| ≥ ([\d,]+) \|", MIN_CALIBRATION_SAMPLES),
         (r"\| `accuracy_over_baseline` \| ≥ \+([\d.]+) \|", MIN_ACCURACY_OVER_BASELINE),
+        (r"\| `brier_over_marginal` \| ≥ \+([\d.]+) \|", MIN_BRIER_SKILL_OVER_MARGINAL),
         (
             r"\| Workhorse ECE \(and adaptive ECE\) \| ≤ ([\d.]+) \|",
             CALIBRATION_GATES["workhorse_max_ece"],
@@ -137,3 +139,22 @@ def test_the_testability_rule_is_stated_as_it_is_enforced():
     # Spelled "½" in prose and 0.5 in code; if the constant moves, the prose
     # has to be rewritten rather than have a digit changed, which is the point.
     assert MAX_FLOOR_FRACTION_OF_GATE == 0.5
+
+
+def test_the_evidence_constants_are_published_as_they_are_enforced():
+    """`docs/architecture.md`, *Evidence*, restates the span rule's numbers."""
+    from trigon.evals.rationale import IOU_MATCH
+    from trigon.evidence import EVIDENCE_THRESHOLD, MAX_WORD_CHARS
+
+    text = (DOCS / "architecture.md").read_text()
+    published = {
+        name: float(value)
+        for value, name in re.findall(
+            r"^\| [^|]+ \| ([\d.]+) \| `(trigon\.[\w.]+)` \|$", text, re.M
+        )
+    }
+    assert published == {
+        "trigon.evidence.EVIDENCE_THRESHOLD": EVIDENCE_THRESHOLD,
+        "trigon.evidence.MAX_WORD_CHARS": MAX_WORD_CHARS,
+        "trigon.evals.rationale.IOU_MATCH": IOU_MATCH,
+    }

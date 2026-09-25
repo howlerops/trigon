@@ -129,7 +129,7 @@ hold, and the ecosystem turned out larger than assumed (28 open reproductions,
   the entire cost argument, so the **burn-in is pulled forward out of phase 3**:
   at week 13 the number arrives after the point where it would shape
   positioning. Until it is measured, the cost claim is an assumption and is
-  labelled one wherever it appears.
+  labelled one wherever it appears. *(Measured, preliminarily, 2026-09-25: $0.0574/MTok for the certified 1.5B model on Modal's L4, eight times this. See `docs/pricing.md`.)*
 
 ## Staffing
 

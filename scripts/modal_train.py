@@ -81,6 +81,8 @@ image = (
         "pyyaml>=6",
         "safetensors>=0.4",
         "regex>=2023",
+        # For `scripts/convert_corpus.py` only; `trigon` never imports it.
+        "pyarrow>=14",
     )
     .env({"HF_HOME": f"{WEIGHTS}/hf", "TRIGON_WEIGHTS_CACHE": f"{WEIGHTS}/backbones"})
     .add_local_dir(
@@ -88,7 +90,15 @@ image = (
         "/root/trigon",
         # The venv and the corpus cache are large and rebuilt inside the job;
         # reports come back through the Volume rather than riding along.
-        ignore=["**/.venv/**", "**/corpora/**", "**/.git/**", "**/__pycache__/**", "**/*.pt"],
+        ignore=[
+            "**/.venv/**",
+            "**/corpora/**",
+            "**/.git/**",
+            "**/.claude/**",
+            "_site/**",
+            "**/__pycache__/**",
+            "**/*.pt",
+        ],
     )
 )
 
@@ -102,6 +112,10 @@ weights = modal.Volume.from_name("trigon-weights", create_if_missing=True)
     gpu="A10G",
     timeout=60 * 60 * 20,
     volumes={RUNS: runs, WEIGHTS: weights},
+    # A container that dies -- a host failure, an OOM kill, `modal container
+    # stop` -- reruns the seed, which picks up its resume file below. A failed
+    # gate is a returned payload, not an exception, so it is never retried.
+    retries=modal.Retries(max_retries=2, initial_delay=10.0),
 )
 def train_one(corpus: str, seed: int, flags: list[str], run: dict) -> dict:
     """One seed, one container. Writes its reports to the Volume and returns them."""
@@ -129,6 +143,27 @@ def train_one(corpus: str, seed: int, flags: list[str], run: dict) -> dict:
     flags = [f.replace("{seed}", str(seed)) for f in flags]
     if "--save-model" in flags:
         flags[flags.index("--save-model") + 1] = str(target / f"seed{seed}.pt")
+
+    # A corpus published only as Parquet is converted into the container's
+    # cache first -- the loader reads plain files and says so rather than
+    # importing a Parquet reader (CLAUDE.md, *When adding a corpus*).
+    if corpus != "synthetic":
+        sys.path.insert(0, str(root / "src"))
+        from trigon.evals.corpora import corpus as spec_of
+
+        if spec_of(corpus).converted_from:
+            subprocess.run(
+                [sys.executable, "scripts/convert_corpus.py", corpus],
+                cwd=root,
+                env={**os.environ, "PYTHONPATH": str(root / "src")},
+                check=True,
+            )
+
+    # Each container that runs this seed writes one "training on" line to the
+    # shared, appended log, so the count so far says which life this is.
+    # `elapsed_s` below times this life only; a restarted seed's wall clock is
+    # longer than it says, and `lives` is how a reader knows to add them up.
+    previous_lives = log_path.read_text().count(": training on ") if log_path.exists() else 0
 
     started = time.time()
     # Streamed to the Volume as it runs, so `status` can show a live epoch
@@ -176,6 +211,7 @@ def train_one(corpus: str, seed: int, flags: list[str], run: dict) -> dict:
         "seed": seed,
         "returncode": process.returncode,
         "elapsed_s": round(elapsed, 1),
+        "lives": previous_lives + 1,
         # Recorded, not assumed: a report whose hardware and commit are
         # unknown is not reproducible, and this is the only place that
         # information exists.

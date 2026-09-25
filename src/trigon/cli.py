@@ -364,7 +364,12 @@ def cmd_train(args: argparse.Namespace) -> int:
             suite="calibration/int8",
             floor_trials=args.floor_trials,
         )
-    gates = check_gates(after, quantized=quantized, slices=slices)
+    # Q16 (docs/decisions.md): the per-question and per-primitive gates were
+    # advisory "until a real backbone lands", because no spike could pass
+    # them. A backbone run is that case, so for it they block.
+    gates = check_gates(
+        after, quantized=quantized, slices=slices, require_per_question=bool(args.backbone)
+    )
     # The int8 run is published as a row of its own, not folded into a delta.
     # A delta says how far two numbers are apart and hides which one is which;
     # the row says what the quantized path actually scores, which is the thing

@@ -36,6 +36,40 @@ of it, because the argmax of a five-level rating is mostly annotator noise.
 What follows is the accuracy record as it was written, kept because it is
 what the gates read.
 
+## A.5: length bucketing, timed — `a5-bucketed-e6-*` against `a5-unbucketed-e6-*`
+
+Same commit (`c55691d`, clean), the same flags as `modal-n12000-e6`, eight
+seeds launched together on `NVIDIA A10`; the only difference is
+`--bucket-window 8` against `--bucket-window 1`. Training seconds from each
+seed's `-training.json`, which excludes evaluation.
+
+| Seed | Train s, bucketed | Train s, unbucketed | Lift, bucketed | Lift, unbucketed | ECE, b | ECE, u | Brier, b | Brier, u |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 0 | 1,731 | 1,922 | +0.0193 | +0.0185 | 0.0087 | 0.0145 | 0.5625 | 0.5643 |
+| 1 | 1,644 | 1,912 | +0.0184 | +0.0191 | 0.0095 | 0.0106 | 0.5651 | 0.5654 |
+| 2 | 1,684 | 1,894 | +0.0204 | +0.0198 | 0.0087 | 0.0090 | 0.5656 | 0.5665 |
+| 3 | 1,711 | 1,940 | +0.0146 | +0.0158 | 0.0151 | 0.0137 | 0.5698 | 0.5701 |
+| median | **1,697** | **1,917** | +0.0189 | +0.0188 | | | | |
+
+**Bucketing is 1.13× faster, not 2.82×.** The ratio of medians is 1.13, and
+no pairing of seeds gives less than 1.09× or more than 1.18×. The 2.82× was
+the *attention work* wasted on padding, and it was quoted as though it were
+wall clock. On a 128-wide, two-layer model attention is a small part of a
+step: the fixed per-step cost dominates it. That cost is Python, the readout,
+and the sub-batching that `--max-batch-cells` imposes. Removing most of the
+padding therefore removes most of a small share. The 2.82× was never a
+prediction of wall clock, and it read like one.
+
+**It changes nothing measurable about the result.** Median lift is +0.0189
+against +0.0188, and Brier is lower on the bucketed arm on all four seeds by
+at most 0.0018. ECE sits in the same range on both arms, 0.0087–0.0151
+against 0.0090–0.0145. The worry that deferred A.5, that length-correlated
+gradient steps would change what the model learns, did not show up here.
+
+**What this does not measure is the backbone.** At 1.5B the MLP dominates at
+these lengths as well, so a similar modest gain is the expectation. It is not
+a measurement, and the Qwen runs keep the default (bucketing on).
+
 ## Qwen2.5-1.5B, 12,000 cases, 3 epochs, four seeds — `qwen15b-n12000-e3-seed*`
 
 The model that took Banking77 from 72% to 90%, at the same 12,000 cases the

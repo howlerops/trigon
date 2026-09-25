@@ -71,9 +71,12 @@ same evaluation. The deployed model is seed 2 and does not change.
 
 Seed 2 is served at **`https://jbeck018--trigon-serve-gateway.modal.run`**
 by `scripts/modal_serve.py` -- the real gateway, `/v1/systemone`,
-`/compat` and `/healthz`, on an A10G that scales to zero. It requires an API
-key (`Authorization: Bearer <key>`), held in the `trigon-serve-auth` Modal
-Secret; without one it answers 401. Measured on deploy, 2026-09-23:
+`/compat` and `/healthz`, on an A10G that scales to zero. It takes two
+credentials. First, a Modal proxy auth token (`Modal-Key` / `Modal-Secret`
+headers): without one, Modal's edge refuses the request before any container
+starts. That has been the case since 2026-09-25 (`docs/security.md`). Second,
+an API key (`Authorization: Bearer <key>`), held in the `trigon-serve-auth`
+Modal Secret. At most two A10Gs serve at once. Measured on deploy, 2026-09-23:
 `/healthz` reports calibrated, trained and schema cache on; 81–108 ms of
 model time a request warm with 284 schema tokens from the cache; the first
 request after idle pays a cold start of a few seconds plus loading the

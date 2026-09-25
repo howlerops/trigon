@@ -14,9 +14,18 @@ seed (`qwen15b-synthetic-e8-modal-run.json`).
 | 2 | 0.8252 | +0.4337 | +0.5940 | +0.1360 | **+0.5712** | 0.0114 | 0.0127 | 0.0002 |
 | 3 | 0.8249 | +0.4309 | +0.5712 | +0.1355 | **+0.5862** | 0.0106 | 0.0190 | 0.0008 |
 
-**Every seed clears every blocking gate, and all three questions are far
-above their marginals on all four.** Per-question lift is the calibrated
-run's, against each question's own marginal predictor.
+**All three questions are far above their marginals on all four seeds.**
+Per-question lift is the calibrated run's, against each question's own
+marginal predictor.
+
+**Three seeds of four certify under the gates as they now stand.** When these
+ran, every seed cleared every blocking gate. On 2026-09-25 the per-question
+and per-primitive gates became blocking for backbone runs, as Q16 of the
+sign-off promised once a real backbone landed (`docs/evals.md`). Seed 0's
+Score head sits at ECE **0.0551** against the 0.05 limit, and its pooled
+0.0408 hid that. So seed 0 no longer certifies. The configuration still
+certifies on its median: the worst-primitive ECE is 0.0254–0.0551, median
+0.0303, and every other gate passes on all four seeds.
 
 ## What it settles
 
@@ -40,8 +49,8 @@ quality.
 
 **Calibration held, and the int8 twin moves ECE by at most 0.0009** against a
 0.01 gate, now on a real backbone rather than the spike. Seed 0 is the
-weakest calibrated (ECE 0.0408, and its Score head 0.0551 on the advisory
-per-primitive check); the other three are 0.0106–0.0307.
+weakest calibrated (ECE 0.0408, and its Score head 0.0551 -- the one
+per-primitive failure, blocking now); the other three are 0.0106–0.0307.
 
 `docs/next.md` A.3's done-condition -- four seeds certify with all three
 synthetic questions above their marginals, and per-corpus ECE holds on real

@@ -15,7 +15,7 @@ import pytest
 
 torch = pytest.importorskip("torch", reason="the backbone backend needs the 'train' extra")
 
-from conftest import assert_answer_unmoved  # noqa: E402
+from conftest import assert_answer_unmoved, assert_evidence_unmoved  # noqa: E402
 from trigon.backends.qwen_readout import (  # noqa: E402
     QwenPrefillModel,
     QwenReadoutBackend,
@@ -221,3 +221,56 @@ def test_an_adapter_checkpoint_round_trips_through_the_shared_loader(tmp_path):
     b = Engine(loaded, compiler=loaded.make_compiler()).answer(request)
     for qid in BASE:
         assert a.answers[qid].model_dump() == b.answers[qid].model_dump()
+
+
+# -- evidence, on the backbone's forward -------------------------------------
+
+
+@pytest.mark.parametrize("method", ["gradient_x_input", "span_head"])
+def test_evidence_does_not_move_when_a_question_is_added(method):
+    """The spike's evidence claim, re-asserted on the Qwen2 forward, in
+    float64 for the reason `tests/test_independence.py` gives."""
+    backend = _tiny()
+    backend.model.double()
+    backend.evidence_mode = method
+    compiler = backend.make_compiler()
+
+    def evidence(questions):
+        request = SystemOneRequest(
+            state=STATE, questions=questions, options={"include_evidence": True}
+        )
+        output = backend.infer(compiler.compile_request(request), request)
+        return {qid: out.evidence for qid, out in output.outputs.items()}
+
+    before = evidence(BASE)
+    after = evidence({**BASE, "extra": NoulQuestion(instructions="Is the weather nice?")})
+    for qid in BASE:
+        assert_evidence_unmoved(before[qid], after[qid], qid, bound=1e-12)
+
+
+def test_the_evidence_head_trains_and_round_trips_on_the_backbone(tmp_path):
+    """A rationale trains the adapter checkpoint's evidence head, and the
+    checkpoint remembers it did -- the flag decides which evidence it serves."""
+    import dataclasses
+
+    from trigon.schema import render_state
+
+    cases = []
+    for case in synthetic_outcome_cases(n=12, seed=2, noise=0.0):
+        text = render_state(case.request.state)
+        where = text.index('"plan"')
+        expected = dict(case.expected)
+        expected["plan"] = dataclasses.replace(expected["plan"], rationale=((where, where + 6),))
+        cases.append(dataclasses.replace(case, expected=expected))
+
+    backend = _tiny()
+    report = train(backend, cases, TrainingConfig(epochs=1, accumulate=4, validation_fraction=0))
+    assert report.n_rationales == len(cases)
+    assert backend.config.evidence_supervised
+    path = tmp_path / "adapter.pt"
+    backend.save(path)
+    loaded = TorchReadoutBackend.load(path)
+    assert loaded.config.evidence_supervised
+    request = SystemOneRequest(state=STATE, questions=BASE, options={"include_evidence": True})
+    answer = Engine(loaded, compiler=loaded.make_compiler()).answer(request)
+    assert {a.evidence_method for a in answer.answers.values()} == {"span_head"}

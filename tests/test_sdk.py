@@ -119,6 +119,20 @@ def test_it_answers_every_primitive_as_its_declared_type(client):
     assert 0.0 <= response.answers["urgent"].probability <= 1.0
 
 
+def test_evidence_comes_back_as_typed_spans_and_only_when_asked(client):
+    state = "the card payment was declined at the till"
+    questions = {"intent": trigon_client.choice("Card or luggage?", ["card", "luggage"])}
+    assert client.systemone(state=state, questions=questions).answers["intent"].evidence is None
+    answer = client.systemone(
+        state=state, questions=questions, options={"include_evidence": True}
+    ).answers["intent"]
+    assert answer.evidence_method == "lexical_overlap"
+    assert answer.evidence and all(
+        isinstance(span, trigon_client.EvidenceSpan) for span in answer.evidence
+    )
+    assert [state[s.start : s.end] for s in answer.evidence] == [s.text for s in answer.evidence]
+
+
 def test_bare_option_names_are_accepted(client):
     """`choice("...", ["a", "b"])` is what someone tries first."""
     response = client.systemone(

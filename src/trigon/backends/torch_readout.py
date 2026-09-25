@@ -37,6 +37,22 @@ Heads, all categorical, none of them a regression:
   One slot regardless of cardinality -- this is what makes large option sets
   affordable.
 * Noul: one readout slot, one linear logit.
+
+And one head that is not an answer: **evidence**. Asked for, each question's
+answer comes back with the spans of the state that drove it. Two sources, and
+the response names which one answered (`evidence_method`):
+
+* ``span_head`` -- a small bilinear head scoring every state token against the
+  question's readout state, trained on human rationales when a case carries
+  them (`Expectation.rationale`). Used only by a checkpoint that was;
+* ``gradient_x_input`` -- otherwise. The gradient of the selected label's
+  log-probability with respect to each state token's input embedding, dotted
+  with that embedding. An untrained head is not evidence, and a model that was
+  never shown a rationale has no business returning one from a head.
+
+Both read only what the question's answer reads -- the state's hidden states
+and the question's own readout -- so evidence inherits the independence the
+mask gives the answer. `tests/test_independence.py` asserts it for both.
 """
 
 from __future__ import annotations
@@ -72,6 +88,12 @@ from .tokenizer import READOUT_ID, Tokenizer, build_tokenizer, default_tokenizer
 __all__ = ["PrefillOnlyModel", "ReadoutConfig", "TorchReadoutBackend"]
 
 TRAINED_VERSION_PREFIX = "trigon-reference-0.1.0"
+#: Width of the evidence head's bilinear space. Small on purpose: it reads one
+#: bit per token -- in the rationale or not -- and is the one head that runs
+#: over every state token of every question.
+EVIDENCE_WIDTH = 64
+#: `TorchReadoutBackend.evidence_mode`'s values.
+EVIDENCE_MODES = ("auto", "span_head", "gradient_x_input")
 # A randomly initialised model answers every question with noise. It says so in
 # its own version string, because ``model_version`` travels in the response and
 # is the only thing a caller downstream has to go on.
@@ -103,6 +125,7 @@ class ReadoutConfig:
         match_normalize: bool = False,
         match_residual: bool = True,
         match_residual_score: bool = False,
+        evidence_supervised: bool = False,
     ) -> None:
         if d_model % n_heads:
             raise ValueError(f"d_model {d_model} must divide by n_heads {n_heads}")
@@ -136,6 +159,12 @@ class ReadoutConfig:
         # measurement of it regressed a run -- see `_heads`. It exists so the
         # question can be answered rather than argued about.
         self.match_residual_score = match_residual_score
+        #: Set by the trainer once the evidence head has been fitted to human
+        #: rationales, and saved with the checkpoint. It decides which evidence
+        #: a request gets: the head when True, gradient x input when not --
+        #: because an evidence head nobody trained is a random projection, and
+        #: its spans would look exactly as confident as a trained one's.
+        self.evidence_supervised = evidence_supervised
 
 
 def _sinusoidal(length: int, d_model: int, device, dtype) -> torch.Tensor:
@@ -243,6 +272,12 @@ class PrefillOnlyModel(nn.Module):
         # is the same shape as `noul_head`, which is the one single-slot head
         # in this model that demonstrably learns its question.
         self.score_head = nn.Linear(config.d_model, config.max_levels)
+        # The evidence head, declared last so every parameter above draws the
+        # initialisation it drew before the head existed: a seed must keep
+        # meaning the same model.
+        self.evidence_query = nn.Linear(config.d_model, EVIDENCE_WIDTH, bias=False)
+        self.evidence_key = nn.Linear(config.d_model, EVIDENCE_WIDTH, bias=False)
+        self.evidence_bias = nn.Parameter(torch.zeros(()))
 
     def forward(
         self,
@@ -423,6 +458,12 @@ class TorchReadoutBackend:
         # Reported as `usage.cached_schema_tokens`, set per request by
         # `logits` so the number describes the request the caller just made.
         self._last_cached_tokens = 0
+        #: Which evidence a request gets. "auto" is the served behaviour: the
+        #: span head if this checkpoint was trained on rationales, gradient x
+        #: input otherwise. The other two force one, which is what an eval
+        #: comparing them needs; forcing "span_head" on an untrained head is
+        #: allowed there and labelled, never served by default.
+        self.evidence_mode = "auto"
 
     @property
     def model_version(self) -> str:
@@ -538,6 +579,7 @@ class TorchReadoutBackend:
                     "max_levels": self.config.max_levels,
                     "match_normalize": self.config.match_normalize,
                     "match_residual": self.config.match_residual,
+                    "evidence_supervised": self.config.evidence_supervised,
                 },
                 "tokenizer": describe(self.tokenizer),
                 "state_dict": self.model.state_dict(),
@@ -609,6 +651,11 @@ class TorchReadoutBackend:
         divergence is invisible until someone measures ECE on the served path.
         """
         embeddings, spans = self._embed(compiled)
+        hidden = self._encode(compiled, embeddings, spans)
+        return self._heads(compiled, request, hidden, spans), int(embeddings.shape[1])
+
+    def _encode(self, compiled: CompiledRequest, embeddings: torch.Tensor, spans: _Spans):
+        """One request's hidden states, through the schema prefix cache if it is on."""
         mask = self._cached_mask(compiled)
         if mask.shape[0] != embeddings.shape[1]:
             raise ValueError(
@@ -620,12 +667,96 @@ class TorchReadoutBackend:
         self._last_cached_tokens = 0
         prefix = self._prefix_for(compiled, embeddings, mask, positions, segments)
         if prefix is None:
-            hidden = self.model(embeddings, mask, positions, segments)[0]
-        else:
-            hidden = self.model.forward_with_prefix(embeddings, mask, positions, segments, prefix)[
-                0
-            ]
-        return self._heads(compiled, request, hidden, spans), int(embeddings.shape[1])
+            return self.model(embeddings, mask, positions, segments)[0]
+        return self.model.forward_with_prefix(embeddings, mask, positions, segments, prefix)[0]
+
+    # -- evidence --------------------------------------------------------
+
+    def evidence_logits(self, hidden: torch.Tensor, spans: _Spans, qid: str) -> torch.Tensor:
+        """The span head: one logit per state token for question ``qid``.
+
+        Bilinear between each state token's final hidden state and the mean of
+        the question's readout states. Both are things the question's answer
+        already reads and nothing else is: state tokens encode without seeing
+        any schema, and a readout sees only its own question's schema. So the
+        head is as independent of the other questions as the answer is, by
+        the same mask and with no new path to prove.
+        """
+        query = self.model.evidence_query(hidden[spans.readout[qid]].mean(dim=0))
+        keys = self.model.evidence_key(hidden[spans.state])
+        return keys @ query / math.sqrt(EVIDENCE_WIDTH) + self.model.evidence_bias
+
+    def state_offsets(self, compiled: CompiledRequest) -> list[tuple[int, int]]:
+        """Character offsets of each state token, in the order they are embedded.
+
+        From the tokenizer that built the tensors, and checked against it: an
+        offset table one token out of step would put every span one token
+        late, and the spans would still look like plausible text.
+        """
+        text = next(s.text for s in compiled.segments if s.kind is SegmentKind.STATE)
+        triples = self.tokenizer.encode_with_offsets(text)
+        if [t[0] for t in triples] != self.tokenizer.encode(text):
+            raise ValueError("the tokenizer's offsets disagree with its own encoding")
+        return [(start, end) for _, start, end in triples]
+
+    def _resolved_evidence_mode(self) -> str:
+        if self.evidence_mode not in EVIDENCE_MODES:
+            raise ValueError(f"evidence_mode must be one of {EVIDENCE_MODES}")
+        if self.evidence_mode != "auto":
+            return self.evidence_mode
+        return "span_head" if self.config.evidence_supervised else "gradient_x_input"
+
+    def _evidence(
+        self,
+        compiled: CompiledRequest,
+        embeddings: torch.Tensor,
+        hidden: torch.Tensor,
+        spans: _Spans,
+        raw: dict[str, torch.Tensor],
+    ) -> tuple[dict[str, tuple[tuple[int, int, float], ...]], str]:
+        """Per-question, per-state-token scores in [0, 1], and the method used.
+
+        ``gradient_x_input`` attributes the label the head ranks first -- the
+        selected one, since calibration is monotone -- as the gradient of its
+        log-probability with respect to each state token's input embedding,
+        dotted with that embedding. Only positive attribution is evidence *for*
+        the answer; it is scaled by the answer's largest, so the scores say
+        which tokens mattered most to this answer and not how much in absolute
+        terms. For a Noul the selected side is the one its logit falls on.
+
+        One backward pass per question, each through the same forward graph:
+        prefill-only still, one forward, and no decoding.
+        """
+        offsets = self.state_offsets(compiled)
+        if len(offsets) != len(spans.state):
+            raise ValueError(f"{len(spans.state)} state tokens embedded but {len(offsets)} offsets")
+        method = self._resolved_evidence_mode()
+        out: dict[str, tuple[tuple[int, int, float], ...]] = {}
+        state = spans.state
+        for compiled_q in compiled.schema.questions:
+            qid = compiled_q.question_id
+            if not state:
+                out[qid] = ()
+                continue
+            if method == "span_head":
+                scores = torch.sigmoid(self.evidence_logits(hidden, spans, qid))
+            else:
+                logits = raw[qid]
+                if compiled_q.kind == "noul":
+                    target = nn.functional.logsigmoid(logits[0] if logits[0] >= 0 else -logits[0])
+                else:
+                    target = torch.log_softmax(logits, dim=-1)[int(torch.argmax(logits))]
+                (gradient,) = torch.autograd.grad(target, embeddings, retain_graph=True)
+                attribution = (gradient[0, state] * embeddings[0, state]).sum(dim=-1)
+                attribution = attribution.clamp_min(0.0)
+                peak = attribution.max()
+                scores = attribution / peak if peak > 0 else torch.zeros_like(attribution)
+            values = scores.detach().float().cpu().tolist()
+            out[qid] = tuple(
+                (start, end, float(value))
+                for (start, end), value in zip(offsets, values, strict=True)
+            )
+        return out, method
 
     def _cached_mask(self, compiled: CompiledRequest) -> torch.Tensor:
         """The token mask for this request's shape, from the cache if it fits."""
@@ -789,8 +920,40 @@ class TorchReadoutBackend:
         because a row that may attend to nothing softmaxes over all -inf and
         returns NaN, which then propagates through the whole batch.
         """
+        hidden, spans_list = self._forward_batch(items)
+        return [
+            self._heads(compiled, request, hidden[i], spans_list[i])
+            for i, (compiled, request) in enumerate(items)
+        ]
+
+    def evidence_logits_batch(
+        self, items: Sequence[tuple[CompiledRequest, SystemOneRequest]]
+    ) -> list[tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]]]:
+        """:meth:`logits_batch`, plus each question's span-head logits.
+
+        The trainer's path for cases that carry human rationales: the answer
+        and the rationale loss come from one forward pass, so supervising the
+        evidence head costs a bilinear product per question and nothing else.
+        """
+        hidden, spans_list = self._forward_batch(items)
+        out = []
+        for i, (compiled, request) in enumerate(items):
+            spans = spans_list[i]
+            out.append(
+                (
+                    self._heads(compiled, request, hidden[i], spans),
+                    {
+                        q.question_id: self.evidence_logits(hidden[i], spans, q.question_id)
+                        for q in compiled.schema.questions
+                    },
+                )
+            )
+        return out
+
+    def _forward_batch(self, items):
+        """Padded hidden states for several requests, and where each one's tokens are."""
         if not items:
-            return []
+            return torch.zeros(0), []
 
         embeddings, spans_list, masks = [], [], []
         for compiled, _ in items:
@@ -832,20 +995,32 @@ class TorchReadoutBackend:
             pad = torch.arange(length, width, device=device)
             mask[i, pad, pad] = True
 
-        hidden = self.model(padded, mask, positions, segments)
+        return self.model(padded, mask, positions, segments), spans_list
 
-        out: list[dict[str, torch.Tensor]] = []
-        for i, (compiled, request) in enumerate(items):
-            out.append(self._heads(compiled, request, hidden[i], spans_list[i]))
-        return out
-
-    @torch.no_grad()
     def infer(self, compiled: CompiledRequest, request: SystemOneRequest) -> BackendOutput:
         started = time.perf_counter()
         was_training = self.model.training
         self.model.eval()
+        evidence: dict[str, tuple[tuple[int, int, float], ...]] = {}
+        method = None
         try:
-            raw, length = self.logits(compiled, request)
+            if request.options.include_evidence:
+                # Attribution needs gradients, so its pass is built with
+                # autograd on; the span head does not, and stays on the
+                # no-grad path the plain answer takes. Either way it is one
+                # forward pass: the answer and its evidence share it.
+                attributing = self._resolved_evidence_mode() == "gradient_x_input"
+                with torch.enable_grad() if attributing else torch.no_grad():
+                    embeddings, spans = self._embed(compiled)
+                    if attributing:
+                        embeddings = embeddings.detach().requires_grad_(True)
+                    hidden = self._encode(compiled, embeddings, spans)
+                    raw = self._heads(compiled, request, hidden, spans)
+                    evidence, method = self._evidence(compiled, embeddings, hidden, spans, raw)
+                length = int(embeddings.shape[1])
+            else:
+                with torch.no_grad():
+                    raw, length = self.logits(compiled, request)
         finally:
             self.model.train(was_training)
 
@@ -853,7 +1028,9 @@ class TorchReadoutBackend:
             q.question_id: QuestionOutput(
                 question_id=q.question_id,
                 kind=q.kind,
-                logits=tuple(float(x) for x in raw[q.question_id].tolist()),
+                logits=tuple(float(x) for x in raw[q.question_id].detach().tolist()),
+                evidence=evidence.get(q.question_id),
+                evidence_method=method,
             )
             for q in compiled.schema.questions
         }
@@ -891,6 +1068,12 @@ class TorchReadoutBackend:
             return []
         if len(batch) == 1:
             return [self.infer(*batch[0])]
+        if any(request.options.include_evidence for _, request in batch):
+            # Attribution needs a backward pass per question through its own
+            # request's graph; a padded batch would share one graph between
+            # callers. Evidence requests are answered one at a time, which is
+            # the same arithmetic `test_batching.py` holds the batch to.
+            return [self.infer(compiled, request) for compiled, request in batch]
 
         started = time.perf_counter()
         was_training = self.model.training
@@ -1047,6 +1230,8 @@ class TorchReadoutBackend:
                     f"segment {segment.kind.value} compiled to {segment.tokens} tokens "
                     f"but tokenizes to {len(ids)}"
                 )
+            if segment.kind is SegmentKind.STATE:
+                spans.state.extend(range(cursor, cursor + len(ids)))
             for offset in range(len(ids)):
                 spans.record(start + offset, _SEGMENT_TYPE[segment.kind])
             group_position[group] = start + len(ids)
@@ -1081,6 +1266,8 @@ class _Spans:
 
     def __init__(self) -> None:
         self.readout: dict[str, list[int]] = {}
+        # Sequence positions of the state's tokens, in order: what evidence scores.
+        self.state: list[int] = []
         self.members: dict[str, list[list[int]]] = {}
         # Per-option input embeddings, kept differentiable for match_residual.
         self.member_seed_rows: dict[str, list] = {}

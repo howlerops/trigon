@@ -136,6 +136,102 @@ expectation. A caller asking for a 1–5 rating gets a distribution over five
 levels and a continuous number, not a regression output that could land
 anywhere.
 
+## Evidence
+
+Asked for with `options.include_evidence`, every answer also carries the spans
+of the state that drove it:
+
+```json
+"evidence": [{"start": 26, "end": 31, "text": "idiot", "score": 0.5002}],
+"evidence_method": "span_head"
+```
+
+Character offsets into the state string — for a JSON state, into its
+canonical rendering — so `state[start:end] == text`. Off by default, and absent
+from the response when off, so no existing client or the compat adapter sees a
+new key. `evidence_method` says where the spans came from, because the two
+sources mean different things and a caller acting on them has to know which:
+
+| `evidence_method` | Source | Score means |
+| --- | --- | --- |
+| `span_head` | a bilinear head scoring each state token against the question's readout, **trained on human rationales** | the head's probability that a person would highlight the token |
+| `gradient_x_input` | the gradient of the selected label's log-probability with respect to each state token's input embedding, dotted with that embedding; positive part only | relative within this answer: 1 is its most influential token. Not a probability |
+| `lexical_overlap` | the lexical floor: state words the question's own text contains | 1 for a match |
+| `unavailable` | a backend that cannot attribute (the prompted LLM) | — the list is empty for that reason, not because nothing mattered |
+
+**An untrained head is not evidence.** The span head exists in every
+checkpoint, and a random projection's spans would look exactly as confident as
+a trained one's. So a checkpoint serves `span_head` only when the trainer
+fitted it to human rationales — `ReadoutConfig.evidence_supervised`, set by
+`trigon.training` and saved with the weights — and `gradient_x_input`
+otherwise, including every checkpoint written before the head existed. The
+attribution is a statement about the model, not a prediction of what a person
+would highlight, and the label says so.
+
+**Evidence is exactly as independent as the answer.** The span head reads the
+state's final hidden states and the question's own readout; gradient × input
+differentiates the question's own log-probability. Neither reads anything the
+answer could not, so the mask that isolates the answer isolates its evidence,
+with no new path to prove. `tests/test_independence.py` holds both methods to
+it, with the prefix cache on and off, plus a positive control showing a real
+leak (`state_attends_to_schema`) moves evidence by 1e-3.
+
+Those tests compare across shapes **in float64**, which is a measurement rather
+than a convenience: a backward pass amplifies the forward's rounding, so adding
+one question moved float32 gradient × input by 1.7e-06 while the logits it
+differentiates moved 1.2e-07 — past the bound the answers are held to. In
+float64 the same comparison reads 0.0. Fixed-shape comparisons stay float32
+and exact.
+
+**Cost.** Still one prefill pass and no decode. The span head is a bilinear
+product per question on the no-grad path, and its answers are bit-identical to
+the plain ones. Gradient × input needs autograd on for that pass and one
+backward pass per question; that takes `nn.TransformerEncoder` off its no-grad
+fast path, so its answers agree with the plain ones to rounding (2e-08) rather
+than exactly. Batched requests that ask for evidence are answered one at a
+time, so no two callers share a graph.
+
+**From token scores to spans**, one rule for every backend
+(`trigon.evidence`), so a model and a floor are never measured under two
+definitions of a span:
+
+| Evidence constant | Value | In code |
+| --- | --- | --- |
+| Score a token needs to be evidence | 0.5 | `trigon.evidence.EVIDENCE_THRESHOLD` |
+| Longest word a subword token is widened to | 32 | `trigon.evidence.MAX_WORD_CHARS` |
+| IOU at which a predicted span matches a human one | 0.5 | `trigon.evals.rationale.IOU_MATCH` |
+
+A token is kept at the threshold, trimmed of whitespace (a byte-level token's
+leading space is never evidence), widened to the word it sits inside — the
+spike's first HateXplain answer highlighted `kes` out of `likes` — and merged
+with kept neighbours separated only by whitespace; a span scores its best
+token. For the span head 0.5 is the decision its proper scoring rule was
+trained to support; for gradient × input it keeps the tokens at least half as
+influential as the strongest, which is a rule and not a probability.
+
+Offsets come from the tokenizer that built the tensors, `encode_with_offsets`,
+checked against its own `encode` on every request. For Qwen2.5's byte-level
+BPE they match the reference `tokenizers` library offset for offset
+(`tests/test_hf_bpe.py`), except where NFC composes characters: there a
+composed character maps back to every source character — `e` plus a
+combining accent is one two-character span — where the reference drops the
+accent.
+
+**Supervision.** A case whose `Expectation` carries `rationale` — character
+spans a person highlighted — adds a binary cross-entropy term for the span
+head to that question's loss (`TrainingConfig.rationale_weight`, 1.0),
+computed from the same forward pass. No positive-class weight: that would buy
+recall by making the head's probabilities lie.
+
+**Plausibility** is scored against human rationales on HateXplain
+(`trigon.evals.rationale`): token F1 and IOU F1 over words of the state, beside
+three floors — the lexical floor's evidence, a *rationale lexicon* (every word
+highlighted in at least half its training occurrences), and highlighting every
+word. The lexicon is the floor that matters: on hate speech it is very nearly
+a slur list, and it scores token F1 0.57 and IOU F1 0.45 — above the spike's
+trained head on both (`reports/hatexplain/README.md`). A highlighter that does
+not beat it has learned a vocabulary, not a reading.
+
 ## Type safety is structural
 
 A Choice answer can only ever be a softmax over the option set the request
@@ -161,6 +257,7 @@ mirror rather than three:
 ```
 narrow oversized Choices  →  compile layout + mask  →  one forward pass
   →  validate structure  →  temperature  →  confidence  →  conformal
+  →  evidence, if asked
 ```
 
 Confidence is derived from the **calibrated** distribution. Deriving it from
