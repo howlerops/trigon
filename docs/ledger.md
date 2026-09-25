@@ -396,7 +396,10 @@ what order, and how each step is known to be done.
   from it (`TrainingConfig.resume_path`); every Modal seed gets its own on the
   Volume. A run killed after epoch 1 and restarted in a fresh process ends
   bit-identical to an uninterrupted one on CPU (`tests/test_training.py`).
-  Not yet exercised by a real preemption.
+  **Exercised on Modal, 2026-09-25**: a container killed mid-epoch 3 was
+  restarted by Modal in about 8 s and resumed after epoch 2/8
+  (`reports/resilience/README.md`). A Modal-initiated preemption has still not
+  been observed.
 - ~~Whether soft targets cause the calibrated disagreement.~~ **Closed: they
   do.** Same splits, majority-vote targets: raw ECE against a random
   annotator 0.0560 median against 0.0096, two seeds of four failing the gate
@@ -442,7 +445,11 @@ what order, and how each step is known to be done.
   bounded only loosely: one half-panel predicts the other at −0.024
   (`reports/helpsteer2/ceiling.md`).
   `reports/helpsteer2/README.md`.
-- **A run longer than a session's idle window cannot finish here.** It was
+- ~~A run longer than a session's idle window cannot finish here.~~
+  **Closed, 2026-09-25.** A run launched by another cloud session, which was
+  then archived and its container released, was collected by id from this one:
+  return code 0, reports and checkpoint intact (`reports/resilience/README.md`).
+  The record of how it got here: **A run longer than a session's idle window cannot finish here.** It was
   moved to Modal, and the 12,000-case HelpSteer2 run finished there — but only
   because this container outlived it. **Reopened by the first real reclamation**: the next sweep lost all
   four seeds to it (see *disproved*). Closes again when a spawned run is

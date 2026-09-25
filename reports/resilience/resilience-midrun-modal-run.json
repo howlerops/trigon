@@ -1,0 +1,31 @@
+[
+  {
+    "seed": 0,
+    "returncode": 0,
+    "elapsed_s": 182.1,
+    "corpus": "banking77",
+    "run_id": "banking77-resilience-midrun-6449526e6507-20260925T210605",
+    "prefix": "resilience-midrun",
+    "commit": "6449526e6507753b47566e1b87df11065c00dbd0",
+    "dirty": false,
+    "flags": [
+      "-n",
+      "2000",
+      "--epochs",
+      "6",
+      "--calibration-n",
+      "1000",
+      "--log-every",
+      "200",
+      "--max-batch-cells",
+      "50000000",
+      "--log-every",
+      "50"
+    ],
+    "gpu_requested": "A10G",
+    "gpu_actual": "NVIDIA A10",
+    "torch": "2.14.0+cu130",
+    "lives": 2,
+    "lives_note": "added after collection from the seed log, which shows two starts"
+  }
+]

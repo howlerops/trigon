@@ -151,6 +151,12 @@ def train_one(corpus: str, seed: int, flags: list[str], run: dict) -> dict:
                 check=True,
             )
 
+    # Each container that runs this seed writes one "training on" line to the
+    # shared, appended log, so the count so far says which life this is.
+    # `elapsed_s` below times this life only; a restarted seed's wall clock is
+    # longer than it says, and `lives` is how a reader knows to add them up.
+    previous_lives = log_path.read_text().count(": training on ") if log_path.exists() else 0
+
     started = time.time()
     # Streamed to the Volume as it runs, so `status` can show a live epoch
     # line instead of nothing until the seed returns.
@@ -197,6 +203,7 @@ def train_one(corpus: str, seed: int, flags: list[str], run: dict) -> dict:
         "seed": seed,
         "returncode": process.returncode,
         "elapsed_s": round(elapsed, 1),
+        "lives": previous_lives + 1,
         # Recorded, not assumed: a report whose hardware and commit are
         # unknown is not reproducible, and this is the only place that
         # information exists.
