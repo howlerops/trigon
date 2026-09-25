@@ -3,8 +3,8 @@ name: Pages
 # Renders the site from docs/, reports/, examples/ and spec/ with
 # scripts/build_site.py and publishes it to GitHub Pages. Only the default
 # branch deploys; it is read from the event rather than written here, because
-# this repository's default branch is not `main` and a hardcoded name is how
-# ci.yml once went a month without running.
+# the default branch has been renamed once already (to `main`, 2026-09-25) and
+# a hardcoded name is how ci.yml once went a month without running.
 on:
   push:
   workflow_dispatch:

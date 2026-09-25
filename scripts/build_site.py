@@ -60,7 +60,7 @@ from trigon import limits  # noqa: E402
 # Where links to the repository point. One constant: change the branch here.
 
 REPO = "howlerops/trigon"
-BRANCH = "claude/file-review-build-setup-fixhq5"
+BRANCH = "main"
 GITHUB = f"https://github.com/{REPO}"
 
 

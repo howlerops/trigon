@@ -1,8 +1,9 @@
 name: CI
 
-# Every branch, not just `main`. This said `branches: [main]` and this
-# repository has no `main` -- its default branch is the one the work is on --
-# so the workflow had never run once. A CI configuration that cannot fire is
+# Every branch, not just `main`. This once said `branches: [main]` while the
+# repository had no `main` -- its default branch was the one the work was on --
+# so the workflow never ran once. `main` exists now (2026-09-25), and the
+# lesson stands: every branch. A CI configuration that cannot fire is
 # indistinguishable from a green one, which is the worse half of that.
 on:
   push:
