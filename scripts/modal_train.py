@@ -90,7 +90,15 @@ image = (
         "/root/trigon",
         # The venv and the corpus cache are large and rebuilt inside the job;
         # reports come back through the Volume rather than riding along.
-        ignore=["**/.venv/**", "**/corpora/**", "**/.git/**", "**/.claude/**", "_site/**", "**/__pycache__/**", "**/*.pt"],
+        ignore=[
+            "**/.venv/**",
+            "**/corpora/**",
+            "**/.git/**",
+            "**/.claude/**",
+            "_site/**",
+            "**/__pycache__/**",
+            "**/*.pt",
+        ],
     )
 )
 

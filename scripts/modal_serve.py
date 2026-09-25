@@ -74,7 +74,15 @@ image = (
     .add_local_dir(
         REPO,
         "/root/trigon",
-        ignore=["**/.venv/**", "**/corpora/**", "**/.git/**", "**/.claude/**", "_site/**", "**/__pycache__/**", "**/*.pt"],
+        ignore=[
+            "**/.venv/**",
+            "**/corpora/**",
+            "**/.git/**",
+            "**/.claude/**",
+            "_site/**",
+            "**/__pycache__/**",
+            "**/*.pt",
+        ],
     )
 )
 
