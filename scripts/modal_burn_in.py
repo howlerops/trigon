@@ -63,7 +63,7 @@ image = (
     .add_local_dir(
         REPO,
         "/root/trigon",
-        ignore=["**/.venv/**", "**/corpora/**", "**/.git/**", "**/__pycache__/**", "**/*.pt"],
+        ignore=["**/.venv/**", "**/corpora/**", "**/.git/**", "**/.claude/**", "_site/**", "**/__pycache__/**", "**/*.pt"],
     )
 )
 app = modal.App("trigon-burn-in")
