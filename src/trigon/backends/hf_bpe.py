@@ -27,7 +27,7 @@ import json
 import pathlib
 import unicodedata
 
-from ..bpe import _byte_encoder
+from ..bpe import _byte_encoder, char_spans
 
 __all__ = ["ByteLevelBPE"]
 
@@ -109,9 +109,89 @@ class ByteLevelBPE:
             out.extend(self._merge("".join(self._bytes[b] for b in piece.encode("utf-8"))))
         return out
 
+    def encode_with_offsets(self, text: str) -> list[tuple[int, int, int]]:
+        """``(id, start, end)`` per token, as character offsets into ``text``.
+
+        The ids are :meth:`encode`'s. The offsets index the caller's string,
+        not the NFC-normalized one the merges run over: evidence is handed back
+        as spans of what the caller sent. Where normalization is the identity
+        -- which is almost all text -- the offsets are exactly what the
+        reference ``tokenizers`` library reports (``tests/test_hf_bpe.py``).
+
+        Where NFC composes characters, a normalized character is mapped back to
+        the whole run of original characters it came from, so ``e`` plus a
+        combining acute is one span of two characters. The reference library
+        maps it to the ``e`` alone and drops the combining mark from every
+        token; that is the one place these offsets deliberately differ from it.
+        """
+        normalized, origin = _nfc_alignment(text)
+        out: list[tuple[int, int, int]] = []
+        for match in self._split.finditer(normalized):
+            piece = match.group()
+            ids = self._merge("".join(self._bytes[b] for b in piece.encode("utf-8")))
+            lengths = [len(self._symbols[i]) for i in ids]
+            for token_id, (start, end) in zip(
+                ids, char_spans(piece, match.start(), lengths), strict=True
+            ):
+                out.append((token_id, origin[start][0], origin[end - 1][1]))
+        return out
+
+    @property
+    def _symbols(self) -> dict[int, str]:
+        """Id to byte-level symbol, built on first use: only offsets need it."""
+        table = self.__dict__.get("_symbol_table")
+        if table is None:
+            table = {i: s for s, i in self.vocab.items()}
+            self.__dict__["_symbol_table"] = table
+        return table
+
     def count(self, text: str) -> int:
         return len(self.encode(text))
 
     @property
     def exact(self) -> bool:
         return True
+
+
+def _nfc_alignment(text: str) -> tuple[str, list[tuple[int, int]]]:
+    """NFC of ``text``, and for each of its characters the original span.
+
+    NFC acts within runs that begin at a starter, so the text is cut into
+    runs that normalize independently -- a cut is made before a character
+    only when normalizing across it changes nothing -- and each run is mapped
+    as a unit. Unchanged runs map character for character; a run NFC changed
+    maps every output character to the whole run, which is exact at the only
+    granularity normalization preserves.
+    """
+    normalized = unicodedata.normalize("NFC", text)
+    if normalized == text:
+        return text, [(i, i + 1) for i in range(len(text))]
+    runs: list[tuple[int, int]] = []
+    start = 0
+    for index in range(1, len(text)):
+        char = text[index]
+        if unicodedata.combining(char):
+            continue
+        head = text[start:index]
+        if unicodedata.normalize("NFC", head + char) == unicodedata.normalize(
+            "NFC", head
+        ) + unicodedata.normalize("NFC", char):
+            runs.append((start, index))
+            start = index
+    runs.append((start, len(text)))
+
+    rebuilt: list[str] = []
+    origin: list[tuple[int, int]] = []
+    for begin, end in runs:
+        run = text[begin:end]
+        composed = unicodedata.normalize("NFC", run)
+        rebuilt.append(composed)
+        if composed == run:
+            origin.extend((begin + i, begin + i + 1) for i in range(len(run)))
+        else:
+            origin.extend((begin, end) for _ in composed)
+    if "".join(rebuilt) != normalized:
+        # Runs that do not normalize independently: fall back to one run, which
+        # is still correct, only coarse.
+        return normalized, [(0, len(text))] * len(normalized)
+    return normalized, origin
