@@ -31,6 +31,7 @@ Taken once the pretrained backbone existed and had been measured.
 | --- | --- | --- |
 | Q16 | When the per-question gates stop being advisory | **Now, for backbone runs.** `trigon train`, `scripts/train_corpus.py` and `scripts/regate.py` set `require_per_question` whenever the model is a pretrained backbone. The spike keeps them advisory |
 | Q20 | How a corpus scored against one drawn annotator certifies | **On `brier_over_marginal` ≥ +0.02** (1 − Brier / the training marginal's Brier). The accuracy gates are reported there as advisory, because no predictor can pass them: the annotators beat their own marginal by +0.021 (`reports/helpsteer2/ceiling.md`). A model that ignores its input scores 0 on the Brier term, so the rule in `CLAUDE.md` holds |
+| Q17 | CC BY-SA on a derived model | **Evaluation only, never training.** A share-alike corpus may evaluate the model; nothing fitted on it -- weights or calibrators -- ships, so the released weights carry no ShareAlike obligation. Enforced on the licence string in `trigon.evals.corpora`, not only on the tier. Applies to BoolQ, FEVER, DBpedia-14 and Circa |
 | Q21 | C.1, publishing weights | **A GitHub Release on this repository**, private to the organisation and tied to a commit. It holds the certified Banking77 adapter, its calibrators and a model card. Nothing goes to a public hub yet |
 
 **What would change Q20:** a drawn-annotator corpus on which a model clears
@@ -259,11 +260,14 @@ a phase-0 gate:
 | **Red** | Competition-only terms, unclear provenance, no stated licence | Prototyping on a local copy only; blocked from any shipped artifact |
 
 Concrete consequences for the seed list in the plan: Banking77, MASSIVE,
-Circa, HelpSteer2/3 (CC BY 4.0), GoEmotions (Apache-2.0) and Civil Comments
+HelpSteer2/3 (CC BY 4.0), GoEmotions (Apache-2.0) and Civil Comments
 (CC0) are green — each confirmed against its dataset card, not inherited from
 the plan. Amazon ESCI is **not**: see below. BoolQ and FEVER (CC BY-SA) are amber — the
 share-alike term is a redistribution question for a derived model, so they are
-eval-only until counsel says otherwise. The Kaggle entries (ASAP, Home Credit,
+eval-only -- and stay so under Q17 (2026-09-25), which settled the
+question for every share-alike corpus. Circa, green in the first audit on its
+Hugging Face card, is CC BY-SA 4.0 by its own repository and amber since
+2026-09-25 (`docs/data.md`). The Kaggle entries (ASAP, Home Credit,
 IEEE-CIS) are red by default: competition terms are frequently
 competition-only, and a permissive HF mirror must be found or the dataset
 dropped. Everything the plan marks "verify" stays red until verified — "verify"

@@ -86,7 +86,11 @@ def question_loss(
             )
         return loss
     if kind == "noul":
-        target = torch.tensor([float(label)], dtype=logits.dtype, device=logits.device)
+        # With a distribution, the target is the share of annotators who said
+        # yes -- (no, yes) in the aligned order -- for the same reason as above:
+        # binary cross-entropy against it is minimised by reporting it.
+        yes = float(distribution[-1]) if distribution is not None else float(label)
+        target = torch.tensor([yes], dtype=logits.dtype, device=logits.device)
         return nn.functional.binary_cross_entropy_with_logits(logits, target)
 
     loss = nn.functional.cross_entropy(

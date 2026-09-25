@@ -87,6 +87,7 @@ across nine corpora would hide exactly what a caller needs to know.
 
 **2.3 Resolve CC BY-SA.** BoolQ and FEVER are blocked on counsel. The question
 recurs for every share-alike corpus, so it is worth answering once.
+**Resolved 2026-09-25 (Q17): evaluation only, enforced in code.**
 
 **Done when** ECE ≤ 0.05 holds per corpus on held-out data, not pooled, and the
 conformal wrapper's coverage holds per corpus too.

@@ -53,9 +53,18 @@ training, not a footnote.
 Kaggle entries (ASAP, Home Credit, IEEE-CIS) and LMSYS were dropped outright
 rather than left as blockers awaiting a licence answer: none is load-bearing
 now that outcome grounding comes from verifiable synthetic data, and carrying
-a red row indefinitely is how a blocker turns into a footnote. BoolQ and FEVER
-stay amber pending a counsel opinion on CC BY-SA for a derived model — that one
-is worth answering because it recurs for every share-alike corpus.
+a red row indefinitely is how a blocker turns into a footnote.
+
+**CC BY-SA evaluates and never trains** — the owner's decision of 2026-09-25
+(`docs/decisions.md` Q17), answering the counsel question BoolQ and FEVER had
+been waiting on. A share-alike corpus may be used to evaluate our model; it is
+never in a training mix, and nothing fitted on it — weights or calibrators —
+ships, so the released weights carry no ShareAlike obligation. It is enforced
+on the licence string rather than on the tier: `load(..., purpose="train")`
+refuses any corpus whose licence is CC BY-SA whatever tier it was typed with,
+a share-alike spec cannot be declared green, and a test holds every row of the
+table below to the same rule. BoolQ, FEVER, DBpedia-14 and Circa are the
+share-alike rows today.
 
 **Checked against primary sources on 2026-09-20.** Each row below records what
 the dataset's own card or repository states, not what the build plan assumed.
@@ -68,18 +77,18 @@ Rows marked *unchecked* keep the plan's assumption and are still blockers.
 | MASSIVE | Choice (60) | CC BY 4.0 | **green** ✓ | HF `AmazonScience/massive` metadata |
 | AG News | Choice (4) | **licence "unknown" on the dataset card** | **red** | HF `fancyzhx/ag_news` |
 | DBpedia-14 | Choice (14) | **CC BY-SA 3.0 + GFDL** | **amber** ⬆ | HF `fancyzhx/dbpedia_14` |
-| BoolQ | Noul | CC BY-SA 3.0 | **amber** | plan; share-alike |
-| Circa | Noul | CC BY 4.0 | **green** ✓ | HF `google-research-datasets/circa` metadata |
-| FEVER | Choice (3) | CC BY-SA 3.0 | **amber** | plan; share-alike |
+| BoolQ | Noul | CC BY-SA 3.0 | **amber** | plan; share-alike — eval only (Q17) |
+| Circa | Choice (8), annotator distributions | **CC BY-SA 4.0** — the repo's licence section names CC BY 4.0 and links the BY-SA 4.0 text; the HF card says cc-by-4.0; the stricter binds | **amber** ⬇ | `google-research-datasets/circa` README at `02ad965`, checked 2026-09-25 — eval only (Q17) |
+| FEVER | Choice (3) | CC BY-SA 3.0 | **amber** | plan; share-alike — eval only (Q17) |
 | SST-5 | Score | **no licence field on the HF card** | **red** ✓ | HF `SetFit/sst5` carries no licence |
 | Amazon Reviews 2023 | Score | **Amazon Customer Reviews Terms of Use** (repo scripts MIT) | **amber** | McAuley Lab card; platform terms are not an open licence |
 | ASAP essay scoring | Score + rubric | Kaggle competition terms | **dropped** | not pursued; see sign-off Q18 |
 | HelpSteer2/3 | Score | CC BY 4.0 | **green** ✓ | HF `nvidia/HelpSteer2` metadata |
 | HelpSteer2-annotators | Score, annotator distributions | CC BY 4.0 | **green** ✓ | HF `nvidia/HelpSteer2` `disagreements/`, same dataset and licence |
-| GoEmotions | Choice (27) + distributions | Apache-2.0 | **green** ✓ | HF `google-research-datasets/go_emotions` metadata |
+| GoEmotions | Noul ×7 (Ekman groups + neutral), annotator distributions | Apache-2.0 | **green** ✓ | HF `google-research-datasets/go_emotions` metadata (the publisher's own org); its licensing section cites the `google-research` repo LICENSE, Apache 2.0. The raw per-rater CSVs sit on a Google bucket with no separate notice. Rechecked 2026-09-25 |
 | ChaosNLI | annotator distributions | **no licence field found** | **red** | HF mirror carries no licence |
 | Civil Comments | Noul/Score soft labels | CC0-1.0 | **green** ✓ | HF `google/civil_comments` metadata |
-| measuring_hate_speech | Score distributions | **CC BY 4.0** | **green** ⬆ | HF `ucberkeley-dlab/measuring-hate-speech` |
+| measuring_hate_speech | Score ×10 survey items, annotator distributions | **CC BY 4.0** | **green** ⬆ | HF `ucberkeley-dlab/measuring-hate-speech` metadata at `5468f6e`, rechecked 2026-09-25 |
 | deepset prompt-injection; WildGuardMix; ToxicChat | Noul guardrails | not resolved | **amber** | cards not conclusive |
 | UFET | Choice (~10k types) | **no stated licence; distant-supervision half derives from LDC-licensed Gigaword** | **red** | UT Austin dataset page; `uwnlp/open_type` |
 | Amazon ESCI | Choice (4) | **repo licensed Apache-2.0 as a "project"; no data-specific grant** | **amber** ⬇ | `amazon-science/esci-data` LICENSE + README |
@@ -101,9 +110,27 @@ the drift tests, neither of which has a GPU stack — a Parquet reader here puts
 | Banking77 | CSV over HTTP | ✅ built |
 | HelpSteer2 | gzipped JSONL | ✅ built |
 | HelpSteer2-annotators | gzipped JSONL, per-annotator lists | ✅ built — the distribution stream |
-| GoEmotions | Parquet only | needs a conversion step in `scripts/` |
-| measuring_hate_speech | Parquet only | needs a conversion step in `scripts/` |
-| Circa | Parquet only | needs a conversion step in `scripts/` |
+| GoEmotions | raw per-rater CSV on the authors' bucket | ✅ built — seven Nouls, one row per rater grouped per comment |
+| measuring_hate_speech | Parquet only | ✅ built — `scripts/convert_corpus.py` writes gzipped JSONL once |
+| Circa | TSV in its repository | ✅ built — **evaluation only**, CC BY-SA |
+
+**The three were not all Parquet-only.** The Hugging Face mirrors are, which
+is what the rows above used to say. GoEmotions' authors publish the raw
+per-rater CSVs on their own bucket, and Circa's repository holds a TSV with
+every annotator's judgement; only measuring_hate_speech needs converting.
+Each is pinned — a Hugging Face revision or a commit in the URL, and a
+SHA-256 of every file, since a bucket URL carries no revision at all.
+
+| Corpus | Items (train / test) | Raters | Questions | Held out by |
+| --- | ---: | --- | --- | --- |
+| GoEmotions | 57,877 comments (46,211 / 11,666) | 82 raters; 3–5 per comment, "very unclear" abstentions dropped, at least two kept | 7 Nouls: anger, disgust, fear, joy, sadness, surprise (the authors' Ekman mapping), neutral | a fifth, by hash of the text — 173 texts recur under two ids |
+| measuring_hate_speech | 29,488 comments (22,192 / 7,296) | 7,912 annotators; 2 to ~800 per comment, the 10,077 comments rated once dropped | 10 Scores: nine 0–4 survey items and `hatespeech` 0–2, all coded so higher is more hateful | a quarter, by hash of the text |
+| Circa | 34,268 question–answer pairs (25,738 / 8,530) | 5 judgements per pair (20 have 4) | 1 Choice over 8 interpretations, `Other` included | a quarter, by hash of the question — each was answered about ten times |
+
+GoEmotions is seven Nouls rather than a Choice because a rater marks every
+emotion that applies, so one rater's answer is not one option; and seven
+rather than 28 because most single emotions are marked on under 3% of ratings,
+where a gate reads the marginal, and 28 questions quadruple the schema.
 
 **HelpSteer2's main split is not the distribution stream.** It carries
 aggregated integer ratings, 0–4, across five attributes. The per-annotator
@@ -128,9 +155,18 @@ That is the §3 policy applied to us rather than to someone else: the rows we
 
 Six rows the plan assumed were confirmed against the dataset cards rather than
 inherited — Banking77, MASSIVE, Circa, HelpSteer2, GoEmotions and Civil
-Comments are green as stated, and SST-5's card does indeed carry no licence at
+Comments were green as stated, and SST-5's card does indeed carry no licence at
 all. Rows still marked *unchecked* are all already amber or red, so verifying
 them can only confirm a blocker, never create one.
+
+**Circa did not survive the second reading (2026-09-25).** The first check
+read the Hugging Face card, which says cc-by-4.0. The repository's own README
+says "Creative Commons Attribution 4.0 License" and, in the next sentence,
+gives the BY-SA 4.0 deed as "a full copy of the license". A licence whose two
+statements disagree is read as the stricter until its authors say which they
+meant, so Circa is recorded as CC BY-SA 4.0 and drops to **amber**: it
+evaluates the model and does not train it. The first reading was one source
+deep, which is the mistake this table exists to stop.
 
 ### The three consequences that change the plan
 

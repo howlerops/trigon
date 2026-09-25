@@ -36,6 +36,10 @@ train = ["torch>=2.2", "numpy>=1.26", "regex>=2023", "safetensors>=0.4"]
 # through an HTTPS proxy, and without python-socks the client reports only
 # "Could not connect to the Modal server" and hides the ImportError under it.
 gpu = ["modal[api-proxy-support]>=1.0"]
+# Only `scripts/convert_corpus.py` needs this, to turn a Parquet-only corpus
+# into the gzipped JSONL `trigon.evals.corpora` reads. Never imported by
+# `trigon`: a compiled reader in the loader's import path is what it avoids.
+convert = ["pyarrow>=14"]
 dev = ["pytest>=8", "httpx>=0.27", "fastapi>=0.110", "pyyaml>=6", "ruff>=0.5"]
 
 [project.scripts]
