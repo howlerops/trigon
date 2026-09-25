@@ -82,6 +82,29 @@ def test_a_model_never_shown_a_rationale_serves_gradient_x_input():
     assert _methods(backend) == {"gradient_x_input"}
 
 
+def test_an_unsupervised_checkpoint_can_be_told_to_serve_integrated_gradients(tmp_path):
+    """The serving knob picks between the two attributions, and only between
+    them: it survives nothing on disk, it cannot reach the span head, and a
+    checkpoint trained on rationales still serves its head regardless."""
+    from trigon.backends.torch_readout import UNSUPERVISED_EVIDENCE
+
+    assert UNSUPERVISED_EVIDENCE == "gradient_x_input"  # until the backbone says otherwise
+    plain = _backend()
+    plain.unsupervised_evidence = "integrated_gradients"
+    assert _methods(plain) == {"integrated_gradients"}
+    plain.save(tmp_path / "plain.pt")
+    assert _methods(TorchReadoutBackend.load(tmp_path / "plain.pt")) == {"gradient_x_input"}
+
+    plain.unsupervised_evidence = "span_head"
+    with pytest.raises(ValueError, match="unsupervised_evidence"):
+        _methods(plain)
+
+    supervised = _backend()
+    train(supervised, _cases(16, 1), TrainingConfig(epochs=1, accumulate=8, validation_fraction=0))
+    supervised.unsupervised_evidence = "integrated_gradients"
+    assert _methods(supervised) == {"span_head"}
+
+
 def test_a_rationale_weight_of_zero_trains_no_head_even_with_rationales():
     backend = _backend()
     report = train(
@@ -181,3 +204,39 @@ def test_the_span_head_leaves_the_answer_exactly_as_it_was():
     ).answers["fruit"]
     assert explained.evidence_method == "span_head"
     assert explained.probability == plain.probability
+
+
+def test_the_gateway_serves_the_attribution_it_is_configured_for(tmp_path):
+    """`TRIGON_UNSUPERVISED_EVIDENCE` reaches the backend, `/healthz` says
+    which way it is set, and a misspelt method stops the deployment at startup
+    rather than failing a caller's first evidence request."""
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    from trigon.server.app import build_app
+    from trigon.server.config import ServerConfig
+
+    path = tmp_path / "plain.pt"
+    _backend().save(path)
+    request = {**_cases(1, 4)[0].request.model_dump(), "options": {"include_evidence": True}}
+    for env, method in (
+        ({}, "gradient_x_input"),
+        ({"TRIGON_UNSUPERVISED_EVIDENCE": "integrated_gradients"}, "integrated_gradients"),
+    ):
+        config = ServerConfig.from_env(
+            {"TRIGON_BACKEND": "torch", "TRIGON_WEIGHTS": str(path), **env}
+        )
+        with TestClient(build_app(config)) as http:
+            assert http.get("/healthz").json()["unsupervised_evidence"] == method
+            answer = http.post("/v1/systemone", json=request).json()["answers"]["fruit"]
+            assert answer["evidence_method"] == method
+
+    bad = ServerConfig.from_env(
+        {
+            "TRIGON_BACKEND": "torch",
+            "TRIGON_WEIGHTS": str(path),
+            "TRIGON_UNSUPERVISED_EVIDENCE": "span_head",
+        }
+    )
+    with pytest.raises(ValueError, match="unsupervised_evidence"):
+        build_app(bad)

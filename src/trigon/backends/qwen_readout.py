@@ -346,14 +346,18 @@ class QwenPrefillModel(nn.Module):
         n = prefix.tokens
         hidden = (embeddings + self.segment_embed(segments))[:, n:]
         pos, block = positions[:, n:], mask[:, n:, :]
+        # Several variants of one request -- integrated gradients' steps --
+        # share one schema block, so the cached keys and values are broadcast.
+        batch = hidden.shape[0]
         with self._autocast(hidden):
             for layer, (cached_k, cached_v) in zip(self.layers, prefix.layers, strict=True):
                 q, k, v = layer.self_attn.qkv(layer.input_layernorm(hidden), pos)
-                k = torch.cat((cached_k, k), dim=2)
-                v = torch.cat((cached_v, v), dim=2)
+                k = torch.cat((cached_k.expand(batch, -1, -1, -1), k), dim=2)
+                v = torch.cat((cached_v.expand(batch, -1, -1, -1), v), dim=2)
                 hidden = hidden + layer.self_attn.attend(q, k, v, block)
                 hidden = hidden + layer.mlp(layer.post_attention_layernorm(hidden))
-        return torch.cat((prefix.outputs, self.norm(hidden.float())), dim=1)
+        outputs = prefix.outputs.expand(batch, -1, -1)
+        return torch.cat((outputs, self.norm(hidden.float())), dim=1)
 
     # -- weights ---------------------------------------------------------
 

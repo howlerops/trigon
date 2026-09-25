@@ -81,6 +81,13 @@ twenty-two runs** — the investigation is closed and the evidence is in
   absent from the default response. Independence of evidence across questions
   is asserted for both methods, cache on and off, with a positive control
   that sees a real leak (`docs/architecture.md`, *Evidence*).
+- **Integrated gradients** (2026-09-25), the next attribution after gradient ×
+  input's falsifier fired on the backbone: served as `integrated_gradients`
+  when a deployment asks (`TRIGON_UNSUPERVISED_EVIDENCE`), not by default.
+  32 `u³`-spaced points from a zero baseline, 16 to a batched pass through the
+  cached schema prefix; independence, completeness and batching-invariance
+  asserted on the spike and the Qwen2 forward. `train_corpus.py --weights`
+  scores it beside gradient × input on an existing checkpoint.
 
 ### Calibration
 - Temperature scaling and isotonic calibration, **selected per primitive** on a
@@ -280,6 +287,8 @@ The most useful section. Each of these was argued for before it was measured.
 | A chunk of eight fits on a 24 GB GPU | HelpSteer2's longest case is 7,171 tokens; the chunk asked a 22 GiB A10 for 6.13 GiB at once and died four minutes in. |
 | Evidence can be held to the answers' float32 bound across shapes | Gradient × input moved 1.7e-06 when one question was added, past the 1e-06 bound: a backward pass amplifies the forward's rounding ~14×. In float64 it reads 0.0, so the tests compare there. |
 | Asking for evidence leaves the answer bit-identical | Not under gradient × input: autograd takes `nn.TransformerEncoder` off its no-grad fast path, and the answer moves 2e-08. The span head, which needs no gradients, now stays on that path and is exact. |
+| Gradient × input would be a usable unsupervised attribution, and the spike's was below *every word* only because the spike is small | On Qwen2.5-1.5B, four seeds, it is still below highlighting every word: token F1 0.287–0.308 against 0.434–0.437, IOU F1 0.211–0.234 — no better than the spike's 0.30–0.32. The span head on the same weights scores 0.715–0.720. The falsifier in `docs/decisions.md` fired; integrated gradients is built and is not the default until it is measured to clear the same bar |
+| Integrated gradients needs only enough evenly spaced steps | On a pre-norm forward the path's change is packed against the zero baseline: 32 evenly spaced points on a tiny Qwen2 summed 12–91% away from the difference they must add up to, and 64 were no better. Spaced as `u³`, 32 are within 0.04% |
 
 ---
 
@@ -456,10 +465,13 @@ what order, and how each step is known to be done.
 - ~~Evidence on the backbone is unmeasured.~~ **Closed, 2026-09-25**: on
   Qwen2.5-1.5B the supervised span head beats the word list on both metrics on
   four seeds of four (token F1 0.715–0.720 against 0.571–0.574). What opened in
-  its place: **no validated unsupervised attribution.** Gradient × input falls
-  below highlighting every word on the backbone, and it is what every checkpoint
-  without rationales serves. Integrated gradients is next
-  (`reports/hatexplain/README.md`).
+  its place is the item below.
+- **Integrated gradients on the backbone is unmeasured.** Qwen2.5-1.5B's span
+  head beats the word list on both metrics over four seeds; gradient × input
+  loses to highlighting every word (`docs/decisions.md`). Whether integrated
+  gradients beats every word on token F1 decides the unsupervised default,
+  and scoring it needs a GPU but no retraining: `train_corpus.py --weights`
+  on the existing checkpoints.
 - **Faithfulness of evidence is unmeasured.** Plausibility says a person would
   agree with a highlight, not that the model used it. Comprehensiveness and
   sufficiency — delete the spans, measure the answer move — are not built.

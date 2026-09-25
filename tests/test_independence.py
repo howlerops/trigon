@@ -288,7 +288,7 @@ def test_the_vectorized_mask_matches_the_specification_exactly():
 # a score by orders of magnitude more than 1e-12. Comparisons at a fixed shape
 # stay in float32, the served dtype, and stay exact.
 
-EVIDENCE_METHODS = ["gradient_x_input", "span_head"]
+EVIDENCE_METHODS = ["gradient_x_input", "integrated_gradients", "span_head"]
 #: Across shapes, in float64. See above for why not float32's `ROUNDING`.
 EVIDENCE_ROUNDING_F64 = 1e-12
 
@@ -462,3 +462,74 @@ def test_the_evidence_tests_can_see_a_leak(method):
     )
     moved = max(abs(a[2] - b[2]) for q in BASE for a, b in zip(before[q], after[q], strict=True))
     assert moved > 1e6 * EVIDENCE_ROUNDING_F64
+
+
+# -- integrated gradients: what defines it, and what batching must not change --
+
+
+def _completeness_errors(backend, steps: int) -> dict[str, float]:
+    """Per question: |sum of attributions - (F(input) - F(baseline))| / |that difference|."""
+    compiler = backend.make_compiler()
+    request = SystemOneRequest(state=STATE, questions=BASE)
+    compiled = compiler.compile_request(request)
+    backend.ig_steps = steps
+    attributions = backend.integrated_gradients(compiled, request)
+    errors = {}
+    for qid, delta in backend.path_difference(compiled, request).items():
+        assert delta != 0.0, f"{qid}: the baseline answers exactly as the input does"
+        errors[qid] = abs(float(attributions[qid].sum()) - delta) / abs(delta)
+    return errors
+
+
+def test_integrated_gradients_is_complete():
+    """IG's defining property: summed over the state, the attributions are the
+    selected label's log-probability at the input minus at the zero baseline.
+
+    The quadrature is exact only in the limit -- the spike's ReLUs put kinks
+    on the path -- so it is held at the served step count to a bound over what
+    was measured there (0.86% worst) and shown to converge with more steps.
+    Convergence is what separates quadrature error from a wrong attribution: a
+    weight summing to the wrong total, a baseline counted twice or a gradient
+    taken at the wrong point does not shrink when the steps grow."""
+    backend = _backend("integrated_gradients", double=True)
+    served = _completeness_errors(backend, backend.ig_steps)
+    assert max(served.values()) < 0.03, served
+    fine = _completeness_errors(backend, 1024)
+    # Measured at 0.14% worst: a sixth of the served error for 32x the steps,
+    # the first-order rate kinks allow.
+    assert max(fine.values()) < 3e-3, fine
+
+
+def test_integrated_gradients_does_not_depend_on_how_its_steps_are_batched():
+    """One step per pass against every step in one pass: different batch
+    shapes, so float64 and the cross-shape bound -- and the same numbers,
+    because the steps of a chunk share nothing but the schema prefix."""
+    backend = _backend("integrated_gradients", double=True, cache=True)
+    compiler = backend.make_compiler()
+    request = SystemOneRequest(state=STATE, questions=BASE)
+    compiled = compiler.compile_request(request)
+    backend.ig_chunk = 1
+    one = backend.integrated_gradients(compiled, request)
+    backend.ig_chunk = backend.ig_steps
+    whole = backend.integrated_gradients(compiled, request)
+    for qid in BASE:
+        assert torch.allclose(one[qid], whole[qid], rtol=0, atol=EVIDENCE_ROUNDING_F64), qid
+
+
+def test_integrated_gradients_leaves_the_answer_exactly_as_it_was():
+    """The answer under integrated gradients comes from the plain no-grad
+    pass -- the path passes are extra -- so it is bit-identical to the answer
+    without evidence, where gradient x input's agrees only to rounding."""
+    backend = _backend("integrated_gradients")
+    engine = Engine(backend, compiler=backend.make_compiler())
+    plain = engine.answer(SystemOneRequest(state=STATE, questions=BASE))
+    explained = engine.answer(
+        SystemOneRequest(state=STATE, questions=BASE, options={"include_evidence": True})
+    )
+    for qid, answer in plain.answers.items():
+        with_evidence = explained.answers[qid].model_dump()
+        assert with_evidence.pop("evidence") is not None
+        assert with_evidence.pop("evidence_method") == "integrated_gradients"
+        without = answer.model_dump()
+        without.pop("evidence"), without.pop("evidence_method")
+        assert with_evidence == without, qid

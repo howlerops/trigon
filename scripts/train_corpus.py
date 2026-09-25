@@ -29,9 +29,16 @@ this repo has made that mistake once already.
 publishes its plausibility** -- token F1 and IOU F1 against what the annotators
 highlighted -- in the same report, beside the three floors
 `trigon.evals.rationale` computes: the lexical floor's evidence, a word list
-fitted to the training split's highlights, and highlighting every word. When
-the head trained, the model is also scored with gradient x input on the same
-weights, so the table shows what the supervision bought.
+fitted to the training split's highlights, and highlighting every word. The
+same weights are also scored under every attribution they do not serve --
+gradient x input and integrated gradients -- so the table shows what the
+supervision bought and which unsupervised attribution is the better one.
+
+**Scoring attributions needs no retraining.** ``--weights`` skips training and
+re-gates an existing checkpoint, and the plausibility table comes with it:
+
+    python scripts/train_corpus.py hatexplain --weights run.pt -n 0 --seed 0 \\
+        --out reports/hatexplain/rescored-seed0.md
 """
 
 from __future__ import annotations
@@ -128,6 +135,24 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=int,
         default=0,
         help="score plausibility on at most this many evaluation rationales (0 = all)",
+    )
+    parser.add_argument(
+        "--ig-steps",
+        type=int,
+        default=0,
+        help="integrated gradients' points on the path (0 = the backend's default)",
+    )
+    parser.add_argument(
+        "--ig-chunk",
+        type=int,
+        default=0,
+        help="integrated gradients' points per forward pass (0 = the backend's default)",
+    )
+    parser.add_argument(
+        "--ig-completeness-n",
+        type=int,
+        default=200,
+        help="check integrated gradients' completeness on this many rationale cases",
     )
     parser.add_argument(
         "--hard-labels",
@@ -440,17 +465,26 @@ def evidence_section(backend, engine, train, evaluation, args):
         return None
     if args.rationale_eval_n:
         scored = scored[: args.rationale_eval_n]
+    from trigon.backends.torch_readout import UNSUPERVISED_EVIDENCE_METHODS
+    from trigon.evals.rationale import score_engine
+
     engines = {"model": engine}
     rows = run_rationale_suite(engines, scored, train)
-    if backend.config.evidence_supervised:
-        # Same weights, the other method: what training the head bought.
-        backend.evidence_mode = "gradient_x_input"
+    # Same weights, every attribution the served row is not: beside a trained
+    # head, what the supervision bought; beside gradient x input, whether
+    # integrated gradients is the better unsupervised method -- the measurement
+    # `docs/decisions.md` makes the default wait on. An existing checkpoint
+    # gets every row through --weights, with no retraining.
+    served = backend._resolved_evidence_mode()
+    others = [m for m in UNSUPERVISED_EVIDENCE_METHODS if m != served]
+    for position, method in enumerate(others, start=1):
+        backend.evidence_mode = method
         try:
-            from trigon.evals.rationale import score_engine
-
-            rows.insert(1, score_engine("model, gradient x input", engine, scored))
+            label = f"model, {method.replace('_', ' ')}"
+            rows.insert(position, score_engine(label, engine, scored))
         finally:
             backend.evidence_mode = "auto"
+    completeness = ig_completeness(backend, engine, scored, args.ig_completeness_n)
     text = "\n".join(
         [
             "",
@@ -463,13 +497,81 @@ def evidence_section(backend, engine, train, evaluation, args):
             "rows after the model are floors, and the rationale lexicon is the one",
             "that matters: every word highlighted in at least half its training",
             "occurrences. A highlighter that does not beat it has learned a",
-            "vocabulary, not a reading.",
+            "vocabulary, not a reading. The model rows are one set of weights",
+            "under each evidence method; `model` is the one it serves.",
             "",
             render_plausibility(rows),
             "",
+            *render_completeness(completeness, backend),
         ]
     )
-    return text, rows
+    return text, rows, completeness
+
+
+def ig_completeness(backend, engine, cases, limit: int) -> dict | None:
+    """How far integrated gradients' attributions sum from what they must.
+
+    Completeness -- the attributions over the state summing to the selected
+    label's log-probability at the input minus at the zero baseline -- is the
+    property that defines the method, and the quadrature only approximates
+    it. `tests/test_independence.py` checks it on one request of an untrained
+    spike; this measures it on the weights and the data the plausibility rows
+    come from, because a pre-norm backbone concentrates the path's change near
+    the baseline and a step count that suffices on one model need not on
+    another. Relative error over cases whose difference is at least 0.01 nats;
+    smaller differences make any relative error meaningless.
+    """
+    import statistics
+
+    from trigon.evals.rationale import rationale_cases
+
+    pairs = rationale_cases(cases)[: max(0, limit)]
+    if not pairs:
+        return None
+    errors, deltas = [], []
+    was_training = backend.model.training
+    backend.model.eval()
+    try:
+        for case, qid in pairs:
+            request = case.request
+            compiled = engine.compiler.compile_request(request)
+            attributions = backend.integrated_gradients(compiled, request)
+            delta = backend.path_difference(compiled, request)[qid]
+            deltas.append(abs(delta))
+            if abs(delta) >= 0.01:
+                errors.append(abs(float(attributions[qid].sum()) - delta) / abs(delta))
+    finally:
+        backend.model.train(was_training)
+    ordered = sorted(errors)
+
+    def quantile(q: float) -> float | None:
+        return ordered[min(len(ordered) - 1, int(q * len(ordered)))] if ordered else None
+
+    return {
+        "cases": len(pairs),
+        "scored": len(errors),
+        "median_abs_delta_nats": statistics.median(deltas),
+        "median_relative_error": quantile(0.5),
+        "p90_relative_error": quantile(0.9),
+        "max_relative_error": ordered[-1] if ordered else None,
+    }
+
+
+def render_completeness(result: dict | None, backend) -> list[str]:
+    if result is None or result["scored"] == 0:
+        return []
+    return [
+        "Integrated gradients' completeness on the first "
+        f"{result['cases']:,} of these cases ({backend.ig_steps} points, "
+        f"`u ** {backend.ig_power}` spacing): relative error of the summed attributions "
+        "against the log-probability difference they must add up to, median "
+        f"{result['median_relative_error']:.4f}, p90 {result['p90_relative_error']:.4f}, "
+        f"max {result['max_relative_error']:.4f}, over the {result['scored']:,} whose "
+        f"difference is at least 0.01 nats (median difference "
+        f"{result['median_abs_delta_nats']:.3f}). A large error means too few points, "
+        "and the `integrated gradients` row is then a quadrature artefact, not the method.",
+        "",
+    ]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -519,6 +621,8 @@ def main(argv: list[str] | None = None) -> int:
             config=ReadoutConfig(d_model=args.d_model, n_layers=args.layers), seed=args.seed
         )
     backend.to(device)
+    backend.ig_steps = args.ig_steps or backend.ig_steps
+    backend.ig_chunk = args.ig_chunk or backend.ig_chunk
     hardware = f"{device} ({hardware})"
     print(f"{args.corpus}: training on {hardware}", file=sys.stderr)
     compiler = backend.make_compiler(option_scoring=OptionScoring(args.option_scoring))
@@ -596,6 +700,7 @@ def main(argv: list[str] | None = None) -> int:
         payload = json.loads(render_json([before, after], gates, slices, gated=after))
         if plausibility is not None:
             payload["plausibility"] = [row.to_dict() for row in plausibility[1]]
+            payload["ig_completeness"] = plausibility[2]
         out.with_suffix(".json").write_text(json.dumps(payload, indent=2))
         stem = out.with_suffix("")
         scaler.save(pathlib.Path(f"{stem}-temperatures.json"))

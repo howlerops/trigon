@@ -226,7 +226,7 @@ def test_an_adapter_checkpoint_round_trips_through_the_shared_loader(tmp_path):
 # -- evidence, on the backbone's forward -------------------------------------
 
 
-@pytest.mark.parametrize("method", ["gradient_x_input", "span_head"])
+@pytest.mark.parametrize("method", ["gradient_x_input", "integrated_gradients", "span_head"])
 def test_evidence_does_not_move_when_a_question_is_added(method):
     """The spike's evidence claim, re-asserted on the Qwen2 forward, in
     float64 for the reason `tests/test_independence.py` gives."""
@@ -246,6 +246,36 @@ def test_evidence_does_not_move_when_a_question_is_added(method):
     after = evidence({**BASE, "extra": NoulQuestion(instructions="Is the weather nice?")})
     for qid in BASE:
         assert_evidence_unmoved(before[qid], after[qid], qid, bound=1e-12)
+
+
+def test_integrated_gradients_through_the_cached_prefix_is_complete_and_unbatched():
+    """The backbone's cached forward broadcasts one schema prefix over a batch
+    of path steps -- new code on this forward. The cached path and the
+    uncached one agree, a step per pass agrees with every step in one pass,
+    and the attributions sum to the log-probability difference at the served
+    step count -- which on a pre-norm forward needs the points crowded towards
+    the baseline: evenly spaced, the same 32 miss by more than a tenth."""
+    request = SystemOneRequest(state=STATE, questions=BASE)
+    results = {}
+    for cache, chunk in ((False, 32), (True, 1), (True, 32)):
+        backend = _tiny(cache=cache)
+        backend.model.double()
+        backend.ig_chunk = chunk
+        compiled = backend.make_compiler().compile_request(request)
+        results[cache, chunk] = backend.integrated_gradients(compiled, request)
+    served = results[False, 32]
+    for key, got in results.items():
+        for qid in BASE:
+            assert torch.allclose(got[qid], served[qid], rtol=0, atol=1e-12), (key, qid)
+
+    backend = _tiny()
+    backend.model.double()
+    compiled = backend.make_compiler().compile_request(request)
+    backend.ig_power = 1
+    uniform = backend.integrated_gradients(compiled, request)
+    for qid, delta in backend.path_difference(compiled, request).items():
+        assert abs(float(served[qid].sum()) - delta) <= 1e-2 * abs(delta), qid
+        assert abs(float(uniform[qid].sum()) - delta) > 0.1 * abs(delta), qid
 
 
 def test_the_evidence_head_trains_and_round_trips_on_the_backbone(tmp_path):

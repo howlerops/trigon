@@ -44,7 +44,9 @@ def create_router(config: ServerConfig | None = None) -> TieredRouter:
     conformal = config.load_conformal()
 
     workhorse = Engine(
-        _backend(config.backend, config.weights, config.cache_prefixes),
+        _backend(
+            config.backend, config.weights, config.cache_prefixes, config.unsupervised_evidence
+        ),
         scaler=scaler,
         isotonic=isotonic,
         conformal=conformal,
@@ -52,7 +54,12 @@ def create_router(config: ServerConfig | None = None) -> TieredRouter:
     )
     premium = (
         Engine(
-            _backend(config.premium_backend, config.premium_weights, config.cache_prefixes),
+            _backend(
+                config.premium_backend,
+                config.premium_weights,
+                config.cache_prefixes,
+                config.unsupervised_evidence,
+            ),
             scaler=scaler,
             isotonic=isotonic,
             conformal=conformal,
@@ -68,7 +75,12 @@ def create_router(config: ServerConfig | None = None) -> TieredRouter:
     )
 
 
-def _backend(name: str, weights: str | None = None, cache_prefixes: bool = True) -> Any:
+def _backend(
+    name: str,
+    weights: str | None = None,
+    cache_prefixes: bool = True,
+    unsupervised_evidence: str | None = None,
+) -> Any:
     if name == "lexical":
         if weights:
             raise ValueError("the lexical backend has no weights to load")
@@ -81,6 +93,11 @@ def _backend(name: str, weights: str | None = None, cache_prefixes: bool = True)
         # fixed for this process's lifetime, which is what makes reuse safe
         # here and unsafe in the trainer.
         backend.cache_prefixes = cache_prefixes
+        if unsupervised_evidence:
+            backend.unsupervised_evidence = unsupervised_evidence
+            # At startup, not on the first evidence request: a misspelt
+            # method should stop the deployment, not 500 a caller.
+            backend._resolved_evidence_mode()
         return backend
     raise ValueError(f"unknown backend {name!r}; known backends are 'lexical' and 'torch'")
 
@@ -158,6 +175,13 @@ def build_app(config: ServerConfig | None = None, router: TieredRouter | None = 
             # comparing two deployments should not have to guess which of
             # them is running it.
             "schema_cache": config.cache_prefixes,
+            # What a checkpoint never trained on rationales answers
+            # `include_evidence` with; null for a backend that cannot
+            # attribute. The response names the method too, but an operator
+            # comparing deployments should not need a request to find out.
+            "unsupervised_evidence": getattr(
+                router.workhorse.backend, "unsupervised_evidence", None
+            ),
             "context_tokens": DEFAULT_BUDGET.context_tokens,
             "latency_target_ms": {
                 "p50": DEFAULT_LATENCY_TARGET.p50_ms,
