@@ -81,6 +81,8 @@ image = (
         "pyyaml>=6",
         "safetensors>=0.4",
         "regex>=2023",
+        # For `scripts/convert_corpus.py` only; `trigon` never imports it.
+        "pyarrow>=14",
     )
     .env({"HF_HOME": f"{WEIGHTS}/hf", "TRIGON_WEIGHTS_CACHE": f"{WEIGHTS}/backbones"})
     .add_local_dir(
@@ -133,6 +135,21 @@ def train_one(corpus: str, seed: int, flags: list[str], run: dict) -> dict:
     flags = [f.replace("{seed}", str(seed)) for f in flags]
     if "--save-model" in flags:
         flags[flags.index("--save-model") + 1] = str(target / f"seed{seed}.pt")
+
+    # A corpus published only as Parquet is converted into the container's
+    # cache first -- the loader reads plain files and says so rather than
+    # importing a Parquet reader (CLAUDE.md, *When adding a corpus*).
+    if corpus != "synthetic":
+        sys.path.insert(0, str(root / "src"))
+        from trigon.evals.corpora import corpus as spec_of
+
+        if spec_of(corpus).converted_from:
+            subprocess.run(
+                [sys.executable, "scripts/convert_corpus.py", corpus],
+                cwd=root,
+                env={**os.environ, "PYTHONPATH": str(root / "src")},
+                check=True,
+            )
 
     started = time.time()
     # Streamed to the Volume as it runs, so `status` can show a live epoch
