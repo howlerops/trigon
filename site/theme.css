@@ -1,0 +1,412 @@
+/*
+ * The shared look: tokens and the handful of components every page uses.
+ *
+ * Adopted from the owner's sibling project (howlerops.github.io/slate-orm),
+ * which took it from ironrain.app — dark first, a gold accent, a serif for
+ * display and a sans for body, and a sticky frosted header over a 1080px
+ * column — so that projects by the same hand look like projects by the same
+ * hand. The tokens below are the contract: a page that wants a new colour adds
+ * a token here rather than a hex code in its own file.
+ *
+ * Three departures from the reference, all for contrast (WCAG AA, 4.5:1 for
+ * body text): `--muted` is lighter in dark mode, both muted greys are darker
+ * in light mode, and accent *text* reads `--gold-ink`, which is the gold in
+ * dark mode and a deeper gold in light mode — #c49b21 on #fafaf7 is 2.5:1.
+ *
+ * Dark is the default and light comes from `prefers-color-scheme` alone.
+ * There is deliberately no toggle, and no script on any page.
+ */
+
+/* ── Fonts, self-hosted ─────────────────────────────────────── */
+/*
+ * Four files, committed, and never fetched from a font CDN: a third-party
+ * request on every page view of a site that otherwise makes none, which fails
+ * behind a TLS-inspecting proxy and fails offline. `tests/test_site.py`
+ * fails the build if any page reaches for an external font, stylesheet or
+ * script.
+ *
+ * The `url()`s are relative to *this stylesheet*, so `docs/*.html` reaching
+ * `../theme.css` gets the same four files.
+ */
+
+@font-face {
+  font-family: 'DM Sans';
+  font-style: normal;
+  font-weight: 100 1000;
+  font-display: swap;
+  src: url('fonts/dm-sans.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Fira Code';
+  font-style: normal;
+  font-weight: 300 700;
+  font-display: swap;
+  src: url('fonts/fira-code.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Instrument Serif';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('fonts/instrument-serif.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Instrument Serif';
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url('fonts/instrument-serif-italic.woff2') format('woff2');
+}
+
+:root {
+  --bg:          #09090a;
+  --fg:          #f0ece2;
+  --muted:       #8a837a;
+  --muted-med:   #9a9088;
+
+  --gold:        #c49b21;
+  --gold-ink:    #c49b21;   /* accent used as text */
+  --gold-bright: #d4b820;
+  --gold-light:  #d4c066;
+  --gold-dark:   #9a7a18;
+  --gold-gradient: linear-gradient(135deg, #d4c066, #c49b21, #9a7a18);
+  --gold-dim:    rgba(196, 155, 33, 0.12);
+  --gold-border: rgba(196, 155, 33, 0.28);
+  --gold-glow:   rgba(196, 155, 33, 0.07);
+
+  --card:        #111013;
+  --card-hover:  #181620;
+  --border:      #1e1c22;
+  --border-sub:  #141318;
+  --ink:         #130e00;   /* text on a gold button */
+
+  /* Verdicts. Always shipped with a word, never colour alone. */
+  --pass:        #7fb77e;
+  --fail:        #e0806a;
+  --pass-dim:    rgba(127, 183, 126, 0.12);
+  --fail-dim:    rgba(224, 128, 106, 0.12);
+
+  --font-display:  'Instrument Serif', Georgia, 'Times New Roman', serif;
+  --font-sans:     'DM Sans', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --font-mono:     ui-monospace, 'SF Mono', 'Fira Code', Menlo, 'Courier New', monospace;
+  --font-wordmark: 'Fira Code', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  --max-w:     1080px;
+  --radius:    18px;
+  --radius-sm: 12px;
+  --radius-xs: 8px;
+  --sec-pad:   112px;
+
+  color-scheme: dark light;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg:         #fafaf7;
+    --fg:         #0e0d0b;
+    --muted:      #665f57;
+    --muted-med:  #58514a;
+    --gold-ink:   #7a5c0c;
+    --card:       #f1ede6;
+    --card-hover: #e8e4dc;
+    --border:     #ddd9d0;
+    --border-sub: #e8e4dc;
+    --gold-dim:   rgba(196, 155, 33, 0.10);
+    --gold-glow:  rgba(196, 155, 33, 0.05);
+    --pass:       #2f6b2e;
+    --fail:       #a3361f;
+    --pass-dim:   rgba(47, 107, 46, 0.10);
+    --fail-dim:   rgba(163, 54, 31, 0.10);
+  }
+}
+
+*, *::before, *::after { box-sizing: border-box }
+
+html { scroll-behavior: smooth }
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto }
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-wrap: break-word;
+}
+
+.wrap {
+  max-width: var(--max-w);
+  margin-inline: auto;
+  padding-inline: 28px;
+}
+
+a { color: var(--gold-ink); text-decoration: none; transition: opacity .15s }
+a:hover { opacity: .75; text-decoration: underline }
+a:focus-visible, .btn:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.skip {
+  position: absolute;
+  left: -9999px;
+  top: 8px;
+  z-index: 200;
+  background: var(--gold);
+  color: var(--ink);
+  padding: 8px 14px;
+  border-radius: var(--radius-xs);
+  font-weight: 700;
+}
+.skip:focus { left: 12px }
+
+img { max-width: 100%; display: block }
+
+code {
+  font-family: var(--font-mono);
+  font-size: .88em;
+  background: var(--card);
+  border: 1px solid var(--border);
+  color: var(--gold-ink);
+  padding: .1em .38em;
+  border-radius: var(--radius-xs);
+  overflow-wrap: anywhere;
+}
+a code { text-decoration: inherit }
+
+pre {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.6;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 18px 20px;
+  overflow-x: auto;
+  max-width: 100%;
+}
+/* A code block's own <code> is not an inline chip: no second border, no gold. */
+pre code {
+  background: none;
+  border: 0;
+  color: inherit;
+  padding: 0;
+  font-size: inherit;
+  overflow-wrap: normal;
+}
+
+/* Syntax colours, CSS-only: the build tags tokens and these paint them. */
+.tk-key  { color: var(--gold-ink) }
+.tk-str  { color: var(--pass) }
+.tk-num  { color: var(--fail) }
+.tk-lit  { color: var(--fail); font-style: italic }
+.tk-kw   { color: var(--gold-ink); font-weight: 600 }
+.tk-com  { color: var(--muted); font-style: italic }
+.tk-def  { color: var(--fg); font-weight: 600 }
+
+/* Anchored headings clear the sticky header rather than hiding under it. */
+[id] { scroll-margin-top: 84px }
+
+/* ── Header ─────────────────────────────────────────────────── */
+
+.site-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-top: 16px;
+  padding-bottom: 16px;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: color-mix(in srgb, var(--bg) 86%, transparent);
+  -webkit-backdrop-filter: blur(14px) saturate(1.5);
+  backdrop-filter: blur(14px) saturate(1.5);
+  border-bottom: 1px solid var(--border-sub);
+  /* `100%` and not `100vw`: a classic scrollbar gutter is inside one and
+     outside the other. */
+  padding-inline: max(20px, calc((100% - var(--max-w)) / 2 + 28px));
+}
+
+.brand {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 10px;
+  color: var(--fg);
+  white-space: nowrap;
+}
+.brand:hover { opacity: 1; text-decoration: none }
+
+.brand-mark {
+  font-family: var(--font-wordmark);
+  font-weight: 700;
+  font-size: 17px;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  background: var(--gold-gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.brand-what {
+  font-size: 13px;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.site-nav { display: flex; align-items: center; gap: 2px; flex-wrap: wrap }
+.site-nav a {
+  padding: 6px 10px;
+  border-radius: var(--radius-xs);
+  color: var(--muted-med);
+  font-size: 14px;
+  font-weight: 500;
+}
+.site-nav a:hover,
+.site-nav a[aria-current] {
+  color: var(--fg);
+  background: var(--card);
+  opacity: 1;
+  text-decoration: none;
+}
+
+/* ── Buttons ────────────────────────────────────────────────── */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 12px 22px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--fg);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -.15px;
+  cursor: pointer;
+  white-space: nowrap;
+  text-decoration: none;
+  transition: border-color .18s, background .18s, box-shadow .18s, opacity .15s;
+}
+.btn:hover {
+  border-color: var(--gold-border);
+  background: var(--gold-dim);
+  opacity: 1;
+  text-decoration: none;
+}
+.btn.primary {
+  background: var(--gold);
+  color: var(--ink);
+  border-color: var(--gold);
+  font-weight: 700;
+}
+.btn.primary:hover {
+  background: var(--gold-bright);
+  border-color: var(--gold-bright);
+  box-shadow: 0 4px 24px rgba(196, 155, 33, .32);
+}
+.btn.ghost { background: var(--card) }
+.btn.ghost:hover { background: var(--card-hover) }
+
+/* ── Section furniture ──────────────────────────────────────── */
+
+.eyebrow {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--gold-ink);
+  margin-bottom: 14px;
+}
+
+.display {
+  font-family: var(--font-display);
+  font-weight: 400;
+  line-height: 1.06;
+  letter-spacing: -.02em;
+  margin: 0;
+}
+.display em { font-style: italic; color: var(--gold-ink) }
+
+.lede {
+  font-size: clamp(16px, 2vw, 19px);
+  color: var(--muted-med);
+  line-height: 1.65;
+  max-width: 62ch;
+}
+.lede strong { color: var(--fg) }
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 26px 26px 22px;
+  transition: border-color .18s, background .18s;
+  min-width: 0;
+}
+.card:hover { border-color: var(--gold-border) }
+.card h3 {
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -.01em;
+  margin: 0 0 10px;
+}
+.card p { margin: 0 0 12px; color: var(--muted-med); font-size: 15px }
+.card p:last-child { margin-bottom: 0 }
+.card strong { color: var(--fg); font-weight: 600 }
+
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 20px;
+}
+.card-grid > * { min-width: 0 }
+
+/* A verdict pill: a word first, colour second. */
+.verdict {
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  padding: 1px 9px;
+  border-radius: 100px;
+  white-space: nowrap;
+}
+.verdict.pass { color: var(--pass); background: var(--pass-dim) }
+.verdict.fail { color: var(--fail); background: var(--fail-dim) }
+.verdict.info { color: var(--muted-med); background: var(--card-hover) }
+
+/* ── Footer ─────────────────────────────────────────────────── */
+
+.site-footer {
+  border-top: 1px solid var(--border);
+  padding-top: 28px;
+  padding-bottom: 44px;
+  margin-top: 64px;
+  color: var(--muted);
+  font-size: 14px;
+}
+.site-footer nav { display: flex; gap: 18px; flex-wrap: wrap; margin-bottom: 12px }
+.site-footer nav a { color: var(--muted-med) }
+.site-footer p { margin: 0 0 6px; max-width: 70ch }
+
+/* ── Narrow ─────────────────────────────────────────────────── */
+
+@media (max-width: 760px) {
+  :root { --sec-pad: 72px }
+  .wrap { padding-inline: 20px }
+  .card-grid { grid-template-columns: 1fr }
+  .site-header { flex-wrap: wrap; gap: 8px }
+  .site-nav a { padding: 6px 8px }
+  /* The header wraps to two rows here. */
+  [id] { scroll-margin-top: 120px }
+}

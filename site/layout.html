@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>${title}</title>
+<meta name="description" content="${description}" />
+<meta property="og:title" content="${title}" />
+<meta property="og:description" content="${description}" />
+<meta property="og:type" content="website" />
+<meta name="color-scheme" content="dark light" />
+<meta name="theme-color" content="#09090a" media="(prefers-color-scheme: dark)" />
+<meta name="theme-color" content="#fafaf7" media="(prefers-color-scheme: light)" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%23c49b21'/%3E%3Cpath d='M8 3 13 12H3z' fill='none' stroke='%23130e00' stroke-width='1.6' stroke-linejoin='round'/%3E%3C/svg%3E" />
+${stylesheets}
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="site-header">
+  <a class="brand" href="${root}index.html">
+    <span class="brand-mark">trigon</span>
+    <span class="brand-what">${section}</span>
+  </a>
+  <nav class="site-nav" aria-label="Site">
+${nav}
+  </nav>
+</header>
+
+${body}
+
+<footer class="site-footer">
+  <div class="wrap">
+    <nav aria-label="Footer">
+${footer_nav}
+    </nav>
+    <p>
+      Apache-2.0. Every number on this site is computed at build time from the
+      committed reports under <a href="${github}/tree/${branch}/reports"><code>reports/</code></a>
+      by <a href="${github}/blob/${branch}/scripts/build_site.py"><code>scripts/build_site.py</code></a>,
+      and <a href="${github}/blob/${branch}/tests/test_site.py"><code>tests/test_site.py</code></a>
+      fails the build when the landing page disagrees with them.
+    </p>
+    <p>Built from branch <code>${branch}</code>. No scripts, no trackers, no third-party requests.</p>
+  </div>
+</footer>
+</body>
+</html>
