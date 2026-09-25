@@ -116,6 +116,12 @@ twenty-two runs** — the investigation is closed and the evidence is in
 - **A deployed model.** The certified Banking77 adapter behind the real
   gateway on Modal (`scripts/modal_serve.py`): API-key auth, calibrated,
   schema cache on, scale to zero; 81–108 ms model time warm.
+- **C.1, the weights, packaged** (Q21). `releases/banking77-qwen15b-v1/` holds
+  the model card and checksums, pinned to the committed calibrators and
+  report by `tests/test_release.py`. The bundle, adapter included, is on the
+  `trigon-runs` Volume. It is not yet a GitHub Release: this session's git
+  proxy refused every push that was not to its working branch, a tag
+  included.
 - `scripts/burn_in.py` — B.1, written and handed over. Times the serving path
   at 0.5B and 1.5B backbone shapes rather than the spike's, because the spike
   would flatter `$/MTok` by the ratio of the models' compute.

@@ -22,7 +22,7 @@ next, and what each step would have to show to count.
 | A.5 length bucketing | Implemented; its before/after timing is still owed |
 | B.1 L4 burn-in | Written and handed over (`scripts/burn_in.py`); needs a rented L4 |
 | B.2 / B.3 | Done |
-| C.1 publish weights | **Unblocked by A.3.** Outward-facing and licence-bearing; waits on a decision |
+| C.1 publish weights | 🟡 **Decided and packaged (Q21).** The certified adapter, calibrators and model card are in `releases/banking77-qwen15b-v1/` and on the Modal Volume. What is left is attaching the bundle to a GitHub Release, which needs a token or the UI |
 | C.2 / C.3 | Done |
 
 Two findings changed what a number means here. **The calibrator's accept
