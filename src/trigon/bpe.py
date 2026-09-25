@@ -39,7 +39,14 @@ import pathlib
 import re
 from typing import Any
 
-__all__ = ["BPETokenizer", "DEFAULT_VOCAB_PATH", "PAD_ID", "READOUT_ID", "SEP_ID"]
+__all__ = [
+    "BPETokenizer",
+    "DEFAULT_VOCAB_PATH",
+    "PAD_ID",
+    "READOUT_ID",
+    "SEP_ID",
+    "char_spans",
+]
 
 #: Reserved ids, fixed across every vocabulary so a checkpoint and a vocabulary
 #: cannot disagree about which id is the readout slot.
@@ -105,6 +112,35 @@ def _byte_encoder() -> dict[int, str]:
             mapping[b] = chr(256 + spare)
             spare += 1
     return mapping
+
+
+def char_spans(piece: str, offset: int, byte_lengths: list[int]) -> list[tuple[int, int]]:
+    """Character offsets of consecutive byte-level tokens over one pre-token.
+
+    A byte-level token covers a run of UTF-8 bytes, and a run of bytes does
+    not always start or end on a character: a four-byte emoji can be split
+    across two tokens. Each token is mapped to **every character any of its
+    bytes belongs to** -- the character holding its first byte to the one
+    holding its last -- so two tokens that split one character both claim it.
+    That is the only mapping that never assigns a token a character it has no
+    byte of and never loses a character, and it is what the reference
+    ``tokenizers`` library reports for Qwen2's vocabulary
+    (``tests/test_hf_bpe.py`` checks it id for id and offset for offset).
+
+    ``offset`` is where ``piece`` starts in the text; ``byte_lengths`` are the
+    tokens' lengths in bytes, in order, and must sum to the piece's length.
+    """
+    owner: list[int] = []
+    for index, char in enumerate(piece):
+        owner.extend([index] * len(char.encode("utf-8")))
+    if sum(byte_lengths) != len(owner):
+        raise ValueError(f"tokens cover {sum(byte_lengths)} bytes of a {len(owner)}-byte piece")
+    spans, cursor = [], 0
+    for length in byte_lengths:
+        first, last = owner[cursor], owner[cursor + length - 1]
+        spans.append((offset + first, offset + last + 1))
+        cursor += length
+    return spans
 
 
 class BPETokenizer:
@@ -191,6 +227,26 @@ class BPETokenizer:
                     raise KeyError(f"token {symbol!r} is not in the vocabulary")
                 ids.append(token_id)
         return ids
+
+    def encode_with_offsets(self, text: str) -> list[tuple[int, int, int]]:
+        """``(id, start, end)`` per token, ``text[start:end]`` being what it covers.
+
+        The same ids as :meth:`encode`, in the same order -- asserted in
+        ``tests/test_bpe.py`` over every sample -- plus the characters each
+        one came from, which is what lets evidence scored per token be handed
+        back as character spans of the caller's own string. Every symbol in a
+        byte-level vocabulary is one printable character per byte, so a
+        symbol's length *is* its length in bytes.
+        """
+        out: list[tuple[int, int, int]] = []
+        for match in _PIECE.finditer(text):
+            piece = match.group()
+            mapped = "".join(self._byte_encoder[b] for b in piece.encode("utf-8"))
+            symbols = self._merge(mapped)
+            spans = char_spans(piece, match.start(), [len(symbol) for symbol in symbols])
+            for symbol, (start, end) in zip(symbols, spans, strict=True):
+                out.append((self.vocab[symbol], start, end))
+        return out
 
     def decode(self, ids: list[int]) -> str:
         """Inverse of ``encode`` for any ids it produced."""

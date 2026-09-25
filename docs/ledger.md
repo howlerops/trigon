@@ -19,9 +19,9 @@ narrative sections are a discipline, not a test.
 | Python files (`src`, `tests`, `scripts`) | 113 |
 | Lines in `src/` | 12,633 |
 | Release gates | 9 |
-| Green-tier corpora in the licence audit | 8 |
+| Green-tier corpora in the licence audit | 9 |
 | Committed use cases | 3 |
-| Real corpora loadable | 6 |
+| Real corpora loadable | 7 |
 
 **Certified on real data: Qwen2.5-1.5B on Banking77**, LoRA rank 16, lr
 1e-4, 4 epochs — median accuracy 0.9009 against the spike's 0.7248, every seed
@@ -73,6 +73,14 @@ twenty-two runs** — the investigation is closed and the evidence is in
 - **Schema KV prefix cache** — per-layer pre-attention normed states plus the
   schema block's outputs, keyed on `schema_hash`. Off by default; see
   *Corrected in our own favour*.
+- **Evidence** (2026-09-25). `options.include_evidence` returns, per answer,
+  the spans of the state that drove it — character offsets, text, score — and
+  `evidence_method` saying where they came from: a span head only when the
+  checkpoint was trained on human rationales, gradient × input otherwise,
+  `unavailable` from a backend that cannot attribute. Off by default and
+  absent from the default response. Independence of evidence across questions
+  is asserted for both methods, cache on and off, with a positive control
+  that sees a real leak (`docs/architecture.md`, *Evidence*).
 
 ### Calibration
 - Temperature scaling and isotonic calibration, **selected per primitive** on a
@@ -106,6 +114,11 @@ twenty-two runs** — the investigation is closed and the evidence is in
 - `scripts/train_corpus.py` — train, calibrate and gate on a real corpus, with
   the marginal predictor as the floor since a human-labelled corpus has no
   Bayes-optimal loss to quote.
+- **Plausibility of evidence** (`trigon.evals.rationale`): token F1 and IOU F1
+  against human rationales, on words of the state, printed beside three
+  floors — the lexical floor, a word list fitted to the training split's
+  highlights, and every word. `train_corpus.py` appends it for any corpus
+  with rationales and trains the evidence head on them.
 - **Training on a GPU, from this sandbox.** `scripts/modal_train.py` runs one
   Modal container per seed and writes each seed's reports to a Volume before
   returning, so a `--detach`ed run outlives the VM that launched it and
@@ -152,6 +165,10 @@ twenty-two runs** — the investigation is closed and the evidence is in
   test holds every row of `docs/data.md`'s audit — BoolQ, FEVER, DBpedia-14,
   Circa — to it. `train_corpus.py` refuses such a corpus before building a
   model, since a calibrator fitted on it ships too.
+- **HateXplain**, the rationale stream (2026-09-25): three-way labels,
+  annotator distributions, and the tokens annotators marked as the reason.
+  Licence read from both primary sources — MIT on the repository, CC BY 4.0 on
+  the authors' dataset card — so green; pinned to a commit and a SHA-256.
 
 ### Reference model
 - Prefill-only transformer, byte-level BPE trained on the project's own data,
@@ -203,6 +220,11 @@ twenty-two runs** — the investigation is closed and the evidence is in
 | **HelpSteer2 annotator distributions under `brier_over_marginal`** | **Certified, four seeds of four**: skill +0.0543 to +0.0658, median +0.0559, against +0.02. The hard-label ablation clears it too (median +0.0475), but only after its calibrator ran |
 | The synthetic suite on Qwen, with the per-primitive gate blocking | **Three seeds of four.** Seed 0's Score head is at ECE 0.0551, which its pooled 0.0408 hid. The median worst primitive is 0.0303, so the configuration still certifies. Banking77 passes on all four seeds (worst 0.0448) |
 | Banking77 accuracy (pilot, 2 seeds) | 0.4640 / 0.4193 against a 1.8% marginal — **it transfers** |
+| **Evidence on HateXplain, the spike, two seeds** | The trained span head: token F1 0.488–0.495, IOU F1 0.330–0.331. **A word list beats it**: 0.573 / 0.452 — every word highlighted in half its training occurrences, very nearly a slur list. Gradient × input 0.30–0.32 token F1, below highlighting every word (0.434) |
+| HateXplain accuracy, the spike, with and without rationale supervision | 0.5798 on both supervised seeds, 0.5664 / 0.5702 without, against a 0.408 marginal; every blocking gate passes on all four. Two seeds a side: not an effect |
+| Evidence cost, the spike, one question | p50 2.68 ms plain, 3.36 ms span head, 5.16 ms gradient × input; the span head's answers bit-identical to the plain ones |
+| Evidence across shapes | float32 gradient × input moves 1.7e-06 when a question is added, 14× the logits' 1.2e-07; float64 reads exactly 0.0. A real leak moves it 1e-03 |
+| Qwen2.5 offsets against `tokenizers` | Offset for offset on NFC text; on text NFC changes, ours cover the whole composed character and the reference drops the combining mark |
 
 ---
 
@@ -252,6 +274,8 @@ The most useful section. Each of these was argued for before it was measured.
 | `modal run --detach` plus a Volume survives this VM | It keeps the app, not the calls. The container restarted twelve minutes into a 12-epoch sweep; Modal cancelled all four `starmap` inputs and nothing was written. Now deploy + `spawn`, and the launcher exits at once. |
 | Accepting a calibrator at 95% of resamples is the right burden of proof | At four classes, yes. At 77 classes on a 500-answer check it is more power than the check has: worst-case gate error 0.0844 over five known heads, three of them failing. 0.80 keeps all five under 0.05 (0.0438) and is identical at four classes. |
 | A chunk of eight fits on a 24 GB GPU | HelpSteer2's longest case is 7,171 tokens; the chunk asked a 22 GiB A10 for 6.13 GiB at once and died four minutes in. |
+| Evidence can be held to the answers' float32 bound across shapes | Gradient × input moved 1.7e-06 when one question was added, past the 1e-06 bound: a backward pass amplifies the forward's rounding ~14×. In float64 it reads 0.0, so the tests compare there. |
+| Asking for evidence leaves the answer bit-identical | Not under gradient × input: autograd takes `nn.TransformerEncoder` off its no-grad fast path, and the answer moves 2e-08. The span head, which needs no gradients, now stays on that path and is exact. |
 
 ---
 
@@ -416,6 +440,13 @@ what order, and how each step is known to be done.
   term would have to be a proper score against the marginal distribution
   (Brier or NLL), which every report now prints beside the gates. Whether to
   gate on it is a decision, not made here.
+- **Evidence on the backbone is unmeasured.** The spike's trained span head
+  loses to a word list on HateXplain (`reports/hatexplain/README.md`). Whether
+  Qwen2.5-1.5B's beats it — on both token F1 and IOU F1, over three or more
+  seeds — is the falsifier in `docs/decisions.md`, and needs a GPU run.
+- **Faithfulness of evidence is unmeasured.** Plausibility says a person would
+  agree with a highlight, not that the model used it. Comprehensiveness and
+  sufficiency — delete the spans, measure the answer move — are not built.
 - **$/MTok is unmeasured.** The whole cost argument beyond ~2× rests on it.
   Needs the L4 burn-in.
 - ~~The KV cache is off by default because nobody has timed it.~~ **Closed.**

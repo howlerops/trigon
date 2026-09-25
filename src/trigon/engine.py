@@ -8,7 +8,9 @@ rather than three:
 2. compile the schema-first layout and its block mask;
 3. run one forward pass and check the structural guarantee;
 4. apply the fitted temperature, then derive confidence from the result;
-5. optionally wrap in a conformal prediction set.
+5. optionally wrap in a conformal prediction set;
+6. optionally attach evidence, merged from the backend's per-token scores
+   under the one rule in ``trigon.evidence``.
 
 Step 4 is in that order on purpose. Confidence is a statistic of the
 *calibrated* distribution -- deriving it from raw logits would produce a
@@ -28,6 +30,7 @@ from .calibration.conformal import ConformalPredictor
 from .calibration.isotonic import IsotonicCalibrator
 from .calibration.temperature import TemperatureScaler
 from .confidence import ConfidenceMethod, choice_confidence, score_confidence
+from .evidence import EVIDENCE_THRESHOLD, merge_spans
 from .limits import DEFAULT_BUDGET, RETRIEVAL_SHORTLIST_SIZE, Budget
 from .numeric import expectation, softmax
 from .retrieval import LexicalShortlister, Shortlister
@@ -36,6 +39,7 @@ from .types import (
     Answer,
     ChoiceAnswer,
     ChoiceQuestion,
+    EvidenceSpan,
     NoulAnswer,
     NoulQuestion,
     ScoreAnswer,
@@ -61,6 +65,9 @@ class EngineConfig:
     shortlist_size: int = RETRIEVAL_SHORTLIST_SIZE
     budget: Budget = field(default=DEFAULT_BUDGET)
     tier: str = "workhorse"
+    #: Where a token's evidence score becomes a span. `trigon.evidence` says
+    #: what the default means for each method.
+    evidence_threshold: float = EVIDENCE_THRESHOLD
 
 
 class Engine:
@@ -258,6 +265,38 @@ class Engine:
         return request.model_copy(update={"questions": questions}), shortlists
 
     def _answer_one(
+        self,
+        qid: str,
+        question: ChoiceQuestion | ScoreQuestion | NoulQuestion,
+        output: QuestionOutput,
+        shortlist: list[int] | None,
+        request: SystemOneRequest,
+    ) -> Answer:
+        answer = self._distribution(qid, question, output, shortlist, request)
+        if not request.options.include_evidence:
+            return answer
+        return answer.model_copy(update=self._evidence(output, request))
+
+    def _evidence(self, output: QuestionOutput, request: SystemOneRequest) -> dict:
+        """The answer's evidence fields, merged from the backend's token scores.
+
+        A backend that cannot attribute says nothing, and the answer says so:
+        ``unavailable`` with an empty list, rather than an empty list a caller
+        would read as "nothing in the state mattered".
+        """
+        if output.evidence is None:
+            return {"evidence": [], "evidence_method": "unavailable"}
+        text = render_state(request.state)
+        spans = merge_spans(text, output.evidence, self.config.evidence_threshold)
+        return {
+            "evidence": [
+                EvidenceSpan(start=start, end=end, text=text[start:end], score=score)
+                for start, end, score in spans
+            ],
+            "evidence_method": output.evidence_method or "unavailable",
+        }
+
+    def _distribution(
         self,
         qid: str,
         question: ChoiceQuestion | ScoreQuestion | NoulQuestion,

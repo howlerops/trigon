@@ -45,6 +45,7 @@ from torch.utils.checkpoint import checkpoint
 from .hf_bpe import ByteLevelBPE
 from .tokenizer import Tokenizer, build_tokenizer, describe
 from .torch_readout import (
+    EVIDENCE_WIDTH,
     ReadoutConfig,
     SchemaPrefix,
     TorchReadoutBackend,
@@ -257,6 +258,11 @@ class QwenPrefillModel(nn.Module):
         self.match_key = nn.Linear(d, d, bias=False)
         self.match_log_scale = nn.Parameter(torch.tensor(math.log(1.0 / 0.07)))
         self.score_head = nn.Linear(d, max_levels)
+        # The evidence head, as the spike's: trainable, and used only by a
+        # checkpoint trained on rationales (`ReadoutConfig.evidence_supervised`).
+        self.evidence_query = nn.Linear(d, EVIDENCE_WIDTH, bias=False)
+        self.evidence_key = nn.Linear(d, EVIDENCE_WIDTH, bias=False)
+        self.evidence_bias = nn.Parameter(torch.zeros(()))
         #: Recompute each layer in the backward pass instead of storing its
         #: activations. Twenty-eight layers of a 1.5B model at a few hundred
         #: tokens times a chunk of eight does not fit a 24 GB card otherwise.
@@ -275,6 +281,11 @@ class QwenPrefillModel(nn.Module):
         for module in self.modules():
             if isinstance(module, LoRALinear):
                 module.reset_adapter()
+        # Last, so the adapters draw what they drew before this head existed.
+        self.evidence_query.reset_parameters()
+        self.evidence_key.reset_parameters()
+        with torch.no_grad():
+            self.evidence_bias.zero_()
 
     def _autocast(self, like: torch.Tensor):
         return torch.autocast("cuda", dtype=torch.bfloat16, enabled=like.is_cuda)
@@ -497,6 +508,7 @@ class QwenReadoutBackend(TorchReadoutBackend):
                 "match_normalize": self.config.match_normalize,
                 "match_residual": self.config.match_residual,
                 "match_residual_score": self.config.match_residual_score,
+                "evidence_supervised": self.config.evidence_supervised,
             },
             "tokenizer": describe(self.tokenizer),
             "trainable": {k: v.detach().cpu() for k, v in model.trainable_state().items()},

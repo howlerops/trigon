@@ -24,6 +24,14 @@ this repo has made that mistake once already.
 
     python scripts/train_corpus.py banking77 --out reports/banking77/run.md \
         -n 4000 --epochs 4
+
+**A corpus with human rationales (HateXplain) also trains the evidence head and
+publishes its plausibility** -- token F1 and IOU F1 against what the annotators
+highlighted -- in the same report, beside the three floors
+`trigon.evals.rationale` computes: the lexical floor's evidence, a word list
+fitted to the training split's highlights, and highlighting every word. When
+the head trained, the model is also scored with gradient x input on the same
+weights, so the table shows what the supervision bought.
 """
 
 from __future__ import annotations
@@ -106,6 +114,21 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument("--lora-rank", type=int, default=16)
+    parser.add_argument(
+        "--rationale-weight",
+        type=float,
+        default=1.0,
+        help=(
+            "weight of the evidence head's loss on cases carrying a human rationale; "
+            "0 trains no head, and the checkpoint serves gradient x input"
+        ),
+    )
+    parser.add_argument(
+        "--rationale-eval-n",
+        type=int,
+        default=0,
+        help="score plausibility on at most this many evaluation rationales (0 = all)",
+    )
     parser.add_argument(
         "--hard-labels",
         action="store_true",
@@ -374,7 +397,12 @@ def header(
             f"--device {args.device}"
             + (f" --backbone {args.backbone} --lora-rank {args.lora_rank}" if args.backbone else "")
             + (f" --max-batch-cells {args.max_batch_cells}" if args.max_batch_cells else "")
-            + (" --hard-labels" if args.hard_labels else ""),
+            + (" --hard-labels" if args.hard_labels else "")
+            + (
+                f" --rationale-weight {args.rationale_weight}"
+                if args.rationale_weight != 1.0
+                else ""
+            ),
             "```",
             "",
             *(
@@ -396,6 +424,52 @@ def header(
             "",
         ]
     )
+
+
+def evidence_section(backend, engine, train, evaluation, args):
+    """The plausibility table, or None for a corpus without human rationales.
+
+    Scored on the evaluation split only, and the rationale lexicon floor is
+    fitted on the training split only: fitted on the cases it is scored on, a
+    word list is an oracle with a vocabulary.
+    """
+    from trigon.evals.rationale import rationale_cases, render_plausibility, run_rationale_suite
+
+    scored = [case for case in evaluation if rationale_cases([case])]
+    if not scored:
+        return None
+    if args.rationale_eval_n:
+        scored = scored[: args.rationale_eval_n]
+    engines = {"model": engine}
+    rows = run_rationale_suite(engines, scored, train)
+    if backend.config.evidence_supervised:
+        # Same weights, the other method: what training the head bought.
+        backend.evidence_mode = "gradient_x_input"
+        try:
+            from trigon.evals.rationale import score_engine
+
+            rows.insert(1, score_engine("model, gradient x input", engine, scored))
+        finally:
+            backend.evidence_mode = "auto"
+    text = "\n".join(
+        [
+            "",
+            "## Evidence: plausibility against human rationales",
+            "",
+            "What the model highlights, scored against what the annotators",
+            "highlighted, on words of the state. Token F1 is per-case F1 over",
+            "highlighted words, averaged; IOU F1 counts a predicted span as found",
+            "when it overlaps a human span by at least half their union. The three",
+            "rows after the model are floors, and the rationale lexicon is the one",
+            "that matters: every word highlighted in at least half its training",
+            "occurrences. A highlighter that does not beat it has learned a",
+            "vocabulary, not a reading.",
+            "",
+            render_plausibility(rows),
+            "",
+        ]
+    )
+    return text, rows
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -471,6 +545,7 @@ def main(argv: list[str] | None = None) -> int:
                 max_batch_cells=args.max_batch_cells or None,
                 resume_path=args.resume_path,
                 bucket_window=args.bucket_window,
+                rationale_weight=args.rationale_weight,
             ),
             compiler=compiler,
         )
@@ -509,15 +584,19 @@ def main(argv: list[str] | None = None) -> int:
     markdown = header(
         spec, args, train, calibration, evaluation, marginal, topped_up, hardware
     ) + render_markdown([before, after], gates, slices, gated=after)
+    plausibility = evidence_section(backend, calibrated, train, evaluation, args)
+    if plausibility is not None:
+        markdown += plausibility[0]
     print(markdown)
 
     if args.out:
         out = pathlib.Path(args.out)
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(markdown)
-        out.with_suffix(".json").write_text(
-            render_json([before, after], gates, slices, gated=after)
-        )
+        payload = json.loads(render_json([before, after], gates, slices, gated=after))
+        if plausibility is not None:
+            payload["plausibility"] = [row.to_dict() for row in plausibility[1]]
+        out.with_suffix(".json").write_text(json.dumps(payload, indent=2))
         stem = out.with_suffix("")
         scaler.save(pathlib.Path(f"{stem}-temperatures.json"))
         if isotonic.knots:

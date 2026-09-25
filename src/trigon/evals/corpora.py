@@ -848,6 +848,12 @@ def load(
             f"{spec.name} is {spec.tier} ({spec.licence}) and may not be used to "
             f"{purpose}; docs/decisions.md section 3 has the policy"
         )
+    # A corpus whose shape the generic paths below do not cover brings its own
+    # loader, registered beside its spec. The licence check above runs first
+    # for every corpus, whichever loader reads it.
+    custom = _LOADERS.get(spec.name)
+    if custom is not None:
+        return custom(spec, split, limit=limit, root=root)
     paths = fetch(spec, root=root)
     if spec.holdout_fraction:
         # One pool, split here by a hash of the grouping text; see
@@ -891,3 +897,185 @@ def load(
             )
         )
     return cases
+
+
+# -- Loaders for corpora the generic paths do not cover -----------------------
+#
+# Each registers itself here, beside its spec, so adding one touches nothing
+# above but `load()`'s single lookup.
+
+_LOADERS: dict[str, Any] = {}
+
+
+# -- HateXplain: a label per annotator and the words each one highlighted -----
+#
+# The one corpus here whose annotators said *why*: for every post labelled
+# hateful or offensive, each annotator who said so marked the tokens their
+# label rested on. That is what the evidence head trains on and what its
+# plausibility is scored against (`trigon.evals.rationale`).
+#
+# **Licence, verified 2026-09-25 against both primary sources.** The authors'
+# repository, which is where the file is fetched from, carries an MIT LICENSE
+# ("Copyright (c) 2020 Punyajoy Saha"); the authors' own Hugging Face dataset
+# card (`Hate-speech-CNERG/hatexplain`) declares CC BY 4.0. Both are green
+# under docs/decisions.md section 3. The posts themselves are Twitter and Gab
+# text; neither source attaches platform terms to them, and `docs/data.md`
+# records that as the caveat it is.
+#
+# **The split is by a hash of the post id**, a quarter held out, so a rerun
+# holds out the same posts and no post is on both sides. The authors publish
+# an 8:1:1 split of their own; it is not used, so that every corpus here is
+# split by one rule, and published HateXplain numbers are therefore not
+# directly comparable with ours.
+
+HATEXPLAIN_REVISION = "01d742279dac941981f53806154481c0e15ee686"
+#: SHA-256 of `Data/dataset.json` at that revision. A pinned commit cannot
+#: move, but a cache can be written by anything: checked on every download, and
+#: on every load from the default cache (a test's hand-built fixture under an
+#: explicit ``root`` is not the pinned file and is not held to its hash).
+HATEXPLAIN_SHA256 = "63bb3340fee0ec469b09690d04cb68f7c187787dd8b83807f071892c084967fb"
+#: Declared low to high. `label` is the index into this.
+HATEXPLAIN_LABELS = ("normal", "offensive", "hatespeech")
+
+HATEXPLAIN = CorpusSpec(
+    name="hatexplain",
+    primitive="choice",
+    tier="green",
+    licence="MIT",
+    attribution=(
+        "HateXplain (Mathew et al., AAAI 2021), Punyajoy Saha and co-authors. "
+        "MIT (repository LICENSE, Copyright (c) 2020 Punyajoy Saha); the authors' "
+        "dataset card states CC BY 4.0. "
+        f"https://github.com/punyajoy/HateXplain at {HATEXPLAIN_REVISION[:12]}"
+    ),
+    files={
+        "all": (
+            "https://raw.githubusercontent.com/punyajoy/HateXplain/"
+            f"{HATEXPLAIN_REVISION}/Data/dataset.json"
+        ),
+    },
+    instructions="Is this post hate speech, offensive, or neither?",
+    holdout_fraction=0.25,
+    holdout_key="post_id",
+)
+
+_HATEXPLAIN_OPTIONS = [
+    {"name": "normal", "criteria": "neither hateful nor offensive"},
+    {"name": "offensive", "criteria": "abusive or offensive, but not hate speech"},
+    {
+        "name": "hatespeech",
+        "criteria": "attacks or demeans a group for who they are: race, religion, "
+        "gender, sexual orientation, origin or disability",
+    },
+]
+
+
+def _hatexplain_file(spec: CorpusSpec, root: pathlib.Path | None) -> pathlib.Path:
+    """The pinned file, fetched once into the cache and checked on every load."""
+    folder = (root or cache_root()) / spec.name
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / "dataset.json"
+    if not path.exists():
+        with urllib.request.urlopen(spec.files["all"], timeout=120) as response:  # noqa: S310
+            blob = response.read()
+        if hashlib.sha256(blob).hexdigest() != HATEXPLAIN_SHA256:
+            raise ValueError(f"{spec.files['all']} does not match the pinned SHA-256")
+        path.write_bytes(blob)
+    return path
+
+
+def hatexplain_case(spec: CorpusSpec, post: dict[str, Any], case_id: str) -> Case | None:
+    """One post as a case, or ``None`` for a post the annotators split three ways.
+
+    * **State** is the post's tokens joined by single spaces -- the exact text
+      the annotators highlighted, so a highlighted token is a character span of
+      the state with no alignment step to get wrong.
+    * **Label** is the majority of the three annotators; a three-way split has
+      no majority and is dropped, as the authors drop it. **Distribution** is
+      all three, which is what training fits.
+    * **Rationale** is the majority over the annotators who gave one: a token
+      is in it when at least half of them marked it. Only annotators who
+      labelled a post hateful or offensive were asked, so a post whose
+      majority is ``normal`` has no rationale (``None``), which is not the
+      same as an empty one.
+    """
+    tokens = [str(t) for t in post.get("post_tokens") or []]
+    votes = [a.get("label") for a in post.get("annotators") or []]
+    if not tokens or not votes or any(v not in HATEXPLAIN_LABELS for v in votes):
+        return None
+    counts = [votes.count(label) for label in HATEXPLAIN_LABELS]
+    top = max(counts)
+    if counts.count(top) > 1 or top * 2 <= len(votes):
+        return None
+    label = counts.index(top)
+
+    offsets, cursor = [], 0
+    for token in tokens:
+        offsets.append((cursor, cursor + len(token)))
+        cursor += len(token) + 1
+    state = " ".join(tokens)
+
+    rationale = None
+    marks = [r for r in post.get("rationales") or [] if len(r) == len(tokens)]
+    if HATEXPLAIN_LABELS[label] != "normal" and marks:
+        chosen = [sum(m[i] for m in marks) * 2 >= len(marks) for i in range(len(tokens))]
+        spans: list[tuple[int, int]] = []
+        for i, keep in enumerate(chosen):
+            if not keep:
+                continue
+            start, end = offsets[i]
+            if spans and chosen[i - 1]:
+                spans[-1] = (spans[-1][0], end)
+            else:
+                spans.append((start, end))
+        rationale = tuple(spans)
+
+    return Case(
+        case_id=case_id,
+        request=SystemOneRequest(
+            state=state,
+            questions={
+                "label": ChoiceQuestion(instructions=spec.instructions, options=_HATEXPLAIN_OPTIONS)
+            },
+        ),
+        expected={
+            "label": Expectation(
+                label=label,
+                distribution=tuple(c / len(votes) for c in counts),
+                rationale=rationale,
+            )
+        },
+        domain=spec.name,
+        tags=(spec.name, "real", "rationale"),
+    )
+
+
+def _load_hatexplain(
+    spec: CorpusSpec, split: str, *, limit: int | None, root: pathlib.Path | None
+) -> list[Case]:
+    if split not in ("train", "test"):
+        raise KeyError(f"{spec.name} has splits 'train' and 'test'; got {split!r}")
+    path = _hatexplain_file(spec, root)
+    blob = path.read_bytes()
+    if root is None and hashlib.sha256(blob).hexdigest() != HATEXPLAIN_SHA256:
+        raise ValueError(
+            f"{path} does not match the pinned revision's SHA-256; delete it to refetch"
+        )
+    posts = json.loads(blob)
+    cases = []
+    # Sorted by post id, so the order -- and so what `limit` keeps -- does not
+    # depend on how the file happens to be serialized.
+    for post_id in sorted(posts):
+        if limit is not None and len(cases) >= limit:
+            break
+        post = posts[post_id]
+        if _held_out(spec, {"post_id": post_id}) != (split == "test"):
+            continue
+        case = hatexplain_case(spec, post, f"{spec.name}/{split}/{post_id}")
+        if case is not None:
+            cases.append(case)
+    return cases
+
+
+CORPORA[HATEXPLAIN.name] = HATEXPLAIN
+_LOADERS[HATEXPLAIN.name] = _load_hatexplain

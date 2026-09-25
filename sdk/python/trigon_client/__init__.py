@@ -13,6 +13,7 @@ forty lines of ``urllib``.
 from ._generated import (
     CONTRACT_VERSION,
     ChoiceAnswer,
+    EvidenceSpan,
     NoulAnswer,
     Response,
     ScoreAnswer,
@@ -29,6 +30,7 @@ from ._generated import (
 __all__ = [
     "CONTRACT_VERSION",
     "ChoiceAnswer",
+    "EvidenceSpan",
     "NoulAnswer",
     "Response",
     "ScoreAnswer",

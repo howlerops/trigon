@@ -54,6 +54,32 @@ export interface Timing {
 }
 
 /**
+ * One span of the state that drove an answer.
+ */
+export interface EvidenceSpan {
+  /**
+   * One past the last character, so `state[start:end]` is the span.
+   */
+  end: number;
+  /**
+   * How strongly this span drove the answer. Under `span_head` it is the
+   * head's probability that the span is part of a human rationale, fitted
+   * with a proper scoring rule and never calibrated or gated; under
+   * `gradient_x_input` it is relative within this answer, 1 being its
+   * strongest token, and is not a probability at all.
+   */
+  score: number;
+  /**
+   * First character of the span in the state string.
+   */
+  start: number;
+  /**
+   * `state[start:end]`, so a caller need not slice it.
+   */
+  text: string;
+}
+
+/**
  * A distribution over exactly the options the request declared.
  */
 export interface ChoiceAnswer {
@@ -68,6 +94,22 @@ export interface ChoiceAnswer {
    * The coverage that prediction set guarantees.
    */
   coverage_target?: number | null;
+  /**
+   * Present when `include_evidence` was asked for: the spans of the state
+   * that drove this answer, in order of position. Empty means nothing
+   * cleared the threshold, which is an answer, not an error.
+   */
+  evidence?: EvidenceSpan[] | null;
+  /**
+   * How `evidence` was produced. `span_head`: a head trained on human
+   * rationales. `gradient_x_input`: attribution of the selected label to
+   * each state token, from a model never shown a rationale -- a statement
+   * about the model, not a prediction of what a person would highlight.
+   * `lexical_overlap`: the lexical floor's word matches. `unavailable`:
+   * this backend cannot attribute, and `evidence` is empty for that reason
+   * rather than because nothing mattered.
+   */
+  evidence_method?: "span_head" | "gradient_x_input" | "lexical_overlap" | "unavailable" | null;
   /**
    * Present when a conformal profile was applied: the options that survive
    * at the profile's coverage target. A singleton set is the useful case;
@@ -125,6 +167,22 @@ export interface ScoreAnswer {
    */
   coverage_target?: number | null;
   /**
+   * Present when `include_evidence` was asked for: the spans of the state
+   * that drove this answer, in order of position. Empty means nothing
+   * cleared the threshold, which is an answer, not an error.
+   */
+  evidence?: EvidenceSpan[] | null;
+  /**
+   * How `evidence` was produced. `span_head`: a head trained on human
+   * rationales. `gradient_x_input`: attribution of the selected label to
+   * each state token, from a model never shown a rationale -- a statement
+   * about the model, not a prediction of what a person would highlight.
+   * `lexical_overlap`: the lexical floor's word matches. `unavailable`:
+   * this backend cannot attribute, and `evidence` is empty for that reason
+   * rather than because nothing mattered.
+   */
+  evidence_method?: "span_head" | "gradient_x_input" | "lexical_overlap" | "unavailable" | null;
+  /**
    * Levels surviving the conformal profile, if one was applied.
    */
   prediction_set?: string[] | null;
@@ -159,6 +217,22 @@ export interface ScoreAnswer {
  * already carries everything a confidence statistic could summarise.
  */
 export interface NoulAnswer {
+  /**
+   * Present when `include_evidence` was asked for: the spans of the state
+   * that drove this answer, in order of position. Empty means nothing
+   * cleared the threshold, which is an answer, not an error.
+   */
+  evidence?: EvidenceSpan[] | null;
+  /**
+   * How `evidence` was produced. `span_head`: a head trained on human
+   * rationales. `gradient_x_input`: attribution of the selected label to
+   * each state token, from a model never shown a rationale -- a statement
+   * about the model, not a prediction of what a person would highlight.
+   * `lexical_overlap`: the lexical floor's word matches. `unavailable`:
+   * this backend cannot attribute, and `evidence` is empty for that reason
+   * rather than because nothing mattered.
+   */
+  evidence_method?: "span_head" | "gradient_x_input" | "lexical_overlap" | "unavailable" | null;
   /**
    * Calibrated probability that the judgement holds. There is no
    * confidence field by design: for a binary question the probability

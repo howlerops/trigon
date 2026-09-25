@@ -38,7 +38,14 @@ OUT_TS = ROOT / "sdk" / "typescript" / "src" / "generated.ts"
 #: plain dicts on purpose: the gateway validates them and returns a 422 naming
 #: the field, which is a better error than one this client could invent.
 ANSWER_SCHEMAS = ("ChoiceAnswer", "ScoreAnswer", "NoulAnswer")
-VALUE_SCHEMAS = ("Usage", "Timing")
+VALUE_SCHEMAS = ("Usage", "Timing", "EvidenceSpan")
+
+
+def _ref(schema: dict) -> str | None:
+    """The schema name a ``$ref`` points at, e.g. ``EvidenceSpan``."""
+    ref = schema.get("$ref")
+    return ref.rsplit("/", 1)[-1] if ref else None
+
 
 _PY_TYPES = {
     "string": "str",
@@ -57,6 +64,8 @@ def _annotation(schema: dict) -> tuple[str, bool]:
         optional = len(parts) != len(schema["anyOf"])
         inner = _annotation(parts[0])[0] if parts else "object"
         return (f"{inner} | None" if optional else inner), optional
+    if _ref(schema):
+        return _ref(schema), False
     kind = schema.get("type")
     if kind == "array":
         return f"list[{_annotation(schema.get('items', {}))[0]}]", False
@@ -101,8 +110,25 @@ def _dataclass(name: str, schema: dict) -> str:
     lines.append("")
     lines.append("    @classmethod")
     lines.append(f"    def from_dict(cls, payload: dict) -> {name}:")
-    lines.append("        return cls(**{k: v for k, v in payload.items() if k in _FIELDS[cls]})")
+    lines.append("        return cls(")
+    lines.append(
+        "            **{k: _nested(cls, k, v) for k, v in payload.items() if k in _FIELDS[cls]}"
+    )
+    lines.append("        )")
     return "\n".join(lines)
+
+
+def _nested_entries(schemas: dict) -> list[str]:
+    """``(Class, "field"): Inner`` for every field that is a list of a schema."""
+    out = []
+    for name in VALUE_SCHEMAS + ANSWER_SCHEMAS:
+        for field_name, prop in schemas[name].get("properties", {}).items():
+            options = prop.get("anyOf", [prop])
+            for option in options:
+                inner = _ref(option.get("items", {})) if option.get("type") == "array" else None
+                if inner in VALUE_SCHEMAS:
+                    out.append(f'    ({name}, "{field_name}"): {inner},')
+    return out
 
 
 def _wrap(text: str, width: int) -> list[str]:
@@ -164,8 +190,20 @@ def render(spec: dict) -> str:
         "",
         "_FIELDS = {",
         "    cls: {f.name for f in fields(cls)}",
-        "    for cls in (Usage, Timing, ChoiceAnswer, ScoreAnswer, NoulAnswer)",
+        f"    for cls in ({', '.join(VALUE_SCHEMAS + ANSWER_SCHEMAS)})",
         "}",
+        "",
+        "#: Fields holding a list of another schema, parsed into it.",
+        "_NESTED = {",
+        *_nested_entries(schemas),
+        "}",
+        "",
+        "",
+        "def _nested(cls: type, name: str, value: Any) -> Any:",
+        "    inner = _NESTED.get((cls, name))",
+        "    if inner is None or value is None:",
+        "        return value",
+        "    return [inner.from_dict(item) for item in value]",
         "",
         "",
         "def parse_answer(payload: dict) -> ChoiceAnswer | ScoreAnswer | NoulAnswer:",
@@ -303,6 +341,7 @@ def render(spec: dict) -> str:
         "__all__ = [",
         '    "CONTRACT_VERSION",',
         '    "ChoiceAnswer",',
+        '    "EvidenceSpan",',
         '    "NoulAnswer",',
         '    "Response",',
         '    "ScoreAnswer",',
@@ -337,6 +376,10 @@ def _ts_annotation(schema: dict) -> tuple[str, bool]:
         nullable = len(parts) != len(schema["anyOf"])
         inner = _ts_annotation(parts[0])[0] if parts else "unknown"
         return (f"{inner} | null" if nullable else inner), nullable
+    if _ref(schema):
+        return _ref(schema), False
+    if "enum" in schema:
+        return " | ".join(f'"{v}"' for v in schema["enum"]), False
     kind = schema.get("type")
     if kind == "array":
         return f"{_ts_annotation(schema.get('items', {}))[0]}[]", False

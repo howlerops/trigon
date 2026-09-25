@@ -31,8 +31,9 @@ from pathlib import Path
 import torch
 
 from ..evals.harness import Case
-from ..schema import SchemaCompiler
-from .losses import OrdinalConfig, question_loss
+from ..evidence import token_labels
+from ..schema import SchemaCompiler, render_state
+from .losses import OrdinalConfig, question_loss, rationale_loss
 
 __all__ = ["TrainingConfig", "TrainingReport", "train"]
 
@@ -94,6 +95,12 @@ class TrainingConfig:
     #: keeps its last epoch ships weights it had already beaten. 0 disables the
     #: holdout and keeps the final epoch, which is the old behaviour.
     validation_fraction: float = 0.1
+    #: Weight of the evidence head's loss, for questions whose expectation
+    #: carries a human rationale. Added to that question's answer loss, so a
+    #: case with rationales is not counted twice. 0 trains no evidence head
+    #: even when rationales are present, and the checkpoint then serves
+    #: gradient x input, as one that never saw a rationale does.
+    rationale_weight: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -115,6 +122,9 @@ class TrainingReport:
     seconds: float
     #: Which epoch's weights the model ended up holding. Not always the last.
     kept_epoch: int = 0
+    #: Questions whose human rationale trained the evidence head, in epoch 1.
+    #: Non-zero is what switches a checkpoint's evidence to the span head.
+    n_rationales: int = 0
 
     @property
     def first_loss(self) -> float:
@@ -141,6 +151,7 @@ class TrainingReport:
             "first_loss": self.first_loss,
             "final_loss": self.final_loss,
             "kept_epoch": self.kept_epoch,
+            "n_rationales": self.n_rationales,
         }
 
 
@@ -196,6 +207,8 @@ def train(
     )
     epoch_reports: list[EpochReport] = []
     counted_questions = 0
+    counted_rationales = 0
+    supervise_evidence = config.rationale_weight > 0 and hasattr(backend, "evidence_logits_batch")
     best: tuple[float, int, dict] | None = None
 
     first_epoch = 0
@@ -211,6 +224,8 @@ def train(
         step = saved["step"]
         best = saved["best"]
         counted_questions = saved["counted_questions"]
+        # Absent from a resume file written before rationales trained anything.
+        counted_rationales = saved.get("counted_rationales", 0)
         epoch_reports = [EpochReport(**e) for e in saved["epochs"]]
         first_epoch = len(epoch_reports)
         print(
@@ -246,10 +261,24 @@ def train(
                     (compiler.compile_request(cases[index].request), cases[index].request)
                     for index in part
                 ]
-                batched = backend.logits_batch(items)
+                # The evidence head's logits come out of the same forward pass,
+                # and only for a part that has a rationale to fit them to: a
+                # corpus without rationales trains exactly as it did before.
+                with_rationale = supervise_evidence and any(
+                    _has_rationale(cases[index]) for index in part
+                )
+                if with_rationale:
+                    paired = backend.evidence_logits_batch(items)
+                    batched = [answer for answer, _ in paired]
+                    spans_by_case = [span for _, span in paired]
+                else:
+                    batched = backend.logits_batch(items)
+                    spans_by_case = [None] * len(items)
 
                 case_losses = []
-                for index, (compiled, _), raw in zip(part, items, batched, strict=True):
+                for index, (compiled, _), raw, span_logits in zip(
+                    part, items, batched, spans_by_case, strict=True
+                ):
                     case = cases[index]
                     losses = []
                     for compiled_q in compiled.schema.questions:
@@ -260,15 +289,26 @@ def train(
                         label = expected.hard_label
                         if label is None:
                             continue
-                        losses.append(
-                            question_loss(
-                                raw[qid],
-                                compiled_q.kind,
-                                label,
-                                config.ordinal,
-                                distribution=expected.distribution,
-                            )
+                        loss = question_loss(
+                            raw[qid],
+                            compiled_q.kind,
+                            label,
+                            config.ordinal,
+                            distribution=expected.distribution,
                         )
+                        if span_logits is not None and expected.rationale is not None:
+                            labels = token_labels(
+                                render_state(case.request.state),
+                                backend.state_offsets(compiled),
+                                expected.rationale,
+                            )
+                            if labels:
+                                loss = loss + config.rationale_weight * rationale_loss(
+                                    span_logits[qid], labels
+                                )
+                                if epoch == 0:
+                                    counted_rationales += 1
+                        losses.append(loss)
                     if not losses:
                         continue
                     if epoch == 0:
@@ -341,6 +381,7 @@ def train(
                 best,
                 counted_questions,
                 epoch_reports,
+                counted_rationales,
             )
 
     kept = len(epoch_reports)
@@ -357,6 +398,11 @@ def train(
         )
 
     model.eval()
+    if counted_rationales:
+        # The head was fitted to what people highlighted, so it is what serves
+        # evidence from now on -- and the checkpoint records it, because an
+        # unfitted head and a fitted one are the same shape.
+        backend.config.evidence_supervised = True
     # The weights are final, so the build can be named after them -- before the
     # eval report is rendered, not only when a checkpoint is written. Otherwise
     # a report about a trained model names it "untrained".
@@ -368,10 +414,13 @@ def train(
         n_cases=len(cases),
         n_questions=counted_questions,
         seconds=time.perf_counter() - started,
+        n_rationales=counted_rationales,
     )
 
 
-def _write_resume(path, model, optimizer, rng, order, step, best, counted, reports) -> None:
+def _write_resume(
+    path, model, optimizer, rng, order, step, best, counted, reports, rationales=0
+) -> None:
     """Everything a restarted process needs to continue, written atomically.
 
     Written beside itself and renamed, so a container killed mid-write leaves
@@ -392,6 +441,7 @@ def _write_resume(path, model, optimizer, rng, order, step, best, counted, repor
             "step": step,
             "best": best,
             "counted_questions": counted,
+            "counted_rationales": rationales,
             "epochs": [
                 {
                     "epoch": e.epoch,
@@ -438,6 +488,10 @@ def _chunks(order, lengths, config):
         block.sort(key=lengths.__getitem__)
         for inner in range(0, len(block), step):
             yield block[inner : inner + step]
+
+
+def _has_rationale(case: Case) -> bool:
+    return any(e.rationale is not None for e in case.expected.values())
 
 
 def _labelled(case: Case) -> bool:

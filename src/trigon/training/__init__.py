@@ -4,7 +4,7 @@ Imported lazily everywhere else: this is the only part of the package that
 needs torch.
 """
 
-from .losses import OrdinalConfig, question_loss, squared_emd
+from .losses import OrdinalConfig, question_loss, rationale_loss, squared_emd
 from .trainer import TrainingConfig, TrainingReport, train
 
 __all__ = [
@@ -12,6 +12,7 @@ __all__ = [
     "TrainingConfig",
     "TrainingReport",
     "question_loss",
+    "rationale_loss",
     "squared_emd",
     "train",
 ]

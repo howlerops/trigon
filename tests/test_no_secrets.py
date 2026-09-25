@@ -73,7 +73,8 @@ def test_the_patterns_fire():
     samples = {
         "Modal token id": "ak-" + "A1b2C3d4E5f6G7h8",
         "GitHub token": "ghp_" + "a" * 36,
-        "private key": "-----BEGIN RSA PRIVATE KEY-----",
+        # Assembled, so this file does not trip the scan it is testing.
+        "private key": "-----BEGIN RSA " + "PRIVATE KEY-----",
     }
     for name, sample in samples.items():
         assert PATTERNS[name].search(sample), name

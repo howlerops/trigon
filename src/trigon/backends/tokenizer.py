@@ -44,6 +44,10 @@ class HashingTokenizer:
     def encode(self, text: str) -> list[int]:
         return [self._id(piece) for piece in _PIECE.findall(text)]
 
+    def encode_with_offsets(self, text: str) -> list[tuple[int, int, int]]:
+        """``(id, start, end)`` per piece. Whitespace is never a token here."""
+        return [(self._id(m.group()), m.start(), m.end()) for m in _PIECE.finditer(text)]
+
     def _id(self, piece: str) -> int:
         digest = hashlib.blake2s(piece.lower().encode("utf-8"), digest_size=4).digest()
         return _RESERVED + int.from_bytes(digest, "big") % (self.vocab_size - _RESERVED)
@@ -68,6 +72,12 @@ class Tokenizer(Protocol):
 
     def encode(self, text: str) -> list[int]: ...
     def count(self, text: str) -> int: ...
+
+    def encode_with_offsets(self, text: str) -> list[tuple[int, int, int]]:
+        """``(id, start, end)`` per token: :meth:`encode`'s ids, plus the
+        characters of ``text`` each one covers. Evidence needs it to hand a
+        per-token score back as a span of the caller's own string."""
+        ...
 
     @property
     def exact(self) -> bool: ...

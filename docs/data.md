@@ -89,6 +89,7 @@ Rows marked *unchecked* keep the plan's assumption and are still blockers.
 | ChaosNLI | annotator distributions | **no licence field found** | **red** | HF mirror carries no licence |
 | Civil Comments | Noul/Score soft labels | CC0-1.0 | **green** ✓ | HF `google/civil_comments` metadata |
 | measuring_hate_speech | Score ×10 survey items, annotator distributions | **CC BY 4.0** | **green** ⬆ | HF `ucberkeley-dlab/measuring-hate-speech` metadata at `5468f6e`, rechecked 2026-09-25 |
+| HateXplain | Choice (3) + distributions + **human rationales** | **MIT** (repository LICENSE); **CC BY 4.0** (the authors' dataset card) | **green** ✓ | `punyajoy/HateXplain` LICENSE at `01d74227`; HF `Hate-speech-CNERG/hatexplain` metadata; checked 2026-09-25 |
 | deepset prompt-injection; WildGuardMix; ToxicChat | Noul guardrails | not resolved | **amber** | cards not conclusive |
 | UFET | Choice (~10k types) | **no stated licence; distant-supervision half derives from LDC-licensed Gigaword** | **red** | UT Austin dataset page; `uwnlp/open_type` |
 | Amazon ESCI | Choice (4) | **repo licensed Apache-2.0 as a "project"; no data-specific grant** | **amber** ⬇ | `amazon-science/esci-data` LICENSE + README |
@@ -126,6 +127,7 @@ SHA-256 of every file, since a bucket URL carries no revision at all.
 | GoEmotions | 57,877 comments (46,211 / 11,666) | 82 raters; 3–5 per comment, "very unclear" abstentions dropped, at least two kept | 7 Nouls: anger, disgust, fear, joy, sadness, surprise (the authors' Ekman mapping), neutral | a fifth, by hash of the text — 173 texts recur under two ids |
 | measuring_hate_speech | 29,488 comments (22,192 / 7,296) | 7,912 annotators; 2 to ~800 per comment, the 10,077 comments rated once dropped | 10 Scores: nine 0–4 survey items and `hatespeech` 0–2, all coded so higher is more hateful | a quarter, by hash of the text |
 | Circa | 34,268 question–answer pairs (25,738 / 8,530) | 5 judgements per pair (20 have 4) | 1 Choice over 8 interpretations, `Other` included | a quarter, by hash of the question — each was answered about ten times |
+| HateXplain | one JSON file at a pinned commit, SHA-256 checked | ✅ built — the rationale stream |
 
 GoEmotions is seven Nouls rather than a Choice because a rater marks every
 emotion that applies, so one rater's answer is not one option; and seven
@@ -144,6 +146,25 @@ cross-entropy, plus one annotator drawn per case as the outcome the gates
 score. Split by a hash of the prompt, a quarter held out, so no prompt is on
 both sides. The modal rating carries only 67–75% of annotators on any
 question — the disagreement the averaged split erases.
+
+**`hatexplain` is the one corpus whose annotators said why.** Every annotator
+who labelled a post hateful or offensive also marked the tokens that label
+rested on; the loader keeps a token when at least half of them marked it, and
+those spans are the `Expectation.rationale` the evidence head trains on and
+plausibility is scored against (`docs/architecture.md`, *Evidence*). A post
+whose majority is `normal` carries no rationale — nobody was asked — and a
+three-way split has no majority and is dropped, as the authors drop it.
+19,229 posts survive, split by a hash of the post id with a quarter held out;
+the authors' own 8:1:1 split is not used, so published HateXplain numbers are
+not directly comparable with ours.
+
+Its licence was read from both primary sources on 2026-09-25: the repository
+the file is fetched from is MIT, the authors' Hugging Face card says CC BY 4.0,
+and both are green. The caveat worth recording is the one ESCI taught: the
+posts are Twitter and Gab text, and neither source attaches platform terms to
+them. That is the same position as `measuring_hate_speech`, which is also
+social-media text and also green; if counsel reads platform terms onto either,
+both move together.
 
 Net movement: CLINC150 and measuring_hate_speech clear to **green**, DBpedia-14
 resolves to **amber**, AG News separates out as **red** (the two were one row in

@@ -24,6 +24,8 @@ __all__ = [
     "Answer",
     "ChoiceAnswer",
     "ChoiceQuestion",
+    "EvidenceMethod",
+    "EvidenceSpan",
     "LevelSpec",
     "NoulAnswer",
     "NoulQuestion",
@@ -206,6 +208,19 @@ class RequestOptions(_Strict):
             "probabilities are NOT renormalised: see `truncated` and `probability_mass`."
         ),
     )
+    include_evidence: bool = Field(
+        default=False,
+        description=(
+            "Also return, per answer, the spans of the state that drove it: character "
+            "offsets into the state string (for a JSON state, into its canonical "
+            "rendering: sorted keys, `,` between items, `: ` after keys, non-ASCII "
+            "kept as is), each with a "
+            "score. `evidence_method` on the answer says how they were produced, "
+            "and so whether they were learned from human rationales or are an "
+            "attribution. A question's evidence depends only on what its own answer "
+            "may read, so it is as independent of the other questions as the answer is."
+        ),
+    )
 
 
 class SystemOneRequest(_Strict):
@@ -244,6 +259,51 @@ class SystemOneRequest(_Strict):
             if not key or len(key) > 128:
                 raise ValueError(f"question id must be 1-128 characters, got {key!r}")
         return questions
+
+
+EvidenceMethod = Literal["span_head", "gradient_x_input", "lexical_overlap", "unavailable"]
+
+
+class EvidenceSpan(_Strict):
+    """One span of the state that drove an answer."""
+
+    start: int = Field(ge=0, description="First character of the span in the state string.")
+    end: int = Field(
+        ge=0, description="One past the last character, so `state[start:end]` is the span."
+    )
+    text: str = Field(description="`state[start:end]`, so a caller need not slice it.")
+    score: float = Field(
+        ge=0.0,
+        le=1.0,
+        description=(
+            "How strongly this span drove the answer. Under `span_head` it is the "
+            "head's probability that the span is part of a human rationale, fitted with "
+            "a proper scoring rule and never calibrated or gated; under "
+            "`gradient_x_input` it is relative within this answer, 1 being its "
+            "strongest token, and is not a probability at all."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _ordered(self) -> EvidenceSpan:
+        if self.end <= self.start:
+            raise ValueError(f"evidence span must be non-empty, got [{self.start}, {self.end})")
+        return self
+
+
+_EVIDENCE_DESCRIPTION = (
+    "Present when `include_evidence` was asked for: the spans of the state that drove "
+    "this answer, in order of position. Empty means nothing cleared the threshold, "
+    "which is an answer, not an error."
+)
+_EVIDENCE_METHOD_DESCRIPTION = (
+    "How `evidence` was produced. `span_head`: a head trained on human rationales. "
+    "`gradient_x_input`: attribution of the selected label to each state token, "
+    "from a model never shown a rationale -- a statement about the model, not a "
+    "prediction of what a person would highlight. `lexical_overlap`: the lexical "
+    "floor's word matches. `unavailable`: this backend cannot attribute, and "
+    "`evidence` is empty for that reason rather than because nothing mattered."
+)
 
 
 class ChoiceAnswer(_Strict):
@@ -299,6 +359,10 @@ class ChoiceAnswer(_Strict):
     probability_mass: float | None = Field(
         default=None, ge=0.0, le=1.0, description="How much of the distribution survived trimming."
     )
+    evidence: list[EvidenceSpan] | None = Field(default=None, description=_EVIDENCE_DESCRIPTION)
+    evidence_method: EvidenceMethod | None = Field(
+        default=None, description=_EVIDENCE_METHOD_DESCRIPTION
+    )
 
 
 class ScoreAnswer(_Strict):
@@ -341,6 +405,10 @@ class ScoreAnswer(_Strict):
     probability_mass: float | None = Field(
         default=None, ge=0.0, le=1.0, description="How much of the distribution survived trimming."
     )
+    evidence: list[EvidenceSpan] | None = Field(default=None, description=_EVIDENCE_DESCRIPTION)
+    evidence_method: EvidenceMethod | None = Field(
+        default=None, description=_EVIDENCE_METHOD_DESCRIPTION
+    )
 
 
 class NoulAnswer(_Strict):
@@ -360,6 +428,10 @@ class NoulAnswer(_Strict):
     )
     raw_probability: float | None = Field(
         default=None, description="The pre-calibration probability, if you asked for it."
+    )
+    evidence: list[EvidenceSpan] | None = Field(default=None, description=_EVIDENCE_DESCRIPTION)
+    evidence_method: EvidenceMethod | None = Field(
+        default=None, description=_EVIDENCE_METHOD_DESCRIPTION
     )
 
 

@@ -258,10 +258,14 @@ behind the backend that needs it, and keep the import path of the compiler
 and the calibration math free of it. Training a vocabulary lives in
 `scripts/`.
 
-Expose `encode`, `count`, `exact` and `kind`, and add `kind` to
-`backends.tokenizer.build_tokenizer` so a checkpoint can name you. A model
-served under a vocabulary it was not trained on reads every id as a different
-word and nothing raises.
+Expose `encode`, `count`, `exact`, `kind` and `encode_with_offsets`, and add
+`kind` to `backends.tokenizer.build_tokenizer` so a checkpoint can name you. A
+model served under a vocabulary it was not trained on reads every id as a
+different word and nothing raises. `encode_with_offsets` is what turns a
+per-token evidence score into a span of the caller's string: its ids must be
+`encode`'s, and its offsets must match the reference library's where one
+exists (`tests/test_hf_bpe.py`) — an offset table one token out of step puts
+every highlight one token late and still reads as plausible text.
 
 ## When adding a backend
 
@@ -277,6 +281,14 @@ counts match the tensors. That wiring is the engine's job rather than each call
 site's because it was not: the gateway compiled with the character heuristic
 while the torch backend built tensors from its own tokenizer, and every torch
 request over HTTP died with a 500 while 190 tests stayed green.
+
+Evidence is optional and labelled. A backend that can attribute returns
+per-token `(start, end, score)` on `QuestionOutput.evidence` and names the
+method; one that cannot returns nothing and the answer says `unavailable`.
+Never merge tokens into spans yourself — `trigon.evidence` does it once for
+every backend, so a model and a floor are measured under one definition of a
+span — and never serve a head that was not trained on rationales as if it had
+been (`docs/architecture.md`, *Evidence*).
 
 Name the build after its weights. `model_version` is the only build identifier
 that reaches the caller, so a randomly initialised model must not answer under

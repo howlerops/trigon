@@ -18,7 +18,7 @@ from __future__ import annotations
 import torch
 from torch import nn
 
-__all__ = ["OrdinalConfig", "question_loss", "squared_emd"]
+__all__ = ["OrdinalConfig", "question_loss", "rationale_loss", "squared_emd"]
 
 
 class OrdinalConfig:
@@ -99,3 +99,17 @@ def question_loss(
     if kind == "score" and ordinal is not None and ordinal.enabled:
         loss = (1.0 - ordinal.weight) * loss + ordinal.weight * squared_emd(logits, label)
     return loss
+
+
+def rationale_loss(span_logits: torch.Tensor, labels: list[int]) -> torch.Tensor:
+    """Binary cross-entropy of the evidence head against a human rationale.
+
+    One Bernoulli per state token -- did the annotators highlight it -- and the
+    mean over tokens, so a long state does not outweigh a short one. The log
+    scoring rule again, and for the same reason as everywhere else here: the
+    loss-minimising score is the true probability that a person highlights the
+    token, so the head's 0.5 threshold means what it says. No positive weight
+    for the rarer class: that would buy recall by making the probabilities lie.
+    """
+    target = torch.tensor(labels, dtype=span_logits.dtype, device=span_logits.device)
+    return nn.functional.binary_cross_entropy_with_logits(span_logits, target)
