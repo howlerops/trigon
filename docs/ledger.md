@@ -14,14 +14,14 @@ narrative sections are a discipline, not a test.
 
 | | |
 | --- | ---: |
-| Commits | 184 |
-| Tests | 514 |
-| Python files (`src`, `tests`, `scripts`) | 111 |
-| Lines in `src/` | 12,090 |
+| Commits | 190 |
+| Tests | 537 |
+| Python files (`src`, `tests`, `scripts`) | 113 |
+| Lines in `src/` | 12,633 |
 | Release gates | 9 |
-| Green-tier corpora in the licence audit | 9 |
+| Green-tier corpora in the licence audit | 8 |
 | Committed use cases | 3 |
-| Real corpora loadable | 3 |
+| Real corpora loadable | 6 |
 
 **Certified on real data: Qwen2.5-1.5B on Banking77**, LoRA rank 16, lr
 1e-4, 4 epochs — median accuracy 0.9009 against the spike's 0.7248, every seed
@@ -135,6 +135,23 @@ twenty-two runs** — the investigation is closed and the evidence is in
   ~1.3%) and HelpSteer2 (Score, five ordered ratings over one state) — the
   first real exercise of the Score primitive and of multi-question
   independence on data the generator did not write.
+- **Three more annotator-distribution corpora load, one per primitive.**
+  GoEmotions as seven Nouls (Ekman groups plus neutral) over 57,877 comments,
+  grouped from one row per rater; measuring_hate_speech as ten Score survey
+  items over 29,488 comments, 7,912 annotators; Circa as one eight-way Choice
+  over 34,268 question–answer pairs, five judgements each. Every one is held
+  out by a hash of its grouping text, pinned by URL revision and SHA-256, and
+  runs end to end through `scripts/train_corpus.py` on the CPU spike. Only
+  measuring_hate_speech needed converting from Parquet
+  (`scripts/convert_corpus.py`). The first Noul with a distribution exposed
+  that the Noul loss ignored it and trained on the one drawn annotator; it
+  now fits the share of annotators who said yes.
+- **CC BY-SA evaluates and never trains** (owner's decision, 2026-09-25, Q17).
+  Enforced on the licence string, not the tier: a share-alike corpus refuses
+  `purpose="train"` whatever tier it carries, cannot be declared green, and a
+  test holds every row of `docs/data.md`'s audit — BoolQ, FEVER, DBpedia-14,
+  Circa — to it. `train_corpus.py` refuses such a corpus before building a
+  model, since a calibrator fitted on it ships too.
 
 ### Reference model
 - Prefill-only transformer, byte-level BPE trained on the project's own data,
@@ -219,7 +236,8 @@ The most useful section. Each of these was argued for before it was measured.
 | The mask build is cheap next to the forward pass | It was 208 of 399 ms. Banking77's uniform lengths hid it behind a cache hit. |
 | Removing 2.82× of padding waste makes training 2.82× faster | 1.63×. Attention is not the whole step; everything linear is unaffected. |
 | A.3 and B.1 are blocked on hardware *(assumed)* | Checked. No GPU is present or reachable. Still blocked, now on evidence. |
-| The distribution corpora need a Parquet reader | HelpSteer2 is gzipped JSONL. Three of four do; it does not. |
+| The distribution corpora need a Parquet reader | HelpSteer2 is gzipped JSONL. Then GoEmotions' authors publish raw per-rater CSV and Circa's repository a TSV: only the Hugging Face mirrors are Parquet-only. One of four needs converting. |
+| Circa is CC BY 4.0, so green | Its README says CC BY 4.0 and links the BY-SA 4.0 text as the full licence. Read as the stricter: amber, evaluation only. |
 | "ECE ≤ 0.05 per corpus" is a reachable done-condition | Not on a corpus whose test split is below the 5,000-sample floor. |
 | Modal is reachable from here: `api.modal.com` answers 200 | A `GET` is not the client. It speaks gRPC and behind this proxy needs `python-socks`; without it, 50 ms to "could not connect", the cause two exceptions down. |
 | `scripts/modal_train.py` is ready and waiting on a token | It would have trained on the CPU. Nothing in the backend or trainer moved a tensor to a device; `--gpu` was ignored; results lived only on the VM that gets reclaimed. |
@@ -257,6 +275,12 @@ to hold.
 ## Corrected in our own favour
 
 Errors that flattered the project, found by re-measuring rather than by review:
+
+- **Circa was cleared green on its Hugging Face card alone.** The repository
+  it links to names CC BY 4.0 and gives the BY-SA 4.0 text as the licence.
+  Green would have let it into a training mix and put a ShareAlike question
+  on the weights; it is amber now, eval only. Caught on the second source,
+  before anything trained on it.
 
 - **`gateway_cost.py` charged the test client to the gateway.** httpx costs
   1.35 ms/call; a third of the published figure was the instrument.
@@ -429,14 +453,16 @@ what order, and how each step is known to be done.
   26 predates the only workflow change since. Metered Actions minutes on a
   private organization repository is the likeliest explanation and cannot be
   confirmed without billing access. A.4 is blocked on it.
-- **Two of five data streams unbuilt.** Three corpora load, and the
-  annotator-distribution stream is one of them now: HelpSteer2's
-  `disagreements/` split, trained on soft targets and certified. The
-  remaining two streams wait on the Parquet question below.
-- **GoEmotions, measuring_hate_speech and Circa are Parquet-only.** A reader
-  for them would put a compiled dependency in the import path of the
-  calibration math and the drift tests. They get converted in `scripts/`
-  first, or not at all.
+- **Two of five data streams unbuilt.** Six corpora load. The
+  annotator-distribution stream has four now — HelpSteer2's `disagreements/`
+  split (trained and certified), GoEmotions and measuring_hate_speech
+  (loadable, green, smoke-run on the CPU spike, **never trained at size**) and
+  Circa (evaluation only). Nothing on the new three is a result yet: it needs
+  a backbone sweep on Modal. Synthetic workflows with teacher labels, and the
+  adversarial and paired stream, remain unbuilt.
+- ~~GoEmotions, measuring_hate_speech and Circa are Parquet-only.~~ **Closed.**
+  Only measuring_hate_speech is; it is converted once by
+  `scripts/convert_corpus.py`, and the loader stays stdlib.
 - **"Certified on four seeds" means four seeds on one machine.** The
   configuration failed its gates on GitHub's hardware: choice accuracy 0.530
   against 0.648–0.849 across the certified four, and choice ECE 0.1076 against
@@ -448,4 +474,5 @@ what order, and how each step is known to be done.
   was never swept. The CI job publishes rather than blocks, because a single
   draw on unswept hardware is not evidence either way; sweeping four seeds
   there is `docs/next.md` A.4.
-- **CC BY-SA on a derived model** — counsel opinion requested, unresolved.
+- ~~CC BY-SA on a derived model.~~ **Closed by the owner, 2026-09-25 (Q17):**
+  evaluation only, never training, enforced in `trigon.evals.corpora`.

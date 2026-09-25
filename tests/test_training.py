@@ -49,6 +49,27 @@ def test_noul_loss_is_binary_cross_entropy():
     assert float(question_loss(logits, "noul", 1)) == pytest.approx(math.log(2), abs=1e-6)
 
 
+def test_a_noul_with_annotators_is_fitted_to_the_share_who_said_yes():
+    """GoEmotions' Nouls carry (no, yes) shares; the drawn label must not replace them.
+
+    Before this, a Noul's distribution was ignored and the loss read the one
+    annotator drawn for the case, throwing away the other raters.
+    """
+    share = (0.7, 0.3)
+    honest = torch.logit(torch.tensor([0.3]))
+    for label in (0, 1):  # whichever annotator was drawn
+        losses = {
+            p: float(
+                question_loss(torch.logit(torch.tensor([p])), "noul", label, distribution=share)
+            )
+            for p in (0.1, 0.3, 0.5, 0.9)
+        }
+        assert min(losses, key=losses.get) == 0.3
+    assert float(question_loss(honest, "noul", 1, distribution=share)) == pytest.approx(
+        -(0.3 * math.log(0.3) + 0.7 * math.log(0.7)), abs=1e-6
+    )
+
+
 def test_squared_emd_costs_less_for_a_near_miss():
     """The ordinal property: being one level out should cost less than four."""
     logits = torch.log(torch.tensor([0.0, 1.0, 0.0, 0.0]) + 1e-9)

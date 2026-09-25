@@ -41,7 +41,7 @@ Brier and NLL beside the gates (`reports/helpsteer2/ceiling.md`).
 | 1.3 real backbone | Not started. Needs a GPU |
 | 2.1 data streams | **One of five built.** Banking77 loads, licence-gated in code |
 | 2.2 per-corpus calibration | Machinery built (`scripts/train_corpus.py`); one corpus measured |
-| 2.3 CC BY-SA | Unresolved. Needs counsel |
+| 2.3 CC BY-SA | **Resolved 2026-09-25 (Q17):** evaluation only, enforced in code |
 | 3.1 KV cache | **Built, off by default**, for a measured reason |
 | 3.2 model server | Not started |
 | 3.3 L4 burn-in | Not started. Needs an L4 |

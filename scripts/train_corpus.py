@@ -418,6 +418,17 @@ def main(argv: list[str] | None = None) -> int:
     device, hardware = resolve_device(args.device)
 
     spec = corpus(args.corpus)
+    if not spec.permits("train"):
+        # Before a model is built: the loader would refuse anyway, but a
+        # traceback after a 1.5B backbone has loaded reads like a crash rather
+        # than the licence policy doing its job. Re-gating counts too -- the
+        # calibrator is fitted on this corpus and ships with the weights.
+        print(
+            f"{spec.name} is {spec.tier} ({spec.licence}) and may not be trained or "
+            "calibrated on; it evaluates only (docs/decisions.md section 3, Q17)",
+            file=sys.stderr,
+        )
+        return 2
     if args.weights:
         backend = TorchReadoutBackend.load(args.weights)
     elif args.backbone:
