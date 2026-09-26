@@ -308,15 +308,15 @@ def test_padding_cannot_reach_across_a_batch():
     """A request's answer must not depend on what shared its batch. Requests of
     very different lengths are the case that would expose a leak."""
     from trigon.backends.torch_readout import TorchReadoutBackend
-    from trigon.types import ChoiceQuestion, SystemOneRequest
+    from trigon.types import ChoiceQuestion, DecisionRequest
 
     backend = TorchReadoutBackend(seed=0)
     compiler = backend.make_compiler()
     question = ChoiceQuestion(
         instructions="Route this.", options=[{"name": "a"}, {"name": "b"}, {"name": "c"}]
     )
-    short = SystemOneRequest(state="brief", questions={"q": question})
-    long = SystemOneRequest(state="a much longer message " * 60, questions={"q": question})
+    short = DecisionRequest(state="brief", questions={"q": question})
+    long = DecisionRequest(state="a much longer message " * 60, questions={"q": question})
 
     items = [(compiler.compile_request(r), r) for r in (short, long)]
     with torch.no_grad():
@@ -436,9 +436,9 @@ def test_the_residual_never_touches_a_score_head():
     applying it there regressed the reference run from closing 20% of the gap
     to Bayes to closing 3%."""
     from trigon.backends.torch_readout import ReadoutConfig, TorchReadoutBackend
-    from trigon.types import ScoreQuestion, SystemOneRequest
+    from trigon.types import DecisionRequest, ScoreQuestion
 
-    request = SystemOneRequest(
+    request = DecisionRequest(
         state="the customer is mildly annoyed",
         questions={
             "severity": ScoreQuestion(
@@ -461,9 +461,9 @@ def test_the_residual_still_changes_a_dot_product_choice():
     """The other half: it must still do the thing it was measured doing."""
     from trigon.backends.torch_readout import ReadoutConfig, TorchReadoutBackend
     from trigon.schema import OptionScoring
-    from trigon.types import ChoiceQuestion, SystemOneRequest
+    from trigon.types import ChoiceQuestion, DecisionRequest
 
-    request = SystemOneRequest(
+    request = DecisionRequest(
         state="the card payment failed",
         questions={
             "route": ChoiceQuestion(
@@ -497,7 +497,7 @@ def test_the_quantized_twin_is_a_real_serving_path():
     threshold, which is `trigon train`'s job on real cases.
     """
     from trigon.engine import Engine
-    from trigon.types import SystemOneRequest
+    from trigon.types import DecisionRequest
 
     backend = _tiny_backend()
     compiler = backend.make_compiler()
@@ -509,7 +509,7 @@ def test_the_quantized_twin_is_a_real_serving_path():
     assert twin.model_version == f"{backend.model_version}+int8"
     assert backend.model_version.endswith("+int8") is False
 
-    request = SystemOneRequest.model_validate(
+    request = DecisionRequest.model_validate(
         {
             "state": {"plan": "pro", "seats": 12, "open_tickets": 3},
             "questions": {
@@ -556,9 +556,9 @@ def test_the_linear_score_head_reads_every_level_off_one_slot():
     """
     from trigon.engine import Engine
     from trigon.limits import MAX_LEVELS_PER_SCORE
-    from trigon.types import SystemOneRequest
+    from trigon.types import DecisionRequest
 
-    request = SystemOneRequest.model_validate(
+    request = DecisionRequest.model_validate(
         {
             "state": {"seats": 142},
             "questions": {
@@ -596,7 +596,7 @@ def test_a_score_wider_than_the_head_is_refused_by_name():
     a Score too wide for it actually arrives.
     """
     from trigon.engine import Engine
-    from trigon.types import SystemOneRequest
+    from trigon.types import DecisionRequest
 
     backend = TorchReadoutBackend(
         ReadoutConfig(
@@ -604,7 +604,7 @@ def test_a_score_wider_than_the_head_is_refused_by_name():
         ),
         seed=0,
     )
-    request = SystemOneRequest.model_validate(
+    request = DecisionRequest.model_validate(
         {
             "state": "x",
             "questions": {

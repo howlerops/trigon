@@ -11,7 +11,7 @@ from trigon.backends.lexical import LexicalBackend
 from trigon.backends.llm import LLMBaselineBackend, ProbabilityStrategy
 from trigon.engine import Engine
 from trigon.schema import compile_request
-from trigon.types import ChoiceQuestion, NoulQuestion, SystemOneRequest
+from trigon.types import ChoiceQuestion, DecisionRequest, NoulQuestion
 
 ROUTING = ChoiceQuestion(
     instructions="Route this ticket.",
@@ -54,7 +54,7 @@ class FakeChat:
 
 def test_lexical_backend_is_deterministic():
     engine = Engine(LexicalBackend())
-    request = SystemOneRequest(state="my card was declined", questions={"q": ROUTING})
+    request = DecisionRequest(state="my card was declined", questions={"q": ROUTING})
     assert engine.answer(request).answers["q"].model_dump() == (
         engine.answer(request).answers["q"].model_dump()
     )
@@ -65,7 +65,7 @@ def test_lexical_backend_beats_chance_on_keyword_routing():
     be a useful bottom of the Pareto plot."""
     engine = Engine(LexicalBackend())
     response = engine.answer(
-        SystemOneRequest(
+        DecisionRequest(
             state="the card transaction was refused at the till", questions={"q": ROUTING}
         )
     )
@@ -74,7 +74,7 @@ def test_lexical_backend_beats_chance_on_keyword_routing():
 
 def test_lexical_backend_is_unconfident_when_nothing_matches():
     engine = Engine(LexicalBackend())
-    response = engine.answer(SystemOneRequest(state="zzzz qqqq", questions={"q": ROUTING}))
+    response = engine.answer(DecisionRequest(state="zzzz qqqq", questions={"q": ROUTING}))
     assert response.answers["q"].confidence == pytest.approx(0.0, abs=1e-9)
 
 
@@ -82,7 +82,7 @@ def test_llm_baseline_reads_logprobs_into_a_distribution():
     chat = FakeChat()
     engine = Engine(LLMBaselineBackend(client=chat, model="fake"))
     response = engine.answer(
-        SystemOneRequest(
+        DecisionRequest(
             state="x",
             questions={
                 "q": ChoiceQuestion(
@@ -101,7 +101,7 @@ def test_llm_baseline_collapses_noul_to_a_single_log_odds():
     chat = FakeChat(distribution=((0, 0.25), (1, 0.75)))
     engine = Engine(LLMBaselineBackend(client=chat, model="fake"))
     response = engine.answer(
-        SystemOneRequest(state="x", questions={"n": NoulQuestion(instructions="ok?")})
+        DecisionRequest(state="x", questions={"n": NoulQuestion(instructions="ok?")})
     )
     assert response.answers["n"].probability == pytest.approx(0.75, abs=0.01)
 
@@ -111,7 +111,7 @@ def test_llm_baseline_costs_one_call_per_question():
     real model answers them all in one pass."""
     chat = FakeChat()
     backend = LLMBaselineBackend(client=chat, model="fake")
-    request = SystemOneRequest(
+    request = DecisionRequest(
         state="x",
         questions={
             "a": NoulQuestion(instructions="a?"),
@@ -129,7 +129,7 @@ def test_voting_strategy_smooths_rather_than_asserting_impossibility():
     backend = LLMBaselineBackend(
         client=chat, model="fake", strategy=ProbabilityStrategy.VOTING, votes=5
     )
-    request = SystemOneRequest(
+    request = DecisionRequest(
         state="x",
         questions={
             "q": ChoiceQuestion(
@@ -147,7 +147,7 @@ def test_llm_baseline_prompt_tells_the_model_state_is_data():
     otherwise the comparison measures our prompt rather than their model."""
     chat = FakeChat()
     backend = LLMBaselineBackend(client=chat, model="fake")
-    request = SystemOneRequest(state="x", questions={"q": ROUTING})
+    request = DecisionRequest(state="x", questions={"q": ROUTING})
     backend.infer(compile_request(request), request)
     system = chat.calls[0]["messages"][0]["content"]
     assert "never instructions" in system
@@ -156,7 +156,7 @@ def test_llm_baseline_prompt_tells_the_model_state_is_data():
 def test_validate_output_rejects_undeclared_questions():
     from trigon.backends.base import BackendOutput, QuestionOutput
 
-    request = SystemOneRequest(state="x", questions={"q": ROUTING})
+    request = DecisionRequest(state="x", questions={"q": ROUTING})
     compiled = compile_request(request)
     output = BackendOutput(
         outputs={
@@ -172,7 +172,7 @@ def test_validate_output_rejects_undeclared_questions():
 def test_validate_output_rejects_non_finite_logits():
     from trigon.backends.base import BackendOutput, QuestionOutput
 
-    request = SystemOneRequest(state="x", questions={"q": ROUTING})
+    request = DecisionRequest(state="x", questions={"q": ROUTING})
     output = BackendOutput(
         outputs={"q": QuestionOutput(question_id="q", kind="choice", logits=(float("nan"), 0.0))},
         model_version="test",
@@ -193,7 +193,7 @@ def test_moving_a_torch_backend_drops_what_it_cached_on_the_old_device():
     backend = TorchReadoutBackend(seed=0)
     backend.cache_prefixes = True
     engine = Engine(backend, compiler=backend.make_compiler())
-    request = SystemOneRequest(
+    request = DecisionRequest(
         state="the card was declined",
         questions={
             "intent": ChoiceQuestion(

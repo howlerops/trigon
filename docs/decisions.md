@@ -40,6 +40,18 @@ training split's marginal is global, and a domain-conditional marginal is a
 cheaper baseline that could still be mistaken for understanding. If the gate
 cannot tell those two apart, the baseline has to become conditional.
 
+## Sign-off, 2026-09-26
+
+| | Question | Resolution |
+| --- | --- | --- |
+| Q23 | The native API's name | **Named after nothing but what it does.** `/v1/decide`, `DecisionRequest` / `DecisionResponse`, `client.decide()`, with no alias under the old name. This project is a functional drop-in for an existing typed-decision API and is not named after it, to avoid any naming conflict. The compat route keeps the incumbent's own path, because a drop-in only works if the path is exactly theirs (`trigon.server.compat.COMPAT_PATH`, written once). `tests/test_no_incumbent_names.py` fails the build on the incumbent's product, company or model name anywhere else |
+| Q24 | GoEmotions' tier | **Green.** The publisher's dataset card declares Apache-2.0, a statement about the data itself. Amazon ESCI was moved to amber because its licence was a code repository's alone |
+| Q25 | How a weights release is published | **By a manual workflow** (`.github/workflows/release.yml`). It fetches the bundle from the Modal Volume, checks it against the committed `BUNDLE.sha256`, and creates the Release. It runs only from the default branch |
+| Q26 | Integrated gradients' completeness on the backbone | **Build a float32 path and rescore** the eight saved checkpoints, then decide on the numbers |
+| Q27 | Batched serving without the schema cache | **Fix it and re-time** on Modal's L4 |
+| Q28 | Faithfulness of evidence | **Build comprehensiveness and sufficiency** and score the saved checkpoints against random and lexicon controls |
+| Q29 | The old default branch | **Delete it** once `main` is the default |
+
 ---
 
 ## 1. Per-request option/token budget before the retrieval stage
@@ -55,11 +67,11 @@ the narrower contract would have accepted, and `COMPAT_BUDGET` reproduces their
 limits exactly for like-for-like benchmarking.
 
 **The envelope was checked, and the plan had it wrong.** The plan states a
-"~32k context budget, matching Jev's", and the first version of `limits.py`
+"~32k context budget, matching the incumbent's", and the first version of `limits.py`
 carved 32,768 tokens into state, schema and readout slices. The published
 contract is not one limit but two: **64k tokens per request** (state plus every
 question) and **32k for state plus the longest single question**
-(docs.typesafe.ai, verified 2026-09-20). Building to a single flat number got
+(the incumbent's published limits, verified 2026-09-20). Building to a single flat number got
 this wrong in both directions — it halved the total budget, and it missed the
 constraint that actually governs a high-cardinality Choice.
 
@@ -477,7 +489,7 @@ separable. "Indistinguishable from calibrated at this sample size" is the
 strongest honest claim, and it is a different claim from "ECE is 0.03".
 
 This was prompted by an external observation, not invented here: an independent
-re-analysis pointed out that published Jev ECE figures of 0.0505–0.0712 at n=60
+re-analysis pointed out that the incumbent's published ECE figures of 0.0505–0.0712 at n=60
 are equally what serious miscalibration looks like at that sample size. The
 right response to that critique is to make our own numbers immune to it.
 

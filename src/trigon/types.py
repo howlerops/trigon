@@ -34,8 +34,8 @@ __all__ = [
     "ScoreAnswer",
     "ScoreQuestion",
     "State",
-    "SystemOneRequest",
-    "SystemOneResponse",
+    "DecisionRequest",
+    "DecisionResponse",
     "Usage",
 ]
 
@@ -223,7 +223,7 @@ class RequestOptions(_Strict):
     )
 
 
-class SystemOneRequest(_Strict):
+class DecisionRequest(_Strict):
     """State plus a map of typed questions, answered in a single model pass."""
 
     model: str = Field(
@@ -473,7 +473,7 @@ class Timing(_Strict):
     )
 
 
-class SystemOneResponse(_Strict):
+class DecisionResponse(_Strict):
     id: str = Field(description="Unique id for this response.")
     model: str = Field(
         description=(

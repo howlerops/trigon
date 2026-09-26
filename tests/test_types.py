@@ -6,7 +6,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from trigon.types import ChoiceQuestion, NoulQuestion, ScoreQuestion, SystemOneRequest
+from trigon.types import ChoiceQuestion, DecisionRequest, NoulQuestion, ScoreQuestion
 
 
 def test_choice_needs_at_least_two_options():
@@ -46,10 +46,10 @@ def test_questions_are_frozen_and_reject_unknown_fields():
 
 def test_request_rejects_an_empty_question_map():
     with pytest.raises(ValidationError):
-        SystemOneRequest(state="s", questions={})
+        DecisionRequest(state="s", questions={})
 
 
 def test_state_accepts_text_json_and_lists():
     for state in ("text", {"a": 1}, ["one", "two"]):
-        request = SystemOneRequest(state=state, questions={"q": NoulQuestion(instructions="ok?")})
+        request = DecisionRequest(state=state, questions={"q": NoulQuestion(instructions="ok?")})
         assert request.state == state

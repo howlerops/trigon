@@ -17,21 +17,22 @@ torch = pytest.importorskip("torch", reason="the backbone backend needs the 'tra
 
 from conftest import assert_answer_unmoved, assert_evidence_unmoved  # noqa: E402
 from trigon.backends.qwen_readout import (  # noqa: E402
+    LoRALinear,
     QwenPrefillModel,
     QwenReadoutBackend,
     QwenShape,
 )
 from trigon.backends.tokenizer import default_tokenizer  # noqa: E402
-from trigon.backends.torch_readout import TorchReadoutBackend  # noqa: E402
+from trigon.backends.torch_readout import IG_STEPS, TorchReadoutBackend  # noqa: E402
 from trigon.engine import Engine  # noqa: E402
 from trigon.evals import synthetic_outcome_cases  # noqa: E402
 from trigon.schema import SegmentKind  # noqa: E402
 from trigon.training import TrainingConfig, train  # noqa: E402
 from trigon.types import (  # noqa: E402
     ChoiceQuestion,
+    DecisionRequest,
     NoulQuestion,
     ScoreQuestion,
-    SystemOneRequest,
 )
 
 STATE = "The customer writes: my card payment was declined at the store."
@@ -71,7 +72,7 @@ def engine() -> Engine:
 
 
 def _answers(engine: Engine, questions: dict, state: str = STATE) -> dict:
-    response = engine.answer(SystemOneRequest(state=state, questions=questions))
+    response = engine.answer(DecisionRequest(state=state, questions=questions))
     return {k: v.model_dump() for k, v in response.answers.items()}
 
 
@@ -104,7 +105,7 @@ def test_schema_states_do_not_depend_on_state(engine):
     backend, compiler = engine.backend, engine.compiler
 
     def schema_hidden(state: str) -> torch.Tensor:
-        compiled = compiler.compile_request(SystemOneRequest(state=state, questions=BASE))
+        compiled = compiler.compile_request(DecisionRequest(state=state, questions=BASE))
         embeddings, spans = backend._embed(compiled)
         mask = backend._mask_tensor(compiled)
         with torch.no_grad():
@@ -126,7 +127,7 @@ def test_schema_states_do_not_depend_on_state(engine):
 
 def test_the_cached_prefix_path_agrees_with_the_uncached_one():
     plain, cached = _tiny(), _tiny(cache=True)
-    request = SystemOneRequest(state=STATE, questions=BASE)
+    request = DecisionRequest(state=STATE, questions=BASE)
     first = Engine(plain, compiler=plain.make_compiler()).answer(request)
     engine = Engine(cached, compiler=cached.make_compiler())
     engine.answer(request)  # fills the prefix
@@ -142,7 +143,7 @@ def test_the_batched_pass_matches_one_at_a_time():
     backend = _tiny()
     compiler = backend.make_compiler()
     requests = [
-        SystemOneRequest(state=s, questions=BASE)
+        DecisionRequest(state=s, questions=BASE)
         for s in (STATE, "short", "a much longer message about a refund that never arrived")
     ]
     items = [(compiler.compile_request(r), r) for r in requests]
@@ -161,7 +162,7 @@ def test_zero_initialised_adapters_leave_the_backbone_untouched():
     # backbone, and the same heads, so only the adapters differ.
     with_adapters.model.load_state_dict(without.model.state_dict(), strict=False)
     compiled = with_adapters.make_compiler().compile_request(
-        SystemOneRequest(state=STATE, questions=BASE)
+        DecisionRequest(state=STATE, questions=BASE)
     )
     outputs = []
     for backend in (with_adapters, without):
@@ -216,7 +217,7 @@ def test_an_adapter_checkpoint_round_trips_through_the_shared_loader(tmp_path):
     loaded = TorchReadoutBackend.load(path)
     assert isinstance(loaded, QwenReadoutBackend)
     assert loaded.model_version == backend.model_version
-    request = SystemOneRequest(state=STATE, questions=BASE)
+    request = DecisionRequest(state=STATE, questions=BASE)
     a = Engine(backend, compiler=backend.make_compiler()).answer(request)
     b = Engine(loaded, compiler=loaded.make_compiler()).answer(request)
     for qid in BASE:
@@ -236,7 +237,7 @@ def test_evidence_does_not_move_when_a_question_is_added(method):
     compiler = backend.make_compiler()
 
     def evidence(questions):
-        request = SystemOneRequest(
+        request = DecisionRequest(
             state=STATE, questions=questions, options={"include_evidence": True}
         )
         output = backend.infer(compiler.compile_request(request), request)
@@ -255,7 +256,7 @@ def test_integrated_gradients_through_the_cached_prefix_is_complete_and_unbatche
     and the attributions sum to the log-probability difference at the served
     step count -- which on a pre-norm forward needs the points crowded towards
     the baseline: evenly spaced, the same 32 miss by more than a tenth."""
-    request = SystemOneRequest(state=STATE, questions=BASE)
+    request = DecisionRequest(state=STATE, questions=BASE)
     results = {}
     for cache, chunk in ((False, 32), (True, 1), (True, 32)):
         backend = _tiny(cache=cache)
@@ -276,6 +277,119 @@ def test_integrated_gradients_through_the_cached_prefix_is_complete_and_unbatche
     for qid, delta in backend.path_difference(compiled, request).items():
         assert abs(float(served[qid].sum()) - delta) <= 1e-2 * abs(delta), qid
         assert abs(float(uniform[qid].sum()) - delta) > 0.1 * abs(delta), qid
+
+
+# -- integrated gradients' precision ------------------------------------------
+
+
+def _as_on_the_gpu(backend: QwenReadoutBackend) -> QwenReadoutBackend:
+    """The tiny Qwen2 run the way the GPU runs the real one: frozen projections
+    stored in bf16, and every layer under bf16 autocast."""
+    for module in backend.model.modules():
+        if isinstance(module, LoRALinear):
+            module.base.to(torch.bfloat16)
+    backend.model.autocast_cpu = True
+    backend.model.eval()
+    return backend
+
+
+def _completeness(backend, precision: str, steps: int | None = None) -> dict[str, float]:
+    request = DecisionRequest(state=STATE, questions=BASE)
+    compiled = backend.make_compiler().compile_request(request)
+    backend.ig_precision = precision
+    backend.ig_steps = steps or IG_STEPS
+    attributions = backend.integrated_gradients(compiled, request)
+    return {
+        qid: abs(float(attributions[qid].sum()) - delta) / abs(delta)
+        for qid, delta in backend.path_difference(compiled, request).items()
+    }
+
+
+def test_integrated_gradients_is_complete_in_float32_and_not_under_bf16_autocast():
+    """bf16's share of the GPU's completeness failure, reproduced on a CPU and
+    removed. (It is not the whole failure on the real backbone, whose path is
+    rough: `docs/architecture.md`, *Evidence*.)
+
+    A token's attribution is the input dotted with an integrated gradient, and
+    the log-probability difference they must add up to is what is left when
+    large terms of both signs cancel. A gradient carried through bf16 is off by
+    a relative error per term that the remainder does not share: here the
+    attributions' absolute sum is ~120x the difference, and bf16 misses it by
+    15% where float32 misses by 0.04%. Four times the points do not help,
+    which is what separates rounding from quadrature."""
+    backend = _as_on_the_gpu(_tiny(seed=4))
+    served = _completeness(backend, "float32")
+    assert max(served.values()) < 1e-3, served
+    bf16 = _completeness(backend, "autocast")
+    assert max(bf16.values()) > 0.05, bf16
+    finer = _completeness(backend, "autocast", steps=4 * IG_STEPS)
+    assert max(finer.values()) > 0.05, finer
+
+
+def test_the_float32_path_is_the_float32_model_on_the_same_weights():
+    """Upcasting on the fly (`_UpcastLinear`) computes exactly what a float32
+    copy of the rounded weights would, forward and backward, at a fixed shape
+    -- without holding that copy."""
+    request = DecisionRequest(state=STATE, questions=BASE)
+    upcast = _as_on_the_gpu(_tiny(seed=4))
+    copied = _tiny(seed=4)
+    copied.model.eval()
+    with torch.no_grad():
+        for mine, theirs in zip(copied.model.modules(), upcast.model.modules(), strict=True):
+            if isinstance(mine, LoRALinear):
+                mine.base.weight.copy_(theirs.base.weight.float())
+                if mine.base.bias is not None:
+                    mine.base.bias.copy_(theirs.base.bias.float())
+    compiled = upcast.make_compiler().compile_request(request)
+    got = upcast.integrated_gradients(compiled, request)
+    want = copied.integrated_gradients(compiled, request)
+    for qid in BASE:
+        assert torch.equal(got[qid], want[qid]), qid
+    assert upcast.path_difference(compiled, request) == copied.path_difference(compiled, request)
+
+
+def test_the_float32_path_leaves_the_served_prefix_and_answer_alone():
+    """The served schema prefix is bf16 and stays in the cache, untouched;
+    the float32 path builds its own and drops it. The answer, and gradient x
+    input, keep the served precision."""
+    backend = _as_on_the_gpu(_tiny(seed=4, cache=True))
+    engine = Engine(backend, compiler=backend.make_compiler())
+    plain = _answers(engine, BASE)
+    cached = dict(backend._prefix_cache)
+    assert cached
+    request = DecisionRequest(state=STATE, questions=BASE)
+    compiled = backend.make_compiler().compile_request(request)
+    backend.integrated_gradients(compiled, request)
+    backend.path_difference(compiled, request)
+    assert backend._prefix_cache.keys() == cached.keys()
+    assert all(backend._prefix_cache[k] is v for k, v in cached.items())
+    assert _answers(engine, BASE) == plain
+    assert all(k.dtype == torch.bfloat16 for k, _ in next(iter(cached.values())).layers)
+
+
+def test_integrated_gradients_on_the_float32_path_does_not_move_when_a_question_is_added():
+    """Independence on the new path: bf16 frozen weights upcast on the fly, in
+    float64 for the cross-shape bound, as the other evidence tests are."""
+    backend = _tiny()
+    backend.model.double()
+    for module in backend.model.modules():
+        if isinstance(module, LoRALinear):
+            module.base.to(torch.bfloat16)
+    backend.evidence_mode = "integrated_gradients"
+    assert backend.ig_precision == "float32"
+    compiler = backend.make_compiler()
+
+    def evidence(questions):
+        request = DecisionRequest(
+            state=STATE, questions=questions, options={"include_evidence": True}
+        )
+        output = backend.infer(compiler.compile_request(request), request)
+        return {qid: out.evidence for qid, out in output.outputs.items()}
+
+    before = evidence(BASE)
+    after = evidence({**BASE, "extra": NoulQuestion(instructions="Is the weather nice?")})
+    for qid in BASE:
+        assert_evidence_unmoved(before[qid], after[qid], qid, bound=1e-12)
 
 
 def test_the_evidence_head_trains_and_round_trips_on_the_backbone(tmp_path):
@@ -301,6 +415,6 @@ def test_the_evidence_head_trains_and_round_trips_on_the_backbone(tmp_path):
     backend.save(path)
     loaded = TorchReadoutBackend.load(path)
     assert loaded.config.evidence_supervised
-    request = SystemOneRequest(state=STATE, questions=BASE, options={"include_evidence": True})
+    request = DecisionRequest(state=STATE, questions=BASE, options={"include_evidence": True})
     answer = Engine(loaded, compiler=loaded.make_compiler()).answer(request)
     assert {a.evidence_method for a in answer.answers.values()} == {"span_head"}

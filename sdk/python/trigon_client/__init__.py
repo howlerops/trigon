@@ -1,4 +1,4 @@
-"""Trigon System One — Python client.
+"""Trigon — Python client.
 
 Generated from ``spec/openapi.json``, which is the contract. Nothing here is
 hand-maintained: ``scripts/generate_sdk.py`` writes ``_generated.py`` and

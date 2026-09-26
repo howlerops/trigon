@@ -10,7 +10,7 @@ repository beside the report they were fitted for.
 
 **It is the gateway, not a second serving path.** `trigon.server.app.build_app`
 configured through the same `TRIGON_*` environment variables `trigon serve`
-reads, so `/v1/systemone`, `/compat`, `/healthz`, auth, rate limits and the
+reads, so `/v1/decide`, `/compat`, `/healthz`, auth, rate limits and the
 schema KV cache are the ones the tests cover. A deployment that answered
 through its own code would be a second thing to keep honest.
 

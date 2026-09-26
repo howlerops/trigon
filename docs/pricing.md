@@ -70,7 +70,7 @@ Three things keep this preliminary:
   schema cache skips 97% of the sequence. A use case with a larger state and
   a smaller schema pays more per billed token.
 
-B.1 closes on a rented L4 (`reports/burn-in/modal-l4/`).
+B.1 closes on a rented L4 (`reports/burn-in/README.md`).
 
 **The tool double-counted the cache until this measurement.** It multiplied
 the typed rate by the *post-cache* token count. A burn-in's tokens per

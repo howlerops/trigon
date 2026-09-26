@@ -35,14 +35,14 @@ ROUTING_BODY = {
 
 
 def test_answers_every_declared_question(client):
-    body = client.post("/v1/systemone", json=ROUTING_BODY).json()
+    body = client.post("/v1/decide", json=ROUTING_BODY).json()
     assert set(body["answers"]) == {"intent", "urgent"}
     assert body["answers"]["intent"]["selected"] == "card_declined"
     assert "confidence" not in body["answers"]["urgent"]
 
 
 def test_response_names_a_pinned_version_not_an_alias(client):
-    body = client.post("/v1/systemone", json=ROUTING_BODY).json()
+    body = client.post("/v1/decide", json=ROUTING_BODY).json()
     # A version with no digits would be an alias, and aliases move under users.
     assert any(ch.isdigit() for ch in body["model"])
 
@@ -54,12 +54,12 @@ def test_malformed_schema_is_rejected_before_the_model_runs(client):
             "q": {"type": "choice", "instructions": "pick", "options": [{"name": "only"}]}
         },
     }
-    assert client.post("/v1/systemone", json=bad).status_code == 422
+    assert client.post("/v1/decide", json=bad).status_code == 422
 
 
 def test_unknown_question_type_is_rejected(client):
     bad = {"state": "x", "questions": {"q": {"type": "vibes", "instructions": "hmm"}}}
-    assert client.post("/v1/systemone", json=bad).status_code == 422
+    assert client.post("/v1/decide", json=bad).status_code == 422
 
 
 def test_oversized_state_returns_413_not_422(client):
@@ -68,7 +68,7 @@ def test_oversized_state_returns_413_not_422(client):
         "state": "word " * 80000,  # ~100k tokens, over the 65,536-token state budget
         "questions": {"q": {"type": "noul", "instructions": "ok?"}},
     }
-    response = client.post("/v1/systemone", json=body)
+    response = client.post("/v1/decide", json=body)
     assert response.status_code == 413
     assert response.json()["error"]["type"] == "schema_too_large"
 
@@ -109,7 +109,7 @@ def test_low_confidence_questions_escalate_to_the_premium_tier():
         RoutingPolicy(escalate_below_confidence=0.9, escalate_noul_margin=0.5),
     )
     client = TestClient(build_app(ServerConfig(backend="lexical"), router=router))
-    body = client.post("/v1/systemone", json=ROUTING_BODY).json()
+    body = client.post("/v1/decide", json=ROUTING_BODY).json()
     assert body["tier"] == "escalated"
     # Both tiers are named, because this request took two passes.
     assert "premium-1.0.0" in body["model"] and "lexical-floor" in body["model"]
@@ -123,7 +123,7 @@ def test_confident_requests_do_not_escalate():
         RoutingPolicy(escalate_below_confidence=0.0, escalate_noul_margin=0.0),
     )
     client = TestClient(build_app(ServerConfig(backend="lexical"), router=router))
-    body = client.post("/v1/systemone", json=ROUTING_BODY).json()
+    body = client.post("/v1/decide", json=ROUTING_BODY).json()
     assert body["tier"] == "workhorse"
 
 
@@ -135,7 +135,7 @@ def test_request_level_threshold_overrides_the_deployment_policy():
     )
     client = TestClient(build_app(ServerConfig(backend="lexical"), router=router))
     body = client.post(
-        "/v1/systemone",
+        "/v1/decide",
         json={**ROUTING_BODY, "options": {"escalate_below_confidence": 0.99}},
     ).json()
     assert body["tier"] == "escalated"
@@ -168,7 +168,7 @@ def _torch_body() -> dict:
 
 def _ask(config: ServerConfig, body: dict) -> dict:
     """POST one request at a gateway built from ``config``."""
-    return TestClient(build_app(config)).post("/v1/systemone", json=body).json()
+    return TestClient(build_app(config)).post("/v1/decide", json=body).json()
 
 
 def _health(config: ServerConfig) -> dict:
@@ -179,7 +179,7 @@ def test_torch_backend_is_actually_servable():
     """The compiler must use the backend's tokenizer, not the heuristic."""
     pytest.importorskip("torch", reason="the reference model needs the 'train' extra")
     client = TestClient(build_app(ServerConfig(backend="torch")))
-    response = client.post("/v1/systemone", json=_torch_body())
+    response = client.post("/v1/decide", json=_torch_body())
     assert response.status_code == 200, response.text
     assert set(response.json()["answers"]) == {"intent", "urgent"}
 
@@ -188,11 +188,11 @@ def test_gateway_and_cli_answer_identically(tmp_path):
     """Two entry points, one Engine. If they drift, one of them is lying."""
     pytest.importorskip("torch", reason="the reference model needs the 'train' extra")
     from trigon.cli import _engine
-    from trigon.types import SystemOneRequest
+    from trigon.types import DecisionRequest
 
     body = _torch_body()
     over_http = _ask(ServerConfig(backend="torch"), body)
-    direct = _engine("torch", None, None).answer(SystemOneRequest.model_validate(body))
+    direct = _engine("torch", None, None).answer(DecisionRequest.model_validate(body))
 
     assert over_http["answers"]["intent"]["probabilities"] == pytest.approx(
         direct.answers["intent"].probabilities

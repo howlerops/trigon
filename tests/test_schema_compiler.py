@@ -14,11 +14,11 @@ from trigon.schema import (
     compile_schema,
     materialize_mask,
 )
-from trigon.types import ChoiceQuestion, NoulQuestion, ScoreQuestion, SystemOneRequest
+from trigon.types import ChoiceQuestion, DecisionRequest, NoulQuestion, ScoreQuestion
 
 
-def _request(**questions) -> SystemOneRequest:
-    return SystemOneRequest(state="a customer message", questions=questions)
+def _request(**questions) -> DecisionRequest:
+    return DecisionRequest(state="a customer message", questions=questions)
 
 
 def test_schema_hash_ignores_question_map_order():
@@ -126,16 +126,16 @@ def test_oversized_state_is_rejected():
     compiler = SchemaCompiler(budget=Budget(state_tokens=8))
     with pytest.raises(SchemaTooLarge, match="state budget"):
         compiler.compile_request(
-            SystemOneRequest(state="word " * 500, questions={"q": NoulQuestion(instructions="ok?")})
+            DecisionRequest(state="word " * 500, questions={"q": NoulQuestion(instructions="ok?")})
         )
 
 
 def test_json_state_renders_deterministically():
     a = compile_request(
-        SystemOneRequest(state={"b": 2, "a": 1}, questions={"q": NoulQuestion(instructions="ok?")})
+        DecisionRequest(state={"b": 2, "a": 1}, questions={"q": NoulQuestion(instructions="ok?")})
     )
     b = compile_request(
-        SystemOneRequest(state={"a": 1, "b": 2}, questions={"q": NoulQuestion(instructions="ok?")})
+        DecisionRequest(state={"a": 1, "b": 2}, questions={"q": NoulQuestion(instructions="ok?")})
     )
     assert [s.text for s in a.segments] == [s.text for s in b.segments]
 
@@ -164,7 +164,7 @@ def test_request_inside_the_total_budget_can_still_fail_the_envelope():
         instructions="pick",
         options=[{"name": f"option_number_{i}", "criteria": "a" * 40} for i in range(60)],
     )
-    request = SystemOneRequest(state="a short state", questions={"q": big})
+    request = DecisionRequest(state="a short state", questions={"q": big})
     with pytest.raises(SchemaTooLarge, match="per-question"):
         compiler.compile_request(request)
 
@@ -193,7 +193,7 @@ def test_attention_cost_is_block_diagonal_in_the_schema():
     block attends only to itself, so schema cost is the SUM of per-question
     squares rather than the square of their sum."""
     few = compile_request(
-        SystemOneRequest(
+        DecisionRequest(
             state="a short state",
             questions={
                 "a": ChoiceQuestion(
@@ -204,7 +204,7 @@ def test_attention_cost_is_block_diagonal_in_the_schema():
         )
     )
     many = compile_request(
-        SystemOneRequest(
+        DecisionRequest(
             state="a short state",
             questions={
                 f"q{k}": ChoiceQuestion(
@@ -227,7 +227,7 @@ def test_state_is_the_quadratic_term():
 
     def cost(state_words: int, n_questions: int) -> int:
         return compile_request(
-            SystemOneRequest(
+            DecisionRequest(
                 state="word " * state_words,
                 questions={
                     f"q{i}": NoulQuestion(instructions=f"is fact {i} present?")
@@ -242,7 +242,7 @@ def test_state_is_the_quadratic_term():
 
 def test_dense_equivalent_states_the_claim_honestly():
     compiled = compile_request(
-        SystemOneRequest(
+        DecisionRequest(
             state="word " * 500,
             questions={
                 f"q{k}": ChoiceQuestion(
@@ -269,7 +269,7 @@ def test_compat_budget_requests_are_always_valid_under_the_default():
     assert DEFAULT_BUDGET.max_question_tokens >= COMPAT_BUDGET.max_question_tokens
     assert DEFAULT_BUDGET.max_questions >= COMPAT_BUDGET.max_questions
 
-    at_their_limit = SystemOneRequest(
+    at_their_limit = DecisionRequest(
         state="word " * (COMPAT_BUDGET.state_tokens // 2),
         questions={
             f"q{i}": NoulQuestion(instructions="ok?") for i in range(COMPAT_BUDGET.max_questions)
@@ -304,7 +304,7 @@ def test_the_mask_cache_is_bounded_by_cells_not_by_entries():
     # produces and what the entry-count limit failed to bound.
     for words in range(20, 420, 3):
         compiled = compiler.compile_request(
-            SystemOneRequest(
+            DecisionRequest(
                 state="word " * words,
                 questions={"q": NoulQuestion(instructions="present?")},
             )
@@ -323,7 +323,7 @@ def test_a_mask_too_large_for_the_budget_is_returned_but_not_held():
     compiler = SchemaCompiler()
 
     small = compiler.compile_request(
-        SystemOneRequest(state="a b c", questions={"q": NoulQuestion(instructions="?")})
+        DecisionRequest(state="a b c", questions={"q": NoulQuestion(instructions="?")})
     )
     materialize_mask(small)
     held = mask_cache_cells()
@@ -333,7 +333,7 @@ def test_a_mask_too_large_for_the_budget_is_returned_but_not_held():
     module._MASK_CACHE_CELLS = held + 1  # anything bigger cannot be held
     try:
         big = compiler.compile_request(
-            SystemOneRequest(state="word " * 200, questions={"q": NoulQuestion(instructions="?")})
+            DecisionRequest(state="word " * 200, questions={"q": NoulQuestion(instructions="?")})
         )
         mask = materialize_mask(big)
         assert mask, "the mask must still be built and returned"
@@ -350,7 +350,7 @@ def test_the_cache_still_hits_for_a_repeated_shape():
     module._MASK_CACHE.clear()
     module._cells_held = 0
     compiler = SchemaCompiler()
-    request = SystemOneRequest(
+    request = DecisionRequest(
         state="the same length every time", questions={"q": NoulQuestion(instructions="?")}
     )
     first = materialize_mask(compiler.compile_request(request))

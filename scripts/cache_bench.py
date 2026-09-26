@@ -38,7 +38,7 @@ import time
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "src"))
 
 from trigon.engine import Engine  # noqa: E402
-from trigon.types import ChoiceQuestion, NoulQuestion, SystemOneRequest  # noqa: E402
+from trigon.types import ChoiceQuestion, DecisionRequest, NoulQuestion  # noqa: E402
 
 # A classifier deployment's shape: one large option set, asked repeatedly.
 STATES = [
@@ -50,7 +50,7 @@ STATES = [
 ]
 
 
-def _request(state: str, options: int, extra_questions: int) -> SystemOneRequest:
+def _request(state: str, options: int, extra_questions: int) -> DecisionRequest:
     questions: dict = {
         "intent": ChoiceQuestion(
             instructions="Which banking intent does this customer message express?",
@@ -59,10 +59,10 @@ def _request(state: str, options: int, extra_questions: int) -> SystemOneRequest
     }
     for i in range(extra_questions):
         questions[f"flag_{i}"] = NoulQuestion(instructions=f"Is condition {i} present?")
-    return SystemOneRequest(state=state, questions=questions)
+    return DecisionRequest(state=state, questions=questions)
 
 
-def _time(engine: Engine, requests: list[SystemOneRequest], repeats: int) -> list[float]:
+def _time(engine: Engine, requests: list[DecisionRequest], repeats: int) -> list[float]:
     samples = []
     for _ in range(repeats):
         for request in requests:

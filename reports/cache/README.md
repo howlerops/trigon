@@ -54,6 +54,53 @@ skips recomputing 97% of the sequence, and no hardware makes that slower. The
 set, for the same reason it reports whether the deployment is calibrated: an
 operator should not have to guess which numbers their gateway is producing.
 
+## Batches read it too
+
+Until 2026-09-26 only the single-request path did. `Engine.answer_many`
+padded whole sequences and recomputed the schema block for every request in
+the batch, so the preliminary L4 burn-in (`reports/burn-in/modal-l4/`) computed
+every billed token at batch 8 and 32 where batch 1 computed 3% of them, and
+every batched row was slower per request than batch 1.
+
+`TorchReadoutBackend.infer_many` now groups a batch by `schema_hash` and runs
+each group as one padded pass over the state and readout tokens only, against
+one cached prefix broadcast across the group — the spike and the Qwen2 forward
+alike. The prefix is looked up or filled from one request's own unpadded
+tensors, the same call the single path makes, so it is bit-identical whichever
+path filled it. Mixed schemas are one pass per schema. `cached_schema_tokens`
+is per request: on a miss the group's first request pays for the prefix and
+the rest read it, which is what one-at-a-time serving reports.
+`tests/test_batch_prefix_cache.py` is the specification: batched answers
+within the float32 bound of one-at-a-time ones (different shapes), exact
+where the shapes match.
+
+Timed on CPU only, and on a **shared, heavily loaded** 4-core Xeon @ 2.80GHz
+(load average 15–21 from other jobs), so read the ratios rather than the
+absolute numbers. `scripts/burn_in.py --device cpu --shapes spike --requests
+256 --warmup 2`, two threads, the pre-change tree and this one interleaved
+twice; the quieter of the two rounds:
+
+| Batch | Before req/s | Before billed / computed tok/s | After req/s | After billed / computed tok/s |
+| ---: | ---: | ---: | ---: | ---: |
+| 1 | 45.8 | 33,279 / 889 | 42.9 | 31,133 / 831 |
+| 8 | 12.3 | 8,950 / **8,950** | **47.8** | 34,741 / **928** |
+| 32 | 13.0 | 9,445 / **9,445** | **53.6** | 38,908 / **1,039** |
+
+Batched throughput goes up 3.9× at batch 8 and 4.1× at batch 32, and
+computed tokens now sit at 2.7% of billed at every batch size instead of
+100% above batch 1. The spike is too small for batching itself to buy much
+over batch 1 — per-request Python (embedding, heads) dominates a 0.5M-parameter
+pass — which is why the gain is the recovery of the cache and not more. The
+noisier round agrees in direction (19.1 against 10.1 req/s at batch 8).
+
+At the Qwen2.5-0.5B shape (random weights, 32 requests a row), after the
+change: 1.1, 1.4 and 1.4 req/s at batch 1, 8 and 32, computed 21–28 tok/s
+against 791–1,042 billed. Before it, batch 8 managed 0.4 req/s, and batch 32
+had not finished one row after 25 minutes and was stopped. What this
+changes on an L4 is not measured here: the re-time is
+`modal run scripts/modal_burn_in.py` from a clean tree, and until it runs
+the batched rows in `reports/burn-in/modal-l4/` describe the old path.
+
 ## Reproduce
 
 ```bash

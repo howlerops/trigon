@@ -8,7 +8,7 @@ from trigon.backends.base import BackendOutput, QuestionOutput
 from trigon.calibration.conformal import ConformalMethod, ConformalPredictor
 from trigon.calibration.temperature import TemperatureScaler
 from trigon.engine import Engine, EngineConfig
-from trigon.types import ChoiceQuestion, NoulQuestion, ScoreQuestion, SystemOneRequest
+from trigon.types import ChoiceQuestion, DecisionRequest, NoulQuestion, ScoreQuestion
 
 
 class StubBackend:
@@ -42,7 +42,7 @@ def test_score_is_the_expectation_over_declared_anchors():
     backend = StubBackend({"s": (0.0, 0.0)}, {"s": "score"})
     engine = Engine(backend)
     response = engine.answer(
-        SystemOneRequest(
+        DecisionRequest(
             state="x",
             questions={
                 "s": ScoreQuestion(
@@ -67,7 +67,7 @@ def test_temperature_is_applied_before_confidence_is_derived():
     question = ChoiceQuestion(
         instructions="pick", options=[{"name": "a"}, {"name": "b"}, {"name": "c"}]
     )
-    request = SystemOneRequest(state="x", questions={"c": question})
+    request = DecisionRequest(state="x", questions={"c": question})
 
     sharp = Engine(backend).answer(request).answers["c"]
     flat = (
@@ -85,11 +85,11 @@ def test_raw_probabilities_are_returned_only_when_asked():
     question = ChoiceQuestion(instructions="pick", options=[{"name": "a"}, {"name": "b"}])
     engine = Engine(backend, scaler=TemperatureScaler(primitive={"choice": 4.0}))
 
-    plain = engine.answer(SystemOneRequest(state="x", questions={"c": question}))
+    plain = engine.answer(DecisionRequest(state="x", questions={"c": question}))
     assert plain.answers["c"].raw_probabilities is None
 
     verbose = engine.answer(
-        SystemOneRequest(
+        DecisionRequest(
             state="x", questions={"c": question}, options={"include_raw_probabilities": True}
         )
     )
@@ -109,7 +109,7 @@ def test_conformal_profile_is_applied_when_requested():
         },
     )
     response = engine.answer(
-        SystemOneRequest(
+        DecisionRequest(
             state="x",
             questions={
                 "c": ChoiceQuestion(
@@ -138,7 +138,7 @@ def test_a_backend_that_breaks_the_contract_is_caught():
     engine = Engine(backend)
     with pytest.raises(ValueError, match="expected 3 logits"):
         engine.answer(
-            SystemOneRequest(
+            DecisionRequest(
                 state="x",
                 questions={
                     "c": ChoiceQuestion(
@@ -154,7 +154,7 @@ def test_a_backend_returning_the_wrong_head_is_caught():
     backend = StubBackend({"n": (1.0,)}, {"n": "choice"})
     with pytest.raises(ValueError, match="choice head for a noul question"):
         Engine(backend).answer(
-            SystemOneRequest(state="x", questions={"n": NoulQuestion(instructions="ok?")})
+            DecisionRequest(state="x", questions={"n": NoulQuestion(instructions="ok?")})
         )
 
 
@@ -163,7 +163,7 @@ def test_large_option_sets_are_shortlisted_and_still_answered_in_full(engine):
     options = [{"name": f"intent_{i}"} for i in range(6000)]
     options[900] = {"name": "card_payment_declined", "criteria": "a card transaction was refused"}
     response = engine.answer(
-        SystemOneRequest(
+        DecisionRequest(
             state="my card payment was declined at the store",
             questions={"intent": ChoiceQuestion(instructions="route", options=options)},
         )
@@ -187,7 +187,7 @@ def test_domain_selects_a_per_domain_temperature():
     backend = StubBackend({"c": (3.0, 0.0)}, {"c": "choice"})
     scaler = TemperatureScaler(primitive={"choice": 1.0}, domain={"support": {"choice": 8.0}})
     question = ChoiceQuestion(instructions="pick", options=[{"name": "a"}, {"name": "b"}])
-    request = SystemOneRequest(state="x", questions={"c": question})
+    request = DecisionRequest(state="x", questions={"c": question})
 
     general = Engine(backend, scaler=scaler).answer(request).answers["c"]
     support = (
@@ -204,7 +204,7 @@ def test_an_option_set_inside_the_shortlist_is_not_narrowed(engine):
     options = [{"name": f"intent_{i}"} for i in range(1500)]
     options[900] = {"name": "card_payment_declined", "criteria": "a card was refused"}
     response = engine.answer(
-        SystemOneRequest(
+        DecisionRequest(
             state="my card payment was declined",
             questions={"intent": ChoiceQuestion(instructions="route", options=options)},
         )
@@ -217,7 +217,7 @@ def test_top_probabilities_trims_the_response_without_renormalising(engine):
     distribution the caller is seeing."""
     options = [{"name": f"intent_{i}", "criteria": f"about topic {i}"} for i in range(400)]
     options[7] = {"name": "card_declined", "criteria": "a card transaction was refused"}
-    request = SystemOneRequest(
+    request = DecisionRequest(
         state="my card transaction was refused",
         questions={"intent": ChoiceQuestion(instructions="route", options=options)},
         options={"top_probabilities": 10},
@@ -235,7 +235,7 @@ def test_confidence_is_computed_before_truncation(engine):
     """Confidence derived from a trimmed vector would read high simply because
     the tail was dropped."""
     options = [{"name": f"intent_{i}", "criteria": f"about topic {i}"} for i in range(400)]
-    base = SystemOneRequest(
+    base = DecisionRequest(
         state="a message with no particular signal",
         questions={"intent": ChoiceQuestion(instructions="route", options=options)},
     )

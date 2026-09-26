@@ -1,7 +1,7 @@
 {
   "name": "@trigon/client",
   "version": "0.1.0",
-  "description": "Typed, calibrated decisions from the Trigon System One API. Generated from the OpenAPI contract; no runtime dependencies.",
+  "description": "Typed, calibrated decisions from the Trigon API. Generated from the OpenAPI contract; no runtime dependencies.",
   "license": "Apache-2.0",
   "type": "module",
   "main": "src/generated.ts",

@@ -167,10 +167,26 @@ def _evidence_constants() -> dict[str, float]:
 def test_the_integrated_gradients_quadrature_is_published_as_it_is_served():
     """The same table's backend rows, which need torch to read."""
     pytest.importorskip("torch")
-    from trigon.backends.torch_readout import IG_POWER, IG_STEPS
+    from trigon.backends.torch_readout import IG_POWER, IG_PRECISION, IG_STEPS
 
     published = _evidence_constants()
     assert {k: v for k, v in published.items() if k.startswith("trigon.backends.")} == {
         "trigon.backends.torch_readout.IG_STEPS": IG_STEPS,
         "trigon.backends.torch_readout.IG_POWER": IG_POWER,
     }
+    text = (DOCS / "architecture.md").read_text()
+    assert re.search(
+        rf"^\| [^|]+ \| {IG_PRECISION} \| `trigon\.backends\.torch_readout\.IG_PRECISION` \|$",
+        text,
+        re.M,
+    )
+
+
+def test_the_faithfulness_bins_are_published_as_they_are_scored():
+    """`docs/evals.md` §7 names ERASER's bins; the suite must score those bins."""
+    from trigon.evals.faithfulness import FAITHFULNESS_BINS
+
+    percents = [f"{round(b * 100)}" for b in FAITHFULNESS_BINS]
+    stated = ", ".join(percents[:-1]) + f" and {percents[-1]}%"
+    text = re.sub(r"\s+", " ", (DOCS / "evals.md").read_text())
+    assert f"top {stated} of the post's words" in text

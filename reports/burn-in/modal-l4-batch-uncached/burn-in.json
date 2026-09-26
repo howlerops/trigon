@@ -1,0 +1,187 @@
+{
+  "hardware": {
+    "device": "cuda",
+    "torch": "2.14.0+cu130",
+    "cuda": "13.0",
+    "python": "3.11.12",
+    "cpu": "x86_64",
+    "gpu": "NVIDIA L4",
+    "nvidia_smi": "NVIDIA L4, 580.95.05, 23034 MiB, 72.00 W, 2040 MHz",
+    "commit": "cd918597a7c2581affd3bd27db1a3275fa84f056",
+    "dirty": false
+  },
+  "results": [
+    {
+      "shape": "certified",
+      "d_model": 1536,
+      "layers": 28,
+      "heads": 12,
+      "d_ff": 8960,
+      "parameters": 1567005251,
+      "rows": [
+        {
+          "batch": 1,
+          "requests": 2000,
+          "p50_ms": 102.90811349999807,
+          "p99_ms": 127.16840899997806,
+          "requests_per_s": 9.63423526214106,
+          "billed_tokens_per_s": 3869.1088812758494,
+          "computed_tokens_per_s": 121.39136430297735,
+          "tokens_per_request": 401.6,
+          "usd_per_mtok_billed": 0.05743498801433156
+        },
+        {
+          "batch": 8,
+          "requests": 2000,
+          "p50_ms": 487.80802349998,
+          "p99_ms": 605.3950900000018,
+          "requests_per_s": 16.26781998061403,
+          "billed_tokens_per_s": 6533.156504214594,
+          "computed_tokens_per_s": 6533.156504214594,
+          "tokens_per_request": 401.6,
+          "usd_per_mtok_billed": 0.03401452606850377
+        },
+        {
+          "batch": 32,
+          "requests": 2016,
+          "p50_ms": 2193.6625629999753,
+          "p99_ms": 2377.4324639999804,
+          "requests_per_s": 14.497038910226152,
+          "billed_tokens_per_s": 5822.028084726478,
+          "computed_tokens_per_s": 5822.028084726478,
+          "tokens_per_request": 401.6011904761905,
+          "usd_per_mtok_billed": 0.03816921165413141
+        }
+      ]
+    },
+    {
+      "shape": "spike",
+      "d_model": 128,
+      "layers": 2,
+      "heads": 4,
+      "d_ff": 256,
+      "parameters": 455875,
+      "rows": [
+        {
+          "batch": 1,
+          "requests": 2000,
+          "p50_ms": 20.167205000007016,
+          "p99_ms": 25.525746999960575,
+          "requests_per_s": 48.90071374717461,
+          "billed_tokens_per_s": 35521.478465947635,
+          "computed_tokens_per_s": 948.6738466951875,
+          "tokens_per_request": 726.4,
+          "usd_per_mtok_billed": 0.0062559958599486135
+        },
+        {
+          "batch": 8,
+          "requests": 2000,
+          "p50_ms": 191.19735700002138,
+          "p99_ms": 237.49796499998865,
+          "requests_per_s": 41.44131488903677,
+          "billed_tokens_per_s": 30102.97113539631,
+          "computed_tokens_per_s": 30102.97113539631,
+          "tokens_per_request": 726.4,
+          "usd_per_mtok_billed": 0.007382069405133376
+        },
+        {
+          "batch": 32,
+          "requests": 2016,
+          "p50_ms": 738.7667489999785,
+          "p99_ms": 954.6149540000215,
+          "requests_per_s": 42.58696618334435,
+          "billed_tokens_per_s": 30935.142661299265,
+          "computed_tokens_per_s": 30935.142661299265,
+          "tokens_per_request": 726.3993055555555,
+          "usd_per_mtok_billed": 0.007183487875109381
+        }
+      ]
+    },
+    {
+      "shape": "0.5b",
+      "d_model": 896,
+      "layers": 24,
+      "heads": 14,
+      "d_ff": 7296,
+      "parameters": 393937603,
+      "rows": [
+        {
+          "batch": 1,
+          "requests": 2000,
+          "p50_ms": 39.57845150000594,
+          "p99_ms": 56.109793000018726,
+          "requests_per_s": 24.981774947668978,
+          "billed_tokens_per_s": 18146.761321986745,
+          "computed_tokens_per_s": 484.6464339847782,
+          "tokens_per_request": 726.4,
+          "usd_per_mtok_billed": 0.012245833748470379
+        },
+        {
+          "batch": 8,
+          "requests": 2000,
+          "p50_ms": 920.7164839999677,
+          "p99_ms": 944.819462000055,
+          "requests_per_s": 8.671576716497656,
+          "billed_tokens_per_s": 6299.033326863897,
+          "computed_tokens_per_s": 6299.033326863897,
+          "tokens_per_request": 726.4,
+          "usd_per_mtok_billed": 0.03527878178934165
+        },
+        {
+          "batch": 32,
+          "requests": 2016,
+          "p50_ms": 3659.31157,
+          "p99_ms": 3826.8073330000334,
+          "requests_per_s": 8.71606084225525,
+          "billed_tokens_per_s": 6331.340542994184,
+          "computed_tokens_per_s": 6331.340542994184,
+          "tokens_per_request": 726.3993055555555,
+          "usd_per_mtok_billed": 0.03509876316290043
+        }
+      ]
+    },
+    {
+      "shape": "1.5b",
+      "d_model": 1536,
+      "layers": 28,
+      "heads": 12,
+      "d_ff": 13440,
+      "parameters": 1427675203,
+      "rows": [
+        {
+          "batch": 1,
+          "requests": 2000,
+          "p50_ms": 71.14603650006757,
+          "p99_ms": 79.83769099996607,
+          "requests_per_s": 13.992468680700274,
+          "billed_tokens_per_s": 10164.129249660678,
+          "computed_tokens_per_s": 271.4538924055853,
+          "tokens_per_request": 726.4,
+          "usd_per_mtok_billed": 0.021863380203438573
+        },
+        {
+          "batch": 8,
+          "requests": 2000,
+          "p50_ms": 2388.5542859999305,
+          "p99_ms": 2414.1317849998813,
+          "requests_per_s": 3.3476790491353103,
+          "billed_tokens_per_s": 2431.7540612918897,
+          "computed_tokens_per_s": 2431.7540612918897,
+          "tokens_per_request": 726.4,
+          "usd_per_mtok_billed": 0.091383510265082
+        },
+        {
+          "batch": 32,
+          "requests": 2016,
+          "p50_ms": 9005.163760999949,
+          "p99_ms": 9242.931594999845,
+          "requests_per_s": 3.548501210281363,
+          "billed_tokens_per_s": 2577.6288149114303,
+          "computed_tokens_per_s": 2577.6288149114303,
+          "tokens_per_request": 726.3993055555555,
+          "usd_per_mtok_billed": 0.08621187850503526
+        }
+      ]
+    }
+  ]
+}

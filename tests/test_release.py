@@ -49,3 +49,14 @@ def test_the_checksum_matches_the_committed_file(release, name, digest):
     if not source.exists():
         pytest.skip(f"{source.name} is not committed and no local copy is present")
     assert hashlib.sha256(source.read_bytes()).hexdigest() == digest
+
+
+@pytest.mark.parametrize("release", sorted(SOURCES))
+def test_the_bundle_checksum_is_what_the_release_workflow_checks(release):
+    """`.github/workflows/release.yml` runs `sha256sum -c` on this file against
+    the bundle it fetched from the Modal Volume, so it must name exactly that
+    bundle, `<release>.tar.gz`, with a full SHA-256."""
+    line = (ROOT / "releases" / release / "BUNDLE.sha256").read_text().strip()
+    digest, name = line.split()
+    assert name == f"{release}.tar.gz"
+    assert len(digest) == 64 and all(c in "0123456789abcdef" for c in digest)

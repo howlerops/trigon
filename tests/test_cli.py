@@ -85,7 +85,7 @@ def test_fit_stores_only_the_calibrators_it_kept(tmp_path, capsys):
 
 def test_spec_prints_the_contract(capsys):
     assert main(["spec"]) == 0
-    assert "/v1/systemone" in json.loads(capsys.readouterr().out)["paths"]
+    assert "/v1/decide" in json.loads(capsys.readouterr().out)["paths"]
 
 
 def test_unknown_backend_fails_with_a_useful_message():

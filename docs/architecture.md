@@ -179,6 +179,15 @@ The measurements, and the falsifiers they fired, are in `docs/decisions.md`,
 *Evidence is attribution until it is supervised*. The knob cannot select the
 span head.
 
+**Plausible is not faithful.** The plausibility table says whether a person
+would have highlighted the same words. It cannot say whether the model used
+them. `trigon.evals.faithfulness` measures that with ERASER's
+comprehensiveness and sufficiency. It deletes each method's top-ranked words
+from the state and re-asks the engine, and it scores a random control and
+the rationale lexicon the same way. `scripts/train_corpus.py` prints it
+beside plausibility; `docs/evals.md`, section 7, has the definitions and the
+choices.
+
 Integrated gradients' baseline is the zero embedding: position and segment
 are still added, so it is the state with its words taken out rather than a
 state of some real token, and gradient × input is the same method with one
@@ -189,6 +198,41 @@ zero; evenly spaced, 32 points on a tiny Qwen2 summed 12–91% away from the
 log-probability difference they must add up to, and `u³`-spaced 0.04%.
 Completeness is asserted on both backbones' forwards and measured on every
 plausibility report.
+
+**Integrated gradients runs in float32 when the answer does not**
+(`IG_PRECISION`). On a GPU the backbone's frozen projections are stored in
+bf16 and every layer runs under bf16 autocast, and the answer and gradient ×
+input stay there. IG's path does not: no autocast, and each bf16 projection
+upcast to float32 as it is used, forward and again backward, one at a time —
+so a 1.5B backbone costs no float32 copy (5.3 GB of projections that autograd
+would otherwise hold for the backward pass), only 55 MB for the widest one,
+and TF32 is refused for the duration. The schema prefix it attends to is
+computed in the same arithmetic and dropped afterwards; the served cache is
+not touched. The reason is completeness: attributions of both signs cancel
+down to a small log-probability difference, and a gradient carried in bf16's
+eight bits is a relative error on every term that the remainder does not
+share, so the error grows with how much cancels. On eight tiny Qwen2s under
+CPU bf16 autocast the worst question missed by a median 8.8% (max 86%), and
+256 points instead of 32 did not help (9.3%, 122%) — rounding, not
+quadrature; the same path in float32 misses by a median 0.04%, and by 0.04%
+at worst with 256 points (`tests/test_qwen_backend.py`). The spike has no
+autocast, so there the two settings are one arithmetic.
+
+**Float32 is necessary on the real backbone and not sufficient.** On
+Qwen2.5-1.5B's own weights on a CPU (fresh adapters, so random heads; one
+HateXplain-like post), the float32 path still missed by 130% and 853%, and
+by 63× and 200× with a segment embedding drawn at the token embeddings'
+scale. The path itself is rough there: along the straight line, the
+log-probability moves smoothly for a stretch and then jumps by up to 2.6
+nats between points 0.025 apart. Where it is smooth, autograd agrees with
+finite differences (−0.5065 against −0.5085). Where it is rough, the two
+disagree. With a zero segment embedding the rough stretch is α < 0.05,
+where RMSNorm switches a scaled-down token back on; with a non-zero one it
+is α ≈ 0.55–0.95. In the same stretch bf16 and float32 disagree by up to
+2.6 nats at the same point, which is why bf16 made it worse. Thirty-two
+points cannot integrate that function in either precision. `ig_precision = "autocast"` (or
+`--ig-precision autocast` on `scripts/train_corpus.py`) restores the old
+path, for measuring what it cost.
 
 **Evidence is exactly as independent as the answer.** The span head reads the
 state's final hidden states and the question's own readout; gradient × input
@@ -234,6 +278,7 @@ definitions of a span:
 | Longest word a subword token is widened to | 32 | `trigon.evidence.MAX_WORD_CHARS` |
 | Integrated gradients' points on the path | 32 | `trigon.backends.torch_readout.IG_STEPS` |
 | Power they are spaced by, `alpha = u ** p` | 3 | `trigon.backends.torch_readout.IG_POWER` |
+| Arithmetic the path runs in | float32 | `trigon.backends.torch_readout.IG_PRECISION` |
 | IOU at which a predicted span matches a human one | 0.5 | `trigon.evals.rationale.IOU_MATCH` |
 
 A token is kept at the threshold, trimmed of whitespace (a byte-level token's

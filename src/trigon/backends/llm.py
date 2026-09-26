@@ -35,7 +35,7 @@ from enum import Enum
 from typing import Any, Protocol, runtime_checkable
 
 from ..schema import CompiledRequest, render_state
-from ..types import ChoiceQuestion, NoulQuestion, ScoreQuestion, SystemOneRequest
+from ..types import ChoiceQuestion, DecisionRequest, NoulQuestion, ScoreQuestion
 from .base import BackendOutput, QuestionOutput
 
 __all__ = ["ChatClient", "HttpChatClient", "LLMBaselineBackend", "ProbabilityStrategy"]
@@ -108,7 +108,7 @@ class LLMBaselineBackend:
     def model_version(self) -> str:
         return f"baseline:{self.model}:{self.strategy.value}"
 
-    def infer(self, compiled: CompiledRequest, request: SystemOneRequest) -> BackendOutput:
+    def infer(self, compiled: CompiledRequest, request: DecisionRequest) -> BackendOutput:
         started = time.perf_counter()
         state = render_state(request.state)
         outputs: dict[str, QuestionOutput] = {}

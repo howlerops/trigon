@@ -70,9 +70,9 @@ the checksums. The files themselves are:
   Get it with
   `modal volume get trigon-runs releases/banking77-qwen15b-v1.tar.gz .`
   It is not committed here: `*.pt` is ignored so the repository does not
-  carry weights. The bundle is not a GitHub Release yet. The session that
-  built it could push only its working branch, and a tag or a Release was
-  beyond that.
+  carry weights. It becomes a GitHub Release through `.github/workflows/release.yml`
+  (run it by hand with `release: banking77-qwen15b-v1`), which fetches the bundle
+  from the Volume and refuses it unless it matches `BUNDLE.sha256`.
 - `temperatures.json`, `isotonic.json`, `report.md`, `report.json`:
   `reports/banking77/qwen15b-e4-lr1e-4-seed2-*` and
   `reports/banking77/qwen15b-e4-lr1e-4-seed2.{md,json}`, byte for byte.

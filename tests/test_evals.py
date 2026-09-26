@@ -39,7 +39,7 @@ from trigon.evals.jaggedness import (
     NoulChoiceAgreementBenchmark,
     all_benchmarks,
 )
-from trigon.types import ChoiceQuestion, NoulQuestion, SystemOneRequest
+from trigon.types import ChoiceQuestion, DecisionRequest, NoulQuestion
 
 
 class FixedNoul:
@@ -77,7 +77,7 @@ def _noul_only(cases):
     return [
         Case(
             case_id=c.case_id,
-            request=SystemOneRequest(
+            request=DecisionRequest(
                 state=c.request.state,
                 questions={"at_risk": c.request.questions["at_risk"]},
             ),

@@ -1,18 +1,19 @@
 # Trigon
 
-An open-source **System One**: typed, calibrated decisions in a single
-prefill-only forward pass.
+Open-source, typed, calibrated decisions in a single prefill-only forward
+pass, with a drop-in compatibility layer for an existing typed-decision API:
+point a working integration at it by changing the base URL and key.
 
 Send state plus a map of typed questions. Get one typed answer per question,
 each a full distribution over exactly the labels you declared — in one pass, no
 decode loop, no sampler, no parsing.
 
 ```python
-from trigon import Engine, SystemOneRequest
+from trigon import Engine, DecisionRequest
 from trigon.backends import LexicalBackend
 
 response = Engine(LexicalBackend()).answer(
-    SystemOneRequest(
+    DecisionRequest(
         state="The customer writes: my card payment was declined at the store.",
         questions={
             "intent": {
@@ -337,7 +338,7 @@ regenerating fails CI in the same commit.
 from trigon_client import TrigonClient, choice, noul   # sdk/python, stdlib only
 
 client = TrigonClient("http://localhost:8000")
-response = client.systemone(
+response = client.decide(
     state="my card was declined at the till and I still got charged",
     questions={
         "route": choice("Which queue?", ["billing", "shipping", "account"]),

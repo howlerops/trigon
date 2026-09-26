@@ -25,7 +25,7 @@ def test_spec_documents_the_three_primitives():
     schemas = spec["components"]["schemas"]
     for name in ("ChoiceQuestion", "ScoreQuestion", "NoulQuestion"):
         assert name in schemas, f"{name} missing from the published contract"
-    assert "/v1/systemone" in spec["paths"]
+    assert "/v1/decide" in spec["paths"]
 
 
 def test_noul_answer_has_no_confidence_field_in_the_published_contract():

@@ -20,7 +20,7 @@ from __future__ import annotations
 import random
 from collections.abc import Iterator
 
-from ..types import ChoiceQuestion, NoulQuestion, ScoreQuestion, SystemOneRequest
+from ..types import ChoiceQuestion, DecisionRequest, NoulQuestion, ScoreQuestion
 from .harness import Case, Expectation
 
 __all__ = ["synthetic_outcome_cases"]
@@ -72,7 +72,7 @@ def _generate(rng: random.Random, n: int, noise: float) -> Iterator[Case]:
 
         yield Case(
             case_id=f"synthetic/{i}",
-            request=SystemOneRequest(
+            request=DecisionRequest(
                 state=record,
                 questions={
                     "plan": ChoiceQuestion(

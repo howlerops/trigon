@@ -1121,9 +1121,9 @@ def lexical_response(request: dict) -> dict:
     """
     from trigon.backends.lexical import LexicalBackend
     from trigon.engine import Engine
-    from trigon.types import SystemOneRequest
+    from trigon.types import DecisionRequest
 
-    response = Engine(LexicalBackend()).answer(SystemOneRequest.model_validate(request))
+    response = Engine(LexicalBackend()).answer(DecisionRequest.model_validate(request))
     data = json.loads(response.model_dump_json())
     data["id"] = "so_…"
     if "timing" in data:
@@ -1319,12 +1319,18 @@ def build_api(out: Path) -> str:
     ]
     parts.append('<h2 id="endpoints">Endpoints</h2>')
     subs = [("endpoints", "Endpoints")]
+    from trigon.server.compat import COMPAT_PATH
+
     for route, methods in spec["paths"].items():
+        # The compatibility route's path is the incumbent's, and this project
+        # does not print their name (docs/decisions.md, Q23): the site shows
+        # what the path is, not what it says.
+        shown = route.replace(COMPAT_PATH, "/<the incumbent's path>")
         for method, op in methods.items():
-            anchor = "op-" + re.sub(r"[^a-z0-9]+", "-", f"{method}{route}".lower()).strip("-")
+            anchor = "op-" + re.sub(r"[^a-z0-9]+", "-", f"{method}{shown}".lower()).strip("-")
             parts.append(
                 f'<h3 id="{anchor}" class="endpoint"><span class="method">{method.upper()}</span>'
-                f"<span>{html.escape(route)}</span></h3>"
+                f"<span>{html.escape(shown)}</span></h3>"
             )
             if op.get("summary"):
                 parts.append(f"<p><strong>{html.escape(op['summary'])}</strong></p>")
@@ -2285,7 +2291,7 @@ def build_index(out: Path, metrics: dict[str, Metric]) -> str:
                 "the test that pins it."
             ),
             body=body,
-            section="System One",
+            section="Home",
             current="",
             stylesheets=("home.css",),
         )

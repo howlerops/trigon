@@ -153,13 +153,13 @@ def test_the_served_model_is_the_trained_one(deployment, trained):
     """Step 3: the answers come from those weights, not a fresh init."""
     from trigon.backends.torch_readout import TorchReadoutBackend
     from trigon.engine import Engine
-    from trigon.types import SystemOneRequest
+    from trigon.types import DecisionRequest
 
-    served = deployment.post("/v1/systemone", json=TICKET).json()
+    served = deployment.post("/v1/decide", json=TICKET).json()
     assert served["model"] == trained["version"]
 
     backend = TorchReadoutBackend.load(trained["weights"])
-    direct = Engine(backend).answer(SystemOneRequest.model_validate(TICKET))
+    direct = Engine(backend).answer(DecisionRequest.model_validate(TICKET))
     # Uncalibrated in-process vs calibrated over HTTP, so not equal — but the
     # same weights must rank the options the same way.
     assert served["answers"]["plan"]["selected"] == direct.answers["plan"].selected
@@ -179,7 +179,7 @@ def test_the_sdk_drives_the_whole_thing(deployment, trained):
 
     sdk._call = call
 
-    answer = sdk.systemone(
+    answer = sdk.decide(
         state=TICKET["state"],
         questions={
             "plan": trigon_client.choice(
@@ -224,12 +224,12 @@ def test_the_deployment_refuses_what_the_contract_forbids(deployment):
 
     # A Choice with one option has no answer to give.
     with pytest.raises(trigon_client.TrigonError) as one_option:
-        sdk.systemone(state="x", questions={"q": trigon_client.choice("pick", ["only"])})
+        sdk.decide(state="x", questions={"q": trigon_client.choice("pick", ["only"])})
     assert one_option.value.status == 422
 
     # A state that does not fit is a 413, not a 500 and not a truncation.
     with pytest.raises(trigon_client.TrigonError) as too_big:
-        sdk.systemone(state="word " * 80000, questions={"q": trigon_client.noul("ok?")})
+        sdk.decide(state="word " * 80000, questions={"q": trigon_client.noul("ok?")})
     assert too_big.value.status == 413
 
 
@@ -239,7 +239,7 @@ def test_added_questions_do_not_move_the_others_on_the_served_path(deployment):
     `tests/test_independence.py` proves this in-process on an untrained one.
     Here it has to survive compilation, calibration and serialisation.
     """
-    before = deployment.post("/v1/systemone", json=TICKET).json()
+    before = deployment.post("/v1/decide", json=TICKET).json()
     crowded = {
         "state": TICKET["state"],
         "questions": {
@@ -250,6 +250,6 @@ def test_added_questions_do_not_move_the_others_on_the_served_path(deployment):
             },
         },
     }
-    after = deployment.post("/v1/systemone", json=crowded).json()
+    after = deployment.post("/v1/decide", json=crowded).json()
     for qid in TICKET["questions"]:
         assert_answer_unmoved(before["answers"][qid], after["answers"][qid], qid)

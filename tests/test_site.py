@@ -250,3 +250,16 @@ def test_every_cited_test_exists():
         for test_file, names in claim.tests:
             for name in names:
                 assert build_site.test_line(test_file, name) > 0
+
+
+def test_no_page_names_the_incumbent(site):
+    """Q23: the site shows the compatibility route, never the incumbent's name --
+    not even through its path, which the API page renders as a description."""
+    from tests.test_no_incumbent_names import NAMES
+
+    found = [
+        f"{page.relative_to(site)}: {match.group(0)!r}"
+        for page in _pages(site)
+        for match in NAMES.finditer(page.read_text())
+    ]
+    assert not found, "\n".join(found)

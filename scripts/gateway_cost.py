@@ -25,7 +25,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "src"))
 from trigon.bpe import BPETokenizer  # noqa: E402
 from trigon.limits import DEFAULT_BUDGET, DEFAULT_LATENCY_TARGET  # noqa: E402
 from trigon.schema.compiler import SchemaCompiler  # noqa: E402
-from trigon.types import SystemOneRequest  # noqa: E402
+from trigon.types import DecisionRequest  # noqa: E402
 
 TYPICAL = {
     "state": "the card payment was declined at the till and the customer is upset",
@@ -83,7 +83,7 @@ def _serve(port: int):
     if not server.started:
         raise RuntimeError("the gateway did not come up")
 
-    url = f"http://127.0.0.1:{port}/v1/systemone"
+    url = f"http://127.0.0.1:{port}/v1/decide"
     payload = json.dumps(TYPICAL).encode()
 
     def call() -> None:
@@ -102,7 +102,7 @@ def main() -> int:
     whole = _median_ms(call, 200)
 
     compiler = SchemaCompiler()
-    wide = SystemOneRequest.model_validate(
+    wide = DecisionRequest.model_validate(
         {
             "state": "a short ticket about a declined card",
             "questions": {

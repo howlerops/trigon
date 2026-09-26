@@ -24,7 +24,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "src"))
 
 from trigon.limits import DEFAULT_BUDGET  # noqa: E402
 from trigon.schema.compiler import SchemaCompiler  # noqa: E402
-from trigon.types import ChoiceQuestion, OptionSpec, SystemOneRequest  # noqa: E402
+from trigon.types import ChoiceQuestion, DecisionRequest, OptionSpec  # noqa: E402
 
 DOC = pathlib.Path(__file__).resolve().parent.parent / "docs" / "architecture.md"
 START = "<!-- attention-table:start -->"
@@ -57,7 +57,7 @@ def _state_of(target_tokens: int, compiler: SchemaCompiler) -> str:
 
 def measure(state_tokens: int, n_questions: int, n_options: int) -> dict:
     compiler = SchemaCompiler()
-    request = SystemOneRequest(
+    request = DecisionRequest(
         state=_state_of(state_tokens, compiler),
         questions={
             f"q{i}": ChoiceQuestion(

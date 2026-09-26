@@ -194,7 +194,7 @@ this sample size"** is the strongest claim the data supports, and it is a
 different claim from "ECE is 0.03".
 
 This is the failure the whole section exists to prevent, and it has already
-happened in public: an independent re-analysis observed that published Jev ECE
+happened in public: an independent re-analysis observed that the incumbent's published ECE
 figures of 0.0505–0.0712 at n=60 are equally what serious miscalibration looks
 like at that sample size. Reproducible evals are the differentiator, so our own
 numbers have to survive the same scrutiny.
@@ -474,8 +474,103 @@ construction, so its token F1 is set entirely by how much of a post people
 mark (34% of words), and a highlighter below it is worse than not choosing.
 
 Plausibility is not gated. It says whether a person would agree with the
-highlight, not whether the model used it; faithfulness is open
-(`docs/ledger.md`).
+highlight, not whether the model used it. Section 7 measures whether the
+model used it.
+
+## 7. Faithfulness of evidence
+
+```bash
+python scripts/train_corpus.py hatexplain --weights run.pt -n 0 --seed 0 \
+    --faithfulness-n 500 --out reports/hatexplain/rescored-seed0.md
+```
+
+Plausibility asks whether a person would agree with a highlight. A word list
+is plausible on hate speech whatever the model read, so plausibility cannot
+say whether the model used the words it highlights. `trigon.evals.faithfulness`
+measures that with ERASER's two metrics (DeYoung et al., 2020). Both are
+scored on the label the model selects on the full post:
+
+- **Comprehensiveness** is `p(y | post) − p(y | post without the top words)`.
+  Higher means the highlighted words carried the answer.
+- **Sufficiency** is `p(y | post) − p(y | only the top words)`. Lower means
+  those words alone keep the answer.
+
+`scripts/train_corpus.py` prints the table after the plausibility one for
+every run on a corpus with rationales, `--weights` eval-only runs included.
+It scores the first `--faithfulness-n` rationale cases (default 500), the
+same posts the plausibility table reads.
+
+**The choices, and why:**
+
+- **Binned, not thresholded.** Each method's *scores* rank the words. Each
+  bin takes the top 1, 5, 10, 20 and 50% of the post's words (`ceil`, at
+  least one), and the reported number is the mean over the bins (ERASER's
+  AOPC). A method that highlights a third of a post and one that highlights a
+  tenth are not comparable at their own thresholds. At a fixed share of the
+  post they are.
+- **Words, not tokens.** A word scores the highest of the backend's token
+  scores that touch it, the rule a span's score follows in
+  `trigon.evidence`. Plausibility is scored on words, and the lexicon control
+  has no tokens. Deleting a subword fragment also leaves a string the
+  tokenizer re-segments, so "remove token 7" is not an operation a re-encode
+  can honour. Ties are broken by one seeded draw per case that every method
+  shares, never by position. This matters because the positive part of a
+  gradient is zero for most words.
+- **"Remove" is a deletion and a real re-ask.** The words and the whitespace
+  after each are cut from the rendered state, and the shorter string goes
+  back through `Engine.answer_many` as a new request. Tokenization,
+  positions and the schema prefix cache behave exactly as they do in
+  serving. Masking embeddings in place would keep positions the string no
+  longer has, and would measure a model that never serves.
+- **The raw distribution, not the calibrated one.** The isotonic map is
+  piecewise constant, so a move inside one of its plateaus would read as
+  zero, and a temperature rescales every move by a per-checkpoint factor.
+  The question is what the model used, and the calibrator uses nothing.
+
+**Controls, scored the same way on the same cases:**
+
+| Control | How it ranks words | What beating it shows |
+| --- | --- | --- |
+| `random` | a seeded uniform draw per word | the method found words the answer needed, not just *some* words |
+| `rationale lexicon` | each word's training highlight rate, so the lexicon's words come first | the method found more than a vocabulary |
+
+Every row also reports its difference from `random`, paired per case, with a
+95% interval. The absolute values are bounded by how confident the model was
+to begin with, so they do not compare across checkpoints; the paired
+difference does.
+
+**Cost.** Each case needs one forward on the full post and two per bin per
+method: 51 for three methods and two controls. Every probe is cached on the
+exact text it asks, so methods that pick the same words share it. On top of
+that is one attribution per case per model method; integrated gradients is
+the expensive one.
+
+**On the spike** (HateXplain, trained with rationales, seed 0, 500 cases,
+`reports/hatexplain/spike-faithfulness-seed0.md`). Differences are paired
+per case, ± a 95% interval:
+
+| Highlighter | Comprehensiveness ↑ | − random | − lexicon | Sufficiency ↓ | − random | − lexicon |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `span_head` | 0.147 | +0.114 ± 0.019 | +0.013 ± 0.010 | 0.046 | −0.120 ± 0.024 | +0.013 ± 0.014 |
+| `gradient_x_input` | 0.233 | +0.200 ± 0.015 | +0.099 ± 0.011 | −0.059 | −0.225 ± 0.020 | −0.092 ± 0.016 |
+| `integrated_gradients` | 0.240 | +0.207 ± 0.015 | +0.106 ± 0.011 | −0.074 | −0.240 ± 0.020 | −0.107 ± 0.015 |
+| *rationale lexicon* | 0.134 | +0.101 ± 0.018 | | 0.033 | −0.133 ± 0.025 | |
+| *random* | 0.034 | | | 0.166 | | |
+
+Every method beats `random` on both metrics, so the measurement can tell a
+ranking from a guess. **It also reverses the plausibility table.** The span
+head is the most plausible highlighter here and the least faithful of the
+three: it is barely distinguishable from the word list, and the two gradient
+methods beat both by about 0.1 on both metrics. A negative sufficiency means
+the top words alone make the model *more* sure of its answer than the whole
+post. That the gradient methods are faithful is partly by construction: they
+rank words by the model's own sensitivity, which is what deletion probes.
+This is one seed of a 128-wide model. The backbone checkpoints are the
+measurement.
+
+Cost on that run: 18,995 re-asks for 500 cases and five highlighters, out of
+25,500 before deduplication, in 165 s. The total was 252 s including
+attribution, on four threads of a shared CPU.
 
 ## Baselines
 

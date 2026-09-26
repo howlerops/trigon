@@ -15,7 +15,7 @@ import pathlib
 import pytest
 
 from trigon.schema import SchemaCompiler
-from trigon.types import SystemOneRequest
+from trigon.types import DecisionRequest
 from trigon.usecases import all_use_cases, use_case
 
 PRICE = pathlib.Path(__file__).resolve().parent.parent / "scripts" / "price.py"
@@ -30,7 +30,7 @@ def test_every_use_case_compiles_within_budget():
     compiler = SchemaCompiler()
     for item in all_use_cases():
         compiled = compiler.compile_request(
-            SystemOneRequest(state=item.state, questions=item.questions)
+            DecisionRequest(state=item.state, questions=item.questions)
         )
         assert compiled.total_tokens > 0
         assert compiled.total_tokens <= compiled.budget.context_tokens
@@ -125,7 +125,7 @@ def test_the_typed_advantage_is_modest_on_tokens_alone(name):
     # prompted column by about 40%.
     compiled = SchemaCompiler(
         estimator=CallableEstimator(tokenizer_for_compiler.encode, exact=True)
-    ).compile_request(SystemOneRequest(state=item.state, questions=item.questions))
+    ).compile_request(DecisionRequest(state=item.state, questions=item.questions))
     tokenizer = BPETokenizer.load()
     prefix, per_request, reply = price._prompt_for(item)
 

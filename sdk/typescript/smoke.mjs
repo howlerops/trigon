@@ -11,7 +11,7 @@ console.log("contract", CONTRACT_VERSION, "| healthz", health.status,
             "| calibrated", health.calibrated, "| trained", health.trained);
 console.log("models  ", JSON.stringify((await client.models()).data));
 
-const response = await client.systemone(
+const response = await client.decide(
   "my card was declined at the till and I still got charged",
   {
     route: choice("Which queue?", [
@@ -34,7 +34,7 @@ console.log("urgent  ", response.answers.urgent.probability.toFixed(3),
 console.log("usage   ", JSON.stringify(response.usage));
 
 try {
-  await client.systemone("x", { q: choice("pick", ["only"]) });
+  await client.decide("x", { q: choice("pick", ["only"]) });
   console.log("ERROR: a single-option Choice was accepted");
   process.exit(1);
 } catch (e) {

@@ -23,7 +23,7 @@ from collections import Counter
 from ..schema import CompiledRequest, render_state
 from ..text import STOPWORDS, stem
 from ..text import tokenize as _tokenize
-from ..types import ChoiceQuestion, NoulQuestion, ScoreQuestion, SystemOneRequest
+from ..types import ChoiceQuestion, DecisionRequest, NoulQuestion, ScoreQuestion
 from .base import BackendOutput, QuestionOutput
 
 __all__ = ["LexicalBackend"]
@@ -44,7 +44,7 @@ class LexicalBackend:
     def model_version(self) -> str:
         return "lexical-floor-0.1.0"
 
-    def infer(self, compiled: CompiledRequest, request: SystemOneRequest) -> BackendOutput:
+    def infer(self, compiled: CompiledRequest, request: DecisionRequest) -> BackendOutput:
         started = time.perf_counter()
         state_text = render_state(request.state)
         state_counts = Counter(_tokenize(state_text))

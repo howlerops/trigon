@@ -1,0 +1,66 @@
+name: Release
+
+# Publishes a model bundle from the Modal Volume as a GitHub Release. A bundle
+# is built by a training run and lives on the `trigon-runs` Volume, never in
+# git (`*.pt` is ignored). Its record lives in `releases/<name>/`: the model
+# card, the checksums of what is inside, and BUNDLE.sha256, the checksum of
+# the bundle itself. The job refuses a bundle that does not match that file.
+# What reaches the Release is exactly what the repository says it is.
+#
+# Manual only, and only from the default branch: a release is a decision
+# someone makes, never a side effect of a push, and a fork's pull request
+# must not be able to reach the Modal credentials this needs.
+#
+# Needs two repository secrets, MODAL_TOKEN_ID and MODAL_TOKEN_SECRET (a Modal
+# token with read access to the `trigon-runs` Volume).
+on:
+  workflow_dispatch:
+    inputs:
+      release:
+        description: "A directory under releases/, e.g. banking77-qwen15b-v1"
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ inputs.release }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: ${{ github.ref_name == github.event.repository.default_branch }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Check the release record exists
+        env:
+          RELEASE: ${{ inputs.release }}
+        run: |
+          case "$RELEASE" in *[!A-Za-z0-9._-]*|"") echo "bad release name: $RELEASE"; exit 1;; esac
+          test -f "releases/$RELEASE/README.md"
+          test -f "releases/$RELEASE/BUNDLE.sha256"
+      - name: Fetch the bundle from the Modal Volume
+        env:
+          RELEASE: ${{ inputs.release }}
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+        run: |
+          pip install "modal>=1.0"
+          modal volume get trigon-runs "releases/$RELEASE.tar.gz" .
+      - name: Verify it against the committed checksum
+        env:
+          RELEASE: ${{ inputs.release }}
+        run: sha256sum -c "releases/$RELEASE/BUNDLE.sha256"
+      - name: Create the release
+        env:
+          RELEASE: ${{ inputs.release }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$RELEASE" "$RELEASE.tar.gz" \
+            --target "${{ github.sha }}" \
+            --title "$RELEASE" \
+            --notes-file "releases/$RELEASE/README.md"

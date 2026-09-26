@@ -6,8 +6,8 @@ read the same response fields. Everything here is a pure mapping over JSON --
 no model, no calibration, no policy -- so the one thing that can go wrong is a
 field we translate wrongly, and that is what `tests/test_compat.py` is for.
 
-**The shapes are not ours and were not guessed.** They are the published
-contract (docs.typesafe.ai/api.md and the three primitive pages, read
+**The shapes are not ours and were not guessed.** They are the incumbent's
+published contract (its API reference and the three primitive pages, read
 2026-09-21), and where they differ from our own the difference is recorded in
 `docs/compat.md` rather than papered over. Three differences are worth naming
 here because they are the ones a caller can observe:
@@ -50,12 +50,12 @@ from ..schema.compiler import SchemaTooLarge
 from ..types import (
     ChoiceAnswer,
     ChoiceQuestion,
+    DecisionRequest,
+    DecisionResponse,
     NoulAnswer,
     NoulQuestion,
     ScoreAnswer,
     ScoreQuestion,
-    SystemOneRequest,
-    SystemOneResponse,
 )
 from .app import create_router
 from .config import ServerConfig
@@ -63,6 +63,7 @@ from .limits_middleware import install_guards
 from .routing import TieredRouter
 
 __all__ = [
+    "COMPAT_PATH",
     "build_compat_app",
     "compat_router",
     "to_native",
@@ -145,7 +146,7 @@ def _score(instructions: str, criteria: Any) -> ScoreQuestion:
     return ScoreQuestion(instructions=instructions, levels=levels)
 
 
-def to_native(payload: dict[str, Any]) -> SystemOneRequest:
+def to_native(payload: dict[str, Any]) -> DecisionRequest:
     """Their request body -> ours. Raises CompatError on what they'd reject."""
     if not isinstance(payload, dict):
         raise CompatError("the request body must be an object")
@@ -176,7 +177,7 @@ def to_native(payload: dict[str, Any]) -> SystemOneRequest:
     # `model` is accepted and not honoured: which build answered is reported in
     # the response, where it is a fact rather than a request. A deployment
     # serves the weights it was started with.
-    return SystemOneRequest(state=payload["state"], questions=questions)
+    return DecisionRequest(state=payload["state"], questions=questions)
 
 
 def _legend(question: Any) -> dict[str, str]:
@@ -216,7 +217,7 @@ def _answer_out(answer: Any, question: Any) -> dict[str, Any]:
     raise ValueError(f"no compat mapping for {type(answer).__name__}")
 
 
-def from_native(response: SystemOneResponse, request: SystemOneRequest) -> dict[str, Any]:
+def from_native(response: DecisionResponse, request: DecisionRequest) -> dict[str, Any]:
     """Our response -> theirs.
 
     Takes the request as well, because their Score answer carries a `legend`
@@ -318,12 +319,23 @@ COMPAT_RESPONSE_SCHEMA: dict[str, Any] = {
 }
 
 
+# The incumbent's endpoint path, exactly as their published contract states it.
+# An interoperability detail, not a name this project uses: a migration changes
+# a base URL and nothing else only if the path is theirs. It is written here
+# once, and `tests/test_no_incumbent_names.py` allows it here and nowhere else
+# outside the generated spec and the tests that exercise it.
+COMPAT_PATH = "/v1/systemone"
+
+
 def compat_router(router: TieredRouter) -> APIRouter:
     """Their endpoint, served by our stack."""
     api = APIRouter()
 
     @api.post(
-        "/v1/systemone",
+        COMPAT_PATH,
+        # Named, so the spec's operation id and schema titles come from this
+        # rather than from the path, which is theirs.
+        operation_id="compat_decide",
         tags=["compat"],
         summary="The incumbent's request and response shapes, answered by this model",
         openapi_extra={
@@ -340,7 +352,7 @@ def compat_router(router: TieredRouter) -> APIRouter:
             },
         },
     )
-    async def systemone(request: Request) -> Any:
+    async def compat_decide(request: Request) -> Any:
         try:
             payload = await request.json()
         except (ValueError, UnicodeDecodeError) as exc:
@@ -379,7 +391,7 @@ def build_compat_app(
     config = config or ServerConfig.from_env()
     router = router or create_router(config)
     app = FastAPI(
-        title="Trigon System One API (compatibility)",
+        title="Trigon API (compatibility)",
         version=__version__,
         description=(
             "The incumbent's wire shapes, answered by this model. Differences "
@@ -412,7 +424,7 @@ def build_compat_app(
 # was written to be compared against. These two functions are what fixed that.
 
 
-def to_compat_request(request: SystemOneRequest, model: str = "jev-latest") -> dict[str, Any]:
+def to_compat_request(request: DecisionRequest, model: str) -> dict[str, Any]:
     """Our request -> theirs, for calling their service.
 
     Lossy in one place and the loss is repaired downstream: our Score levels

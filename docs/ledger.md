@@ -14,7 +14,7 @@ narrative sections are a discipline, not a test.
 
 | | |
 | --- | ---: |
-| Commits | 190 |
+| Commits | 218 |
 | Tests | 537 |
 | Python files (`src`, `tests`, `scripts`) | 113 |
 | Lines in `src/` | 12,633 |
@@ -56,7 +56,13 @@ twenty-two runs** — the investigation is closed and the evidence is in
   budgets. Per-question independence and schema-prefix cacheability asserted to
   floating-point equality in `tests/test_independence.py` where the shapes
   match, and to a float32 bound where the comparison spans sequence lengths.
-- `/v1/systemone` gateway, `spec/openapi.json` generated from it, drift-tested.
+- `/v1/decide` gateway, `spec/openapi.json` generated from it, drift-tested.
+- **Named after what it does** (2026-09-26, Q23). The native API is
+  `/v1/decide` with `DecisionRequest` / `DecisionResponse` and
+  `client.decide()`; nothing in the project names the incumbent it is a drop-in
+  for. The compat route keeps their path, written once as
+  `trigon.server.compat.COMPAT_PATH`, and `tests/test_no_incumbent_names.py`
+  and the site test fail the build on their name anywhere else.
 - Generated Python and TypeScript SDKs, both dependency-free, both exercised
   against a live gateway in CI.
 - CLI: `ask`, `serve`, `spec`, `eval`, `fit`, `train`.
@@ -65,7 +71,10 @@ twenty-two runs** — the investigation is closed and the evidence is in
   unless an operator configures them.
 - **Batching across requests** — `Engine.answer_many` coalesces forward
   passes, asserted to answer identically to the one-at-a-time path. Off by
-  default: it is 30% slower on CPU.
+  default: it is 30% slower on CPU. **Reads the schema KV cache** (2026-09-26):
+  a batch is grouped by schema and each group computes only its state and
+  readout tokens against one broadcast prefix, spike and Qwen2 alike, with
+  `cached_schema_tokens` per request (`tests/test_batch_prefix_cache.py`).
 - **Compatibility adapter** — the incumbent's published request and response
   shapes, served at their path (`trigon serve --compat`) and mounted under
   `/compat` on the native gateway. Both front doors are asserted to return the
@@ -126,6 +135,18 @@ twenty-two runs** — the investigation is closed and the evidence is in
   floors — the lexical floor, a word list fitted to the training split's
   highlights, and every word. `train_corpus.py` appends it for any corpus
   with rationales and trains the evidence head on them.
+- **Faithfulness of evidence** (`trigon.evals.faithfulness`, 2026-09-26).
+  ERASER's comprehensiveness and sufficiency, as AOPC over the top 1–50% of
+  words by each method's own scores. Every probe deletes words from the
+  state and re-asks the engine. Two controls are scored the same way, a
+  random ranking and the rationale lexicon, and every row is paired against
+  both with a 95% interval. `train_corpus.py` prints it beside plausibility,
+  `--weights` runs included (`--faithfulness-n`, default 500). Proved on CPU
+  with the spike (`reports/hatexplain/spike-faithfulness-seed0.md`). Every
+  method beats random there. The span head is within 0.013 of the lexicon,
+  and both gradient methods beat the lexicon by about 0.1 on both metrics,
+  the reverse of their plausibility order. The backbone checkpoints are not
+  yet scored.
 - **Training on a GPU, from this sandbox.** `scripts/modal_train.py` runs one
   Modal container per seed and writes each seed's reports to a Volume before
   returning, so a `--detach`ed run outlives the VM that launched it and
@@ -201,6 +222,7 @@ twenty-two runs** — the investigation is closed and the evidence is in
 | Compat path vs native path | Identical answers through one process, asserted per primitive |
 | Schema KV cache, 77 options | 91.8 ms → 15.3 ms p50, a **6× speedup**; 23× at 256 options |
 | Batching 16 requests into one pass, on CPU | 4.14 ms/request against 3.43 ms serial — a 20% loss |
+| Batched serving through the schema cache, spike shape, loaded CPU | 12.3 → 47.8 req/s at batch 8, 13.0 → 53.6 at 32; computed tokens 100% → 2.7% of billed above batch 1. Not yet timed on a GPU (`reports/cache/README.md`) |
 | Vectorized attention mask | 208 ms → 8.2 ms per request; the whole pass 399 ms → 82.8 ms |
 | Padding waste in a training chunk, HelpSteer2 | 2.82× at chunk 8 in random order; 1.04× length-sorted |
 | Length bucketing, end to end | **1.63×** — 2.7× on the attention term, diluted by everything linear |
@@ -229,6 +251,7 @@ twenty-two runs** — the investigation is closed and the evidence is in
 | **GoEmotions on Qwen2.5-1.5B, four seeds** | **Certified, four of four**: Brier skill +0.2857 to +0.3010 against the +0.02 limit; ECE 0.0034–0.0076 at a floor p95 of 0.0029–0.0033. `joy` carries it (+0.21 lift); `fear` and `disgust` sit barely off their marginals on every seed (`reports/goemotions/README.md`) |
 | **HelpSteer2 annotator distributions under `brier_over_marginal`** | **Certified, four seeds of four**: skill +0.0543 to +0.0658, median +0.0559, against +0.02. The hard-label ablation clears it too (median +0.0475), but only after its calibrator ran |
 | The synthetic suite on Qwen, with the per-primitive gate blocking | **Three seeds of four.** Seed 0's Score head is at ECE 0.0551, which its pooled 0.0408 hid. The median worst primitive is 0.0303, so the configuration still certifies. Banking77 passes on all four seeds (worst 0.0448) |
+| **Serving cost on Modal's L4, the certified model, re-timed with batches reading the schema cache** | Batch 1: 72.3 ms p50, $0.0410/MTok. The same unchanged path read 102.9 ms in the first run, so the host varies by 1.4×. Batch 8: 46.4 req/s against 16.3 before; batch 32: 60.8 against 14.5, $0.0091/MTok but p50 514 ms. Interactive savings against a $0.25/MTok LLM are 4.2–6.4×; offline, 27–29× (`reports/burn-in/README.md`) |
 | Banking77 accuracy (pilot, 2 seeds) | 0.4640 / 0.4193 against a 1.8% marginal — **it transfers** |
 | **Evidence on HateXplain, the spike, two seeds** | The trained span head: token F1 0.488–0.495, IOU F1 0.330–0.331. **A word list beats it**: 0.573 / 0.452 — every word highlighted in half its training occurrences, very nearly a slur list. Gradient × input 0.30–0.32 token F1, below highlighting every word (0.434) |
 | HateXplain accuracy, the spike, with and without rationale supervision | 0.5798 on both supervised seeds, 0.5664 / 0.5702 without, against a 0.408 marginal; every blocking gate passes on all four. Two seeds a side: not an effect |
@@ -289,6 +312,7 @@ The most useful section. Each of these was argued for before it was measured.
 | Evidence can be held to the answers' float32 bound across shapes | Gradient × input moved 1.7e-06 when one question was added, past the 1e-06 bound: a backward pass amplifies the forward's rounding ~14×. In float64 it reads 0.0, so the tests compare there. |
 | Asking for evidence leaves the answer bit-identical | Not under gradient × input: autograd takes `nn.TransformerEncoder` off its no-grad fast path, and the answer moves 2e-08. The span head, which needs no gradients, now stays on that path and is exact. |
 | Gradient × input would be a usable unsupervised attribution, and the spike's was below *every word* only because the spike is small | On Qwen2.5-1.5B, four seeds, it is still below highlighting every word: token F1 0.287–0.308 against 0.434–0.437, IOU F1 0.211–0.234 — no better than the spike's 0.30–0.32. The span head on the same weights scores 0.715–0.720. The falsifier in `docs/decisions.md` fired; integrated gradients is built and is not the default until it is measured to clear the same bar |
+| Integrated gradients' completeness failure on the backbone (median 78–895%) is bf16 rounding, and a float32 path fixes it | Half right. On tiny Qwen2s bf16 is the whole failure: median 8.8% in bf16 against 0.04% in float32, and more points do not help. On Qwen2.5-1.5B's own weights on CPU, float32 still misses by 130% and 853% (63× and 200× with a non-zero segment embedding). The path jumps by up to 2.6 nats between points 0.025 apart. Where it is smooth, autograd matches finite differences (−0.5065 against −0.5085); where it is rough, they disagree. The float32 path stays as the default, since it removes the rounding. It does not make the method complete here |
 | Integrated gradients needs only enough evenly spaced steps | On a pre-norm forward the path's change is packed against the zero baseline: 32 evenly spaced points on a tiny Qwen2 summed 12–91% away from the difference they must add up to, and 64 were no better. Spaced as `u³`, 32 are within 0.04% |
 
 ---
@@ -475,19 +499,37 @@ what order, and how each step is known to be done.
   attributions miss the log-probability difference by a median of 78–895%
   across the eight checkpoints, against under 1% in float32 on CPU. The
   backbone runs under bf16 autocast, so the measurement above is of this
-  implementation on this hardware, not of the method. A float32 path through
-  the frozen backbone would settle it.
-- **Faithfulness of evidence is unmeasured.** Plausibility says a person would
-  agree with a highlight, not that the model used it. Comprehensiveness and
-  sufficiency — delete the spans, measure the answer move — are not built.
-- **$/MTok has a preliminary measurement: $0.0574, not $0.007.** Modal's L4,
-  the certified model, batch 1, $0.80/h as an input
-  (`reports/burn-in/modal-l4/`). It closes on a rented, dedicated L4.
-- **The batched serving path does not use the schema cache.** At batch 8 and
-  32 the burn-in's computed tokens equal its billed ones. Every batched row
-  is slower per request than batch 1 and fails the latency target. So
-  `Engine.answer_many` pays full price for the 97% of the sequence that
-  batch 1 reads from the cache.
+  implementation on this hardware, not of the method. **The float32 path is
+  built (2026-09-26) and is IG's default** (`IG_PRECISION`), and bf16 is
+  measured to be a cause on CPU: eight tiny Qwen2s under bf16 autocast miss
+  by a median 8.8% on their worst question (max 86%) and 256 points do not
+  help, where float32 misses by 0.04%. **On the real weights it is not the
+  only cause**: the path is rough, and float32 still misses by 130–853%
+  (*Believed, then disproved*). Still open: the eight checkpoints rescored
+  on the GPU in float32, at 32 points and at 256.
+- **Faithfulness of evidence is unmeasured on the backbone.** Plausibility
+  says a person would agree with a highlight, not that the model used it.
+  Comprehensiveness and sufficiency are built and proved on the CPU spike
+  (*Built*, *Evaluation*). The eight saved HateXplain checkpoints are next,
+  eval-only, and they decide *Plausibility is the wrong target* in
+  `docs/decisions.md`.
+- **$/MTok has a preliminary measurement, and it is not $0.007.** Modal's L4,
+  the certified model, $0.80/h as an input: $0.041–0.057 interactive (batch 1,
+  two runs 1.4× apart on unchanged code), and $0.0091 at batch 32 offline
+  (`reports/burn-in/README.md`). It closes on a rented, dedicated L4.
+- ~~The batched serving path does not use the schema cache.~~ **Closed,
+  2026-09-26, and re-timed on the L4**: the certified model serves 46.4 req/s
+  at batch 8 and 60.8 at batch 32, against 16.3 and 14.5 before
+  (`reports/burn-in/README.md`). The record: at batch 8
+  and 32 the L4 burn-in's computed tokens equalled its billed ones, every
+  batched row was slower per request than batch 1 and failed the latency
+  target, and `Engine.answer_many` paid full price for the 97% of the
+  sequence that batch 1 reads from the cache. `infer_many` now groups a
+  batch by schema and reads one cached prefix per group; on a loaded CPU the
+  spike's batched throughput rose 3.9–4.1× and computed tokens fell to 2.7%
+  of billed at every batch size (`reports/cache/README.md`). On the L4,
+  batching now beats batch 1 on throughput. Only batch 1 meets the 150 ms p50
+  target.
 - ~~The KV cache is off by default because nobody has timed it.~~ **Closed.**
   Timed on an idle machine: 6× at the served shape, 23× at 256 options
   (`reports/cache/README.md`). It is on by default now and `/healthz` reports

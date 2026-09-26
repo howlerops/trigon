@@ -1,4 +1,4 @@
-"""Trigon: an open-source System One -- typed, calibrated decisions in one pass.
+"""Trigon: open-source typed, calibrated decisions in one pass.
 
 The public surface is small on purpose. ``Engine`` is the whole pipeline;
 everything else is a part of it you can replace.
@@ -15,12 +15,12 @@ from .schema import SchemaCompiler, compile_request
 from .types import (
     ChoiceAnswer,
     ChoiceQuestion,
+    DecisionRequest,
+    DecisionResponse,
     NoulAnswer,
     NoulQuestion,
     ScoreAnswer,
     ScoreQuestion,
-    SystemOneRequest,
-    SystemOneResponse,
 )
 
 __all__ = [
@@ -35,8 +35,8 @@ __all__ = [
     "SchemaCompiler",
     "ScoreAnswer",
     "ScoreQuestion",
-    "SystemOneRequest",
-    "SystemOneResponse",
+    "DecisionRequest",
+    "DecisionResponse",
     "__version__",
     "choice_confidence",
     "compile_request",

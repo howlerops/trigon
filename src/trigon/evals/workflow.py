@@ -22,7 +22,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 
 from ..engine import Engine
-from ..types import Question, SystemOneRequest, SystemOneResponse
+from ..types import DecisionRequest, DecisionResponse, Question
 
 __all__ = ["Workflow", "WorkflowCase", "WorkflowResult", "WorkflowStep", "run_workflow"]
 
@@ -108,8 +108,8 @@ def run_workflow(
             questions = step.build(case.state, answers)
             if not questions:
                 continue
-            response: SystemOneResponse = engine.answer(
-                SystemOneRequest(state=case.state, questions=questions)  # type: ignore[arg-type]
+            response: DecisionResponse = engine.answer(
+                DecisionRequest(state=case.state, questions=questions)  # type: ignore[arg-type]
             )
             case_calls += 1
             case_tokens += response.usage.prefill_tokens

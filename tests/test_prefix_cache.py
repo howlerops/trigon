@@ -22,7 +22,7 @@ from trigon.backends.torch_readout import (  # noqa: E402
     TorchReadoutBackend,
 )
 from trigon.engine import Engine  # noqa: E402
-from trigon.types import SystemOneRequest  # noqa: E402
+from trigon.types import DecisionRequest  # noqa: E402
 
 SHAPE = dict(d_model=64, n_layers=2, n_heads=2, d_ff=64)
 REQUEST = {
@@ -40,7 +40,7 @@ REQUEST = {
 
 def _answer(backend, body=REQUEST):
     return Engine(backend, compiler=backend.make_compiler()).answer(
-        SystemOneRequest.model_validate(body)
+        DecisionRequest.model_validate(body)
     )
 
 
@@ -125,7 +125,7 @@ def test_training_never_uses_a_cached_prefix():
     """
     backend = TorchReadoutBackend(ReadoutConfig(**SHAPE), seed=0, cache_prefixes=True)
     compiler = backend.make_compiler()
-    request = SystemOneRequest.model_validate(REQUEST)
+    request = DecisionRequest.model_validate(REQUEST)
     compiled = compiler.compile_request(request)
 
     backend.model.train()
@@ -146,7 +146,7 @@ def test_the_batched_training_pass_does_not_touch_the_cache():
     """
     backend = TorchReadoutBackend(ReadoutConfig(**SHAPE), seed=0, cache_prefixes=True)
     compiler = backend.make_compiler()
-    request = SystemOneRequest.model_validate(REQUEST)
+    request = DecisionRequest.model_validate(REQUEST)
     items = [(compiler.compile_request(request), request)] * 3
 
     backend.model.train()
@@ -173,7 +173,7 @@ def test_the_prefix_really_holds_the_schema_and_nothing_else():
 
     backend = TorchReadoutBackend(ReadoutConfig(**SHAPE), seed=0, cache_prefixes=True)
     compiler = backend.make_compiler()
-    compiled = compiler.compile_request(SystemOneRequest.model_validate(REQUEST))
+    compiled = compiler.compile_request(DecisionRequest.model_validate(REQUEST))
     _answer(backend)
 
     expected = sum(
@@ -250,8 +250,8 @@ def test_neither_path_lets_a_question_reach_another_and_neither_is_exact():
 
     def spread(cache_prefixes: bool) -> float:
         client = TestClient(build_app(ServerConfig(backend="torch", cache_prefixes=cache_prefixes)))
-        alone = client.post("/v1/systemone", json=REQUEST).json()["answers"]["plan"]
-        among = client.post("/v1/systemone", json=crowded).json()["answers"]["plan"]
+        alone = client.post("/v1/decide", json=REQUEST).json()["answers"]["plan"]
+        among = client.post("/v1/decide", json=crowded).json()["answers"]["plan"]
         return max(
             abs(alone["probabilities"][k] - among["probabilities"][k])
             for k in alone["probabilities"]
@@ -308,13 +308,13 @@ def test_the_backends_mask_cache_is_bounded_by_cells_too():
     920 MB of tensors under a limit that reads as if it prevents them.
     """
     from trigon.schema.compiler import MASK_CACHE_CELLS
-    from trigon.types import NoulQuestion, SystemOneRequest
+    from trigon.types import DecisionRequest, NoulQuestion
 
     backend = TorchReadoutBackend(seed=0)
     engine = Engine(backend, compiler=backend.make_compiler())
     for words in range(10, 400, 7):
         engine.answer(
-            SystemOneRequest(
+            DecisionRequest(
                 state="word " * words, questions={"q": NoulQuestion(instructions="present?")}
             )
         )
@@ -333,13 +333,11 @@ def test_the_quantized_twin_never_inherits_the_float_models_prefixes():
     report the numerics as cheaper than they are -- flattering the project, in
     the one gate that exists to catch a numerics change.
     """
-    from trigon.types import NoulQuestion, SystemOneRequest
+    from trigon.types import DecisionRequest, NoulQuestion
 
     backend = TorchReadoutBackend(seed=0, cache_prefixes=True)
     engine = Engine(backend, compiler=backend.make_compiler())
-    engine.answer(
-        SystemOneRequest(state="warm it", questions={"q": NoulQuestion(instructions="?")})
-    )
+    engine.answer(DecisionRequest(state="warm it", questions={"q": NoulQuestion(instructions="?")}))
     assert backend._prefix_cache, "the float model should have cached something"
 
     twin = backend.quantized()

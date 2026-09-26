@@ -39,13 +39,13 @@ from .types import (
     Answer,
     ChoiceAnswer,
     ChoiceQuestion,
+    DecisionRequest,
+    DecisionResponse,
     EvidenceSpan,
     NoulAnswer,
     NoulQuestion,
     ScoreAnswer,
     ScoreQuestion,
-    SystemOneRequest,
-    SystemOneResponse,
     Timing,
     Usage,
 )
@@ -110,7 +110,7 @@ class Engine:
 
     # -- public ----------------------------------------------------------
 
-    def answer(self, request: SystemOneRequest) -> SystemOneResponse:
+    def answer(self, request: DecisionRequest) -> DecisionResponse:
         started = time.perf_counter()
         served, shortlists = self._apply_retrieval(request)
 
@@ -127,7 +127,7 @@ class Engine:
                 qid, question, output.outputs[qid], shortlists.get(qid), request
             )
 
-        return SystemOneResponse(
+        return DecisionResponse(
             id=f"so_{uuid.uuid4().hex[:24]}",
             model=output.model_version,
             answers=answers,
@@ -147,8 +147,8 @@ class Engine:
         )
 
     def answer_many(
-        self, requests: Sequence[SystemOneRequest], batch_size: int = 16
-    ) -> list[SystemOneResponse]:
+        self, requests: Sequence[DecisionRequest], batch_size: int = 16
+    ) -> list[DecisionResponse]:
         """Answer several requests, coalescing the forward passes.
 
         `docs/next.md` B.2. A prefill-only model makes this the easy case:
@@ -162,6 +162,11 @@ class Engine:
         produces well-formed answers to questions nobody asked, which is the
         failure this whole project is built against.
 
+        With the schema KV cache on, a batch reads it as a single request
+        does: the torch backends group the batch by schema and compute only
+        the state and readout tokens, against one cached prefix per schema.
+        Each response's `usage.cached_schema_tokens` is its own.
+
         Backends without a batched path fall through to `answer`, so this is
         always safe to call; it is faster only where the backend implements
         one. Requests are batched in arrival order rather than sorted by
@@ -173,7 +178,7 @@ class Engine:
         if infer_many is None or len(requests) < 2:
             return [self.answer(request) for request in requests]
 
-        responses: list[SystemOneResponse] = []
+        responses: list[DecisionResponse] = []
         for start in range(0, len(requests), max(1, batch_size)):
             window = requests[start : start + max(1, batch_size)]
             prepared = []
@@ -206,7 +211,7 @@ class Engine:
                     for qid, question in request.questions.items()
                 }
                 responses.append(
-                    SystemOneResponse(
+                    DecisionResponse(
                         id=f"so_{uuid.uuid4().hex[:24]}",
                         model=output.model_version,
                         answers=answers,
@@ -235,8 +240,8 @@ class Engine:
     # -- stages ----------------------------------------------------------
 
     def _apply_retrieval(
-        self, request: SystemOneRequest
-    ) -> tuple[SystemOneRequest, dict[str, list[int]]]:
+        self, request: DecisionRequest
+    ) -> tuple[DecisionRequest, dict[str, list[int]]]:
         """Narrow oversized Choice questions before the schema is compiled."""
         shortlists: dict[str, list[int]] = {}
         narrowed: dict[str, object] = {}
@@ -270,14 +275,14 @@ class Engine:
         question: ChoiceQuestion | ScoreQuestion | NoulQuestion,
         output: QuestionOutput,
         shortlist: list[int] | None,
-        request: SystemOneRequest,
+        request: DecisionRequest,
     ) -> Answer:
         answer = self._distribution(qid, question, output, shortlist, request)
         if not request.options.include_evidence:
             return answer
         return answer.model_copy(update=self._evidence(output, request))
 
-    def _evidence(self, output: QuestionOutput, request: SystemOneRequest) -> dict:
+    def _evidence(self, output: QuestionOutput, request: DecisionRequest) -> dict:
         """The answer's evidence fields, merged from the backend's token scores.
 
         A backend that cannot attribute says nothing, and the answer says so:
@@ -302,7 +307,7 @@ class Engine:
         question: ChoiceQuestion | ScoreQuestion | NoulQuestion,
         output: QuestionOutput,
         shortlist: list[int] | None,
-        request: SystemOneRequest,
+        request: DecisionRequest,
     ) -> Answer:
         opts = request.options
         domain = self.config.domain

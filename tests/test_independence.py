@@ -39,9 +39,9 @@ from trigon.engine import Engine  # noqa: E402
 from trigon.schema import SegmentKind, materialize_mask  # noqa: E402
 from trigon.types import (  # noqa: E402
     ChoiceQuestion,
+    DecisionRequest,
     NoulQuestion,
     ScoreQuestion,
-    SystemOneRequest,
 )
 
 STATE = "The customer writes: my card payment was declined at the store."
@@ -68,7 +68,7 @@ def engine() -> Engine:
 
 
 def _answers(engine: Engine, questions: dict) -> dict:
-    response = engine.answer(SystemOneRequest(state=STATE, questions=questions))
+    response = engine.answer(DecisionRequest(state=STATE, questions=questions))
     return {k: v.model_dump() for k, v in response.answers.items()}
 
 
@@ -124,7 +124,7 @@ def test_schema_states_do_not_depend_on_state(engine):
     compiler = engine.compiler
 
     def schema_hidden(state: str) -> torch.Tensor:
-        compiled = compiler.compile_request(SystemOneRequest(state=state, questions=BASE))
+        compiled = compiler.compile_request(DecisionRequest(state=state, questions=BASE))
         embeddings, spans = backend._embed(compiled)
         mask = torch.tensor(materialize_mask(compiled), dtype=torch.bool)
         with torch.no_grad():
@@ -200,7 +200,7 @@ def test_dot_product_repairs_keep_option_keys_independent_of_state(flags):
     with torch.no_grad():
         for state in states:
             compiled = compiler.compile_request(
-                SystemOneRequest(state=state, questions={"intent": BASE["intent"]})
+                DecisionRequest(state=state, questions={"intent": BASE["intent"]})
             )
             embeddings, spans = backend._embed(compiled)
             mask = torch.tensor(materialize_mask(compiled), dtype=torch.bool)
@@ -263,7 +263,7 @@ def test_the_vectorized_mask_matches_the_specification_exactly():
     for state in states:
         for question_set in questions:
             compiled = compiler.compile_request(
-                SystemOneRequest(state=state, questions=question_set)
+                DecisionRequest(state=state, questions=question_set)
             )
             expected = torch.tensor(materialize_mask(compiled), dtype=torch.bool)
             assert torch.equal(backend._mask_tensor(compiled), expected), (
@@ -296,7 +296,7 @@ EVIDENCE_ROUNDING_F64 = 1e-12
 
 
 def _token_evidence(backend, compiler, questions: dict, state: str = STATE) -> dict:
-    request = SystemOneRequest(state=state, questions=questions, options={"include_evidence": True})
+    request = DecisionRequest(state=state, questions=questions, options={"include_evidence": True})
     output = backend.infer(compiler.compile_request(request), request)
     return {qid: out.evidence for qid, out in output.outputs.items()}
 
@@ -416,9 +416,9 @@ def test_asking_for_evidence_does_not_move_the_answer(engine):
     `nn.TransformerEncoder` off its no-grad fast path: same shape, different
     kernel, so the answers agree to the float32 bound rather than exactly --
     measured at 2e-08. What must not change is anything a caller acts on."""
-    plain = engine.answer(SystemOneRequest(state=STATE, questions=BASE))
+    plain = engine.answer(DecisionRequest(state=STATE, questions=BASE))
     explained = engine.answer(
-        SystemOneRequest(state=STATE, questions=BASE, options={"include_evidence": True})
+        DecisionRequest(state=STATE, questions=BASE, options={"include_evidence": True})
     )
     for qid, answer in plain.answers.items():
         with_evidence = explained.answers[qid].model_dump()
@@ -434,9 +434,9 @@ def test_answers_with_evidence_do_not_move_when_a_question_is_added():
     backend = _backend("gradient_x_input", double=True)
     engine = Engine(backend, compiler=backend.make_compiler())
     options = {"include_evidence": True}
-    before = engine.answer(SystemOneRequest(state=STATE, questions=BASE, options=options))
+    before = engine.answer(DecisionRequest(state=STATE, questions=BASE, options=options))
     after = engine.answer(
-        SystemOneRequest(
+        DecisionRequest(
             state=STATE,
             questions={**BASE, "extra": NoulQuestion(instructions="Is the weather nice?")},
             options=options,
@@ -472,7 +472,7 @@ def test_the_evidence_tests_can_see_a_leak(method):
 def _completeness_errors(backend, steps: int) -> dict[str, float]:
     """Per question: |sum of attributions - (F(input) - F(baseline))| / |that difference|."""
     compiler = backend.make_compiler()
-    request = SystemOneRequest(state=STATE, questions=BASE)
+    request = DecisionRequest(state=STATE, questions=BASE)
     compiled = compiler.compile_request(request)
     backend.ig_steps = steps
     attributions = backend.integrated_gradients(compiled, request)
@@ -508,7 +508,7 @@ def test_integrated_gradients_does_not_depend_on_how_its_steps_are_batched():
     because the steps of a chunk share nothing but the schema prefix."""
     backend = _backend("integrated_gradients", double=True, cache=True)
     compiler = backend.make_compiler()
-    request = SystemOneRequest(state=STATE, questions=BASE)
+    request = DecisionRequest(state=STATE, questions=BASE)
     compiled = compiler.compile_request(request)
     backend.ig_chunk = 1
     one = backend.integrated_gradients(compiled, request)
@@ -524,9 +524,9 @@ def test_integrated_gradients_leaves_the_answer_exactly_as_it_was():
     without evidence, where gradient x input's agrees only to rounding."""
     backend = _backend("integrated_gradients")
     engine = Engine(backend, compiler=backend.make_compiler())
-    plain = engine.answer(SystemOneRequest(state=STATE, questions=BASE))
+    plain = engine.answer(DecisionRequest(state=STATE, questions=BASE))
     explained = engine.answer(
-        SystemOneRequest(state=STATE, questions=BASE, options={"include_evidence": True})
+        DecisionRequest(state=STATE, questions=BASE, options={"include_evidence": True})
     )
     for qid, answer in plain.answers.items():
         with_evidence = explained.answers[qid].model_dump()
