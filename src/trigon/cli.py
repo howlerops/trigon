@@ -1026,8 +1026,10 @@ def build_parser() -> argparse.ArgumentParser:
     ask.add_argument("--weights", default=None, help="a checkpoint written by 'trigon train'")
     unsupervised_evidence_help = (
         "the attribution a checkpoint never trained on rationales serves as evidence: "
-        "gradient_x_input (the default) or integrated_gradients. A checkpoint trained "
-        "on rationales serves its span head either way"
+        "none (the default: no spans, `unavailable`), gradient_x_input or "
+        "integrated_gradients. Neither gradient method beats highlighting every word "
+        "on the backbone (docs/decisions.md). A checkpoint trained on rationales "
+        "serves its span head either way"
     )
     ask.add_argument("--unsupervised-evidence", default=None, help=unsupervised_evidence_help)
     ask.add_argument(

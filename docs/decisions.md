@@ -1340,7 +1340,29 @@ plausibility report prints the measured completeness error beside the row.
   does not beat *every word* on token F1 either. Then no gradient attribution
   is worth serving on this architecture, and an unsupervised checkpoint should
   answer `include_evidence` with less, not with a method known to lose to
-  highlighting everything.
+  highlighting everything. **Fired, 2026-09-26.** On the eight saved HateXplain
+  checkpoints, scored without retraining:
+  - Rationale arm: integrated gradients reads 0.352–0.384 token F1.
+  - No-rationale arm: it reads 0.193–0.385.
+  - Every word reads 0.434–0.437.
+  - It does beat gradient × input on seven of eight runs, and its IOU F1 clears
+    every word's on the rationale arm (0.292–0.321 against 0.217–0.219).
+
+  Token F1 is the bar, and it misses on every run.
+
+  **The default is now `none`.** An unsupervised checkpoint answers
+  `include_evidence` with no spans and `evidence_method: "unavailable"`. Both
+  gradient methods stay one setting away (`TRIGON_UNSUPERVISED_EVIDENCE`) for
+  an operator who has measured them on their own data.
+
+  **One caveat keeps this from being a verdict on integrated gradients
+  itself.** On the backbone its completeness fails: the summed attributions
+  miss the log-probability difference by a median of 137–179% on the
+  rationale arm and 78–895% on the other. On the float32 spike and a float32
+  toy Qwen2 the median is under 1%. The backbone runs under bf16 autocast on
+  the GPU, and a path integral of bf16 gradients is not the integral it is
+  written as. A float32 path on the backbone would decide it; until then,
+  what failed is this implementation on this hardware.
 - *Plausibility is the wrong target*, if a faithfulness measurement —
   comprehensiveness and sufficiency, deleting the highlighted spans and
   measuring the answer move — shows the head's spans are not what the answer

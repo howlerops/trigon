@@ -70,7 +70,10 @@ def _methods(backend) -> set[str]:
     return {a.evidence_method for a in answers.values()}
 
 
-def test_a_model_never_shown_a_rationale_serves_gradient_x_input():
+def test_a_model_never_shown_a_rationale_serves_no_spans_unless_asked():
+    """No gradient attribution beats highlighting every word on the backbone,
+    so an unsupervised checkpoint says `unavailable` by default, and serves
+    gradient x input only when an operator asks for it."""
     backend = _backend()
     report = train(
         backend,
@@ -79,6 +82,8 @@ def test_a_model_never_shown_a_rationale_serves_gradient_x_input():
     )
     assert report.n_rationales == 0
     assert not backend.config.evidence_supervised
+    assert _methods(backend) == {"unavailable"}
+    backend.unsupervised_evidence = "gradient_x_input"
     assert _methods(backend) == {"gradient_x_input"}
 
 
@@ -88,12 +93,13 @@ def test_an_unsupervised_checkpoint_can_be_told_to_serve_integrated_gradients(tm
     checkpoint trained on rationales still serves its head regardless."""
     from trigon.backends.torch_readout import UNSUPERVISED_EVIDENCE
 
-    assert UNSUPERVISED_EVIDENCE == "gradient_x_input"  # until the backbone says otherwise
+    # Neither gradient method beat every word on the backbone (docs/decisions.md).
+    assert UNSUPERVISED_EVIDENCE == "none"
     plain = _backend()
     plain.unsupervised_evidence = "integrated_gradients"
     assert _methods(plain) == {"integrated_gradients"}
     plain.save(tmp_path / "plain.pt")
-    assert _methods(TorchReadoutBackend.load(tmp_path / "plain.pt")) == {"gradient_x_input"}
+    assert _methods(TorchReadoutBackend.load(tmp_path / "plain.pt")) == {"unavailable"}
 
     plain.unsupervised_evidence = "span_head"
     with pytest.raises(ValueError, match="unsupervised_evidence"):
@@ -113,7 +119,7 @@ def test_a_rationale_weight_of_zero_trains_no_head_even_with_rationales():
         TrainingConfig(epochs=1, accumulate=8, validation_fraction=0, rationale_weight=0.0),
     )
     assert report.n_rationales == 0
-    assert _methods(backend) == {"gradient_x_input"}
+    assert _methods(backend) == {"unavailable"}
 
 
 def test_rationales_switch_the_checkpoint_to_the_span_head_and_it_stays_switched(tmp_path):
@@ -143,6 +149,8 @@ def test_a_checkpoint_from_before_the_head_existed_loads_and_attributes(tmp_path
     torch.save(payload, path)
     loaded = TorchReadoutBackend.load(path)
     assert not loaded.config.evidence_supervised
+    assert _methods(loaded) == {"unavailable"}
+    loaded.unsupervised_evidence = "gradient_x_input"
     assert _methods(loaded) == {"gradient_x_input"}
 
 
@@ -220,7 +228,8 @@ def test_the_gateway_serves_the_attribution_it_is_configured_for(tmp_path):
     _backend().save(path)
     request = {**_cases(1, 4)[0].request.model_dump(), "options": {"include_evidence": True}}
     for env, method in (
-        ({}, "gradient_x_input"),
+        ({}, "none"),
+        ({"TRIGON_UNSUPERVISED_EVIDENCE": "gradient_x_input"}, "gradient_x_input"),
         ({"TRIGON_UNSUPERVISED_EVIDENCE": "integrated_gradients"}, "integrated_gradients"),
     ):
         config = ServerConfig.from_env(
@@ -229,7 +238,7 @@ def test_the_gateway_serves_the_attribution_it_is_configured_for(tmp_path):
         with TestClient(build_app(config)) as http:
             assert http.get("/healthz").json()["unsupervised_evidence"] == method
             answer = http.post("/v1/systemone", json=request).json()["answers"]["fruit"]
-            assert answer["evidence_method"] == method
+            assert answer["evidence_method"] == ("unavailable" if method == "none" else method)
 
     bad = ServerConfig.from_env(
         {

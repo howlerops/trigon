@@ -98,15 +98,22 @@ EVIDENCE_WIDTH = 64
 #: The attributions a checkpoint never shown a rationale can serve, and so the
 #: values `TorchReadoutBackend.unsupervised_evidence` takes.
 UNSUPERVISED_EVIDENCE_METHODS = ("gradient_x_input", "integrated_gradients")
-#: What an unsupervised checkpoint serves unless told otherwise. It stays
-#: gradient x input until integrated gradients is *measured* to beat
-#: highlighting every word on the backbone -- the rule `docs/decisions.md`
-#: records under *Evidence is attribution until it is supervised*. A better
-#: argued method is not a measured one, and the first attribution this project
-#: served was argued too.
-UNSUPERVISED_EVIDENCE = "gradient_x_input"
+#: What `TorchReadoutBackend.unsupervised_evidence` may be set to: one of the
+#: methods above, or ``"none"`` -- serve no spans and say ``unavailable``.
+UNSUPERVISED_EVIDENCE_CHOICES = ("none", *UNSUPERVISED_EVIDENCE_METHODS)
+#: What an unsupervised checkpoint serves unless an operator asks for more:
+#: **nothing.** On Qwen2.5-1.5B, HateXplain, four seeds per arm, neither
+#: gradient method beats highlighting every word on token F1 -- gradient x
+#: input 0.179-0.308, integrated gradients 0.193-0.385, every word 0.434-0.437
+#: -- which is the falsifier `docs/decisions.md` records under *Evidence is
+#: attribution until it is supervised*: no gradient attribution is worth
+#: serving by default. Labelled spans worse than a trivial highlighter are
+#: still a silent default in everything but name. Either method stays one
+#: setting away (`TRIGON_UNSUPERVISED_EVIDENCE`), for an operator who has
+#: measured it on their own data.
+UNSUPERVISED_EVIDENCE = "none"
 #: `TorchReadoutBackend.evidence_mode`'s values.
-EVIDENCE_MODES = ("auto", "span_head", *UNSUPERVISED_EVIDENCE_METHODS)
+EVIDENCE_MODES = ("auto", "span_head", *UNSUPERVISED_EVIDENCE_CHOICES)
 #: Integrated gradients' quadrature: how many points on the path, how many of
 #: them share one forward and backward pass, and how the points are spaced
 #: (`ig_schedule`). A chunk of 16 keeps a 1.5B backbone's batched activations
@@ -773,9 +780,9 @@ class TorchReadoutBackend:
     def _resolved_evidence_mode(self) -> str:
         if self.evidence_mode not in EVIDENCE_MODES:
             raise ValueError(f"evidence_mode must be one of {EVIDENCE_MODES}")
-        if self.unsupervised_evidence not in UNSUPERVISED_EVIDENCE_METHODS:
+        if self.unsupervised_evidence not in UNSUPERVISED_EVIDENCE_CHOICES:
             raise ValueError(
-                f"unsupervised_evidence must be one of {UNSUPERVISED_EVIDENCE_METHODS}"
+                f"unsupervised_evidence must be one of {UNSUPERVISED_EVIDENCE_CHOICES}"
             )
         if self.evidence_mode != "auto":
             return self.evidence_mode
@@ -1247,7 +1254,9 @@ class TorchReadoutBackend:
         evidence: dict[str, tuple[tuple[int, int, float], ...]] = {}
         method = None
         try:
-            if request.options.include_evidence:
+            # "none" serves no spans: the answer says `unavailable`, and the
+            # pass stays the plain no-grad one.
+            if request.options.include_evidence and self._resolved_evidence_mode() != "none":
                 # Gradient x input differentiates the answer's own pass, so
                 # that pass is built with autograd on; the span head does not,
                 # and stays on the no-grad path the plain answer takes, and so

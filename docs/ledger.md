@@ -249,6 +249,7 @@ The most useful section. Each of these was argued for before it was measured.
 | CLIP-style cosine would fix the dot-product head | Did nothing alone; cancels the residual's gain. |
 | The reference configuration works | It decides its own outcome by seed. Led to the sweep rule. |
 | Latency and throughput depend on a model's shape, not its weights, so a random encoder at 1.5B's shape stands in for the real one (`burn_in.py`) | The certified adapter is **1.45× slower** than its stand-in at batch 1 (102.9 against 71.2 ms): GQA, SwiGLU, a bf16 backbone and LoRA are different kernels from `nn.TransformerEncoderLayer`. The shape rows now sit beside a row of the real model |
+| Integrated gradients would rescue unsupervised attribution where gradient × input could not | On Qwen2.5-1.5B it improves on gradient × input on seven of eight checkpoints and still misses *every word* on token F1 on all eight (0.193–0.385 against 0.434–0.437). It is also far from complete under bf16 (median error 78–895%). The unsupervised default is now `none` (`reports/hatexplain/README.md`) |
 | Sortish batching would cut training time by ~2.82× on HelpSteer2 | **1.13×** (1.09–1.18×, four seeds each arm). 2.82× was the padded *attention work*, and on the spike attention is a small share of a step. Outcomes unchanged (`reports/helpsteer2/README.md`, A.5) |
 | Fitting temperature on the training split is the discipline | It is the bug. Raised ECE on half the seeds. |
 | A Score temperature of 0.20 is a degenerate fit | Constructed test: sharpening is correct for an underconfident head. |
@@ -466,12 +467,16 @@ what order, and how each step is known to be done.
   Qwen2.5-1.5B the supervised span head beats the word list on both metrics on
   four seeds of four (token F1 0.715–0.720 against 0.571–0.574). What opened in
   its place is the item below.
-- **Integrated gradients on the backbone is unmeasured.** Qwen2.5-1.5B's span
-  head beats the word list on both metrics over four seeds; gradient × input
-  loses to highlighting every word (`docs/decisions.md`). Whether integrated
-  gradients beats every word on token F1 decides the unsupervised default,
-  and scoring it needs a GPU but no retraining: `train_corpus.py --weights`
-  on the existing checkpoints.
+- ~~Integrated gradients on the backbone is unmeasured.~~ **Closed,
+  2026-09-26: it does not beat every word either** (token F1 0.193–0.385
+  against 0.434–0.437, eight checkpoints). Unsupervised checkpoints now serve
+  no spans by default (`none`, reported as `unavailable`).
+- **Integrated gradients is not complete on the backbone.** The summed
+  attributions miss the log-probability difference by a median of 78–895%
+  across the eight checkpoints, against under 1% in float32 on CPU. The
+  backbone runs under bf16 autocast, so the measurement above is of this
+  implementation on this hardware, not of the method. A float32 path through
+  the frozen backbone would settle it.
 - **Faithfulness of evidence is unmeasured.** Plausibility says a person would
   agree with a highlight, not that the model used it. Comprehensiveness and
   sufficiency — delete the spans, measure the answer move — are not built.

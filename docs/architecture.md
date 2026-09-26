@@ -170,13 +170,14 @@ attribution is a statement about the model, not a prediction of what a person
 would highlight, and the label says so.
 
 **Which attribution** is a serving choice, not a property of the weights:
-`gradient_x_input` by default, `integrated_gradients` when
+**`none` by default**: no spans, and `evidence_method: "unavailable"`.
+`gradient_x_input` or `integrated_gradients` are served when
 `TRIGON_UNSUPERVISED_EVIDENCE` (or `--unsupervised-evidence`, or
 `TorchReadoutBackend.unsupervised_evidence`) says so, and `/healthz` reports
-which. The default is gradient × input until integrated gradients is measured
-to beat highlighting every word on the backbone — the rule and the
-measurement that fired it are in `docs/decisions.md`, *Evidence is
-attribution until it is supervised*. The knob cannot select the span head.
+which. On the backbone neither beats highlighting every word on token F1.
+The measurements, and the falsifiers they fired, are in `docs/decisions.md`,
+*Evidence is attribution until it is supervised*. The knob cannot select the
+span head.
 
 Integrated gradients' baseline is the zero embedding: position and segment
 are still added, so it is the state with its words taken out rather than a

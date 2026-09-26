@@ -47,12 +47,37 @@ annotators marked, and the non-lexical spans a list cannot hold.
 **The second falsifier fired.** Gradient × input does not beat highlighting
 every word on token F1, on either arm or any seed. So as an unsupervised
 attribution it is worse than trivial. Every checkpoint trained without
-rationales currently serves it, the deployed Banking77 model included. The
+rationales served it by default, the deployed Banking77 model included, until
+the change recorded below. The
 decision names integrated gradients as the next candidate, scored the same
 way; it is being built and will be scored on these same checkpoints without
 retraining. Until then, `evidence_method: "gradient_x_input"` should be read
 as unvalidated, and the response already says which method produced the
 spans.
+
+**Integrated gradients, scored on the same eight checkpoints**
+(`qwen15b-e3-lr1e-4-{rationales,norationales}-igscore-*`: `--weights`, no
+retraining, commit `5a19070`; the reloaded models reproduce their original
+calibration decisions seed for seed):
+
+| Highlighter | Rationale arm, token F1 | No-rationale arm, token F1 | Rationale arm, IOU F1 |
+| --- | ---: | ---: | ---: |
+| `integrated_gradients` | 0.3524–0.3839 | 0.1934–0.3849 | 0.2923–0.3214 |
+| `gradient_x_input` | 0.2873–0.3075 | 0.1793–0.2998 | 0.2138–0.2358 |
+| *every word* | 0.4341–0.4369 | 0.4341–0.4369 | 0.2170–0.2193 |
+
+It beats gradient × input on seven of eight checkpoints, and still misses
+*every word* on token F1 on all eight. **So neither unsupervised attribution
+is served by default any more.** A checkpoint never trained on rationales
+answers `include_evidence` with `evidence_method: "unavailable"`, and an
+operator can opt into either method with `TRIGON_UNSUPERVISED_EVIDENCE`.
+
+**Integrated gradients is not complete on the backbone.** The summed
+attributions miss the log-probability difference they must equal: the median
+error is 137–179% on the rationale arm and 78–895% on the other, against
+under 1% in float32 on CPU. The backbone runs under bf16 autocast. This rules
+out the implementation on this hardware, not the method. A float32 path is
+the open item.
 
 **Accuracy and calibration, both arms** (majority label, three classes,
 marginal 0.4104; every blocking gate passes on all eight runs):

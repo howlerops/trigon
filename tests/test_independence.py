@@ -62,6 +62,8 @@ BASE = {
 @pytest.fixture(scope="module")
 def engine() -> Engine:
     backend = TorchReadoutBackend(seed=0)
+    # The attribution under test; unsupervised checkpoints serve none by default.
+    backend.unsupervised_evidence = "gradient_x_input"
     return Engine(backend, compiler=backend.make_compiler())
 
 
