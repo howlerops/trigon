@@ -40,6 +40,18 @@ training split's marginal is global, and a domain-conditional marginal is a
 cheaper baseline that could still be mistaken for understanding. If the gate
 cannot tell those two apart, the baseline has to become conditional.
 
+## Sign-off, 2026-09-26
+
+| | Question | Resolution |
+| --- | --- | --- |
+| Q23 | The native API's name | **Renamed off "System One".** `/v1/decide`, `DecisionRequest` / `DecisionResponse`, `client.decide()`. The old native path stays for one release as an unlisted alias. The compat adapter keeps the incumbent's own path, because a drop-in only works if the path is theirs exactly (`docs/compat.md`) |
+| Q24 | GoEmotions' tier | **Green.** The publisher's dataset card declares Apache-2.0, a statement about the data itself. Amazon ESCI was moved to amber because its licence was a code repository's alone |
+| Q25 | How a weights release is published | **By a manual workflow** (`.github/workflows/release.yml`). It fetches the bundle from the Modal Volume, checks it against the committed `BUNDLE.sha256`, and creates the Release. It runs only from the default branch |
+| Q26 | Integrated gradients' completeness on the backbone | **Build a float32 path and rescore** the eight saved checkpoints, then decide on the numbers |
+| Q27 | Batched serving without the schema cache | **Fix it and re-time** on Modal's L4 |
+| Q28 | Faithfulness of evidence | **Build comprehensiveness and sufficiency** and score the saved checkpoints against random and lexicon controls |
+| Q29 | The old default branch | **Delete it** once `main` is the default |
+
 ---
 
 ## 1. Per-request option/token budget before the retrieval stage

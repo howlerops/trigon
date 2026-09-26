@@ -13,6 +13,7 @@ open it and asked for the infrastructure to be secured first.
 | Training and burn-in (`modal_train.py`, `modal_burn_in.py`) | The code only | They run as whoever holds `MODAL_TOKEN_ID` / `MODAL_TOKEN_SECRET`. They expose no web endpoint, and the `trigon-runs` and `trigon-weights` Volumes are private to the workspace |
 | CI (`.github/workflows/ci.yml`) | Anyone can open a pull request from a fork | Every job's token is `contents: read`. **A fork's pull request always runs on GitHub's runners, never on the self-hosted one**. The runner is chosen by an expression in the workflow rather than left to a setting, because a self-hosted runner executes whatever a PR contains on our machine. The push-only `reference-run` job can use the self-hosted runner, since only people who can push reach it |
 | Pages (`pages.yml`) | The rendered site | Deploys only from the default branch, on push; never from a pull request |
+| Releases (`release.yml`) | The weights bundle | Manual only and default branch only. It reads the Modal Volume with the `MODAL_TOKEN_ID` / `MODAL_TOKEN_SECRET` repository secrets, which no pull-request workflow receives, and refuses a bundle whose SHA-256 differs from the committed one |
 | Credentials | Anything committed | `tests/test_no_secrets.py` fails the build on anything shaped like a Modal, GitHub, Hugging Face, AWS or bearer credential in a tracked file, and prints only the location. The full history was scanned before the repository went public: nothing |
 
 Two credentials, on purpose. The Modal proxy token decides who may *reach*
