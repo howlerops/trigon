@@ -69,6 +69,13 @@ class ServerConfig:
     # calibrated: an operator should not have to guess which numbers their
     # gateway is producing.
     cache_prefixes: bool = True
+    # The attribution a torch checkpoint never trained on rationales serves as
+    # evidence: None keeps the backend's default, gradient x input, which
+    # stays the default until integrated gradients is measured to beat
+    # highlighting every word on the backbone (docs/decisions.md, *Evidence is
+    # attribution until it is supervised*). A checkpoint trained on
+    # rationales serves its span head whatever this says.
+    unsupervised_evidence: str | None = None
     # Paths to fitted artifacts. Absent means "serve uncalibrated and say so".
     temperature_path: str | None = None
     # `trigon train` picks a calibrator per primitive and writes whichever
@@ -98,6 +105,7 @@ class ServerConfig:
             weights=source.get("TRIGON_WEIGHTS") or None,
             domain=source.get("TRIGON_DOMAIN") or None,
             cache_prefixes=source.get("TRIGON_CACHE_PREFIXES", "1") not in ("0", "false"),
+            unsupervised_evidence=source.get("TRIGON_UNSUPERVISED_EVIDENCE") or None,
             temperature_path=source.get("TRIGON_TEMPERATURE_PATH") or None,
             isotonic_path=source.get("TRIGON_ISOTONIC_PATH") or None,
             conformal_dir=source.get("TRIGON_CONFORMAL_DIR") or None,

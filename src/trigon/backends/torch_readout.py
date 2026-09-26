@@ -39,16 +39,19 @@ Heads, all categorical, none of them a regression:
 * Noul: one readout slot, one linear logit.
 
 And one head that is not an answer: **evidence**. Asked for, each question's
-answer comes back with the spans of the state that drove it. Two sources, and
-the response names which one answered (`evidence_method`):
+answer comes back with the spans of the state that drove it. Two kinds of
+source, and the response names which one answered (`evidence_method`):
 
 * ``span_head`` -- a small bilinear head scoring every state token against the
   question's readout state, trained on human rationales when a case carries
   them (`Expectation.rationale`). Used only by a checkpoint that was;
-* ``gradient_x_input`` -- otherwise. The gradient of the selected label's
-  log-probability with respect to each state token's input embedding, dotted
-  with that embedding. An untrained head is not evidence, and a model that was
-  never shown a rationale has no business returning one from a head.
+* an attribution otherwise -- ``gradient_x_input`` by default: the gradient of
+  the selected label's log-probability with respect to each state token's
+  input embedding, dotted with that embedding; or ``integrated_gradients``,
+  the same gradient integrated along a straight path from a zero embedding,
+  when `TorchReadoutBackend.unsupervised_evidence` asks for it. An untrained
+  head is not evidence, and a model that was never shown a rationale has no
+  business returning one from a head.
 
 Both read only what the question's answer reads -- the state's hidden states
 and the question's own readout -- so evidence inherits the independence the
@@ -92,8 +95,59 @@ TRAINED_VERSION_PREFIX = "trigon-reference-0.1.0"
 #: bit per token -- in the rationale or not -- and is the one head that runs
 #: over every state token of every question.
 EVIDENCE_WIDTH = 64
+#: The attributions a checkpoint never shown a rationale can serve, and so the
+#: values `TorchReadoutBackend.unsupervised_evidence` takes.
+UNSUPERVISED_EVIDENCE_METHODS = ("gradient_x_input", "integrated_gradients")
+#: What `TorchReadoutBackend.unsupervised_evidence` may be set to: one of the
+#: methods above, or ``"none"`` -- serve no spans and say ``unavailable``.
+UNSUPERVISED_EVIDENCE_CHOICES = ("none", *UNSUPERVISED_EVIDENCE_METHODS)
+#: What an unsupervised checkpoint serves unless an operator asks for more:
+#: **nothing.** On Qwen2.5-1.5B, HateXplain, four seeds per arm, neither
+#: gradient method beats highlighting every word on token F1 -- gradient x
+#: input 0.179-0.308, integrated gradients 0.193-0.385, every word 0.434-0.437
+#: -- which is the falsifier `docs/decisions.md` records under *Evidence is
+#: attribution until it is supervised*: no gradient attribution is worth
+#: serving by default. Labelled spans worse than a trivial highlighter are
+#: still a silent default in everything but name. Either method stays one
+#: setting away (`TRIGON_UNSUPERVISED_EVIDENCE`), for an operator who has
+#: measured it on their own data.
+UNSUPERVISED_EVIDENCE = "none"
 #: `TorchReadoutBackend.evidence_mode`'s values.
-EVIDENCE_MODES = ("auto", "span_head", "gradient_x_input")
+EVIDENCE_MODES = ("auto", "span_head", *UNSUPERVISED_EVIDENCE_CHOICES)
+#: Integrated gradients' quadrature: how many points on the path, how many of
+#: them share one forward and backward pass, and how the points are spaced
+#: (`ig_schedule`). A chunk of 16 keeps a 1.5B backbone's batched activations
+#: small at HateXplain's lengths with the schema prefix cached, and on the
+#: spike it is two passes a request.
+#:
+#: **The points crowd towards the baseline, and that was measured, not
+#: assumed.** A pre-norm transformer normalises each token before it reads it,
+#: so scaling a token's embedding down from the input changes almost nothing
+#: until it is nearly zero -- RMSNorm's epsilon is what finally notices -- and
+#: then everything changes at once. On a tiny Qwen2 the log-probability made
+#: 80-94% of its whole change within the first 5% of the path, and 32 evenly spaced
+#: points summed to 12-91% off the difference they must add up to. Spaced as
+#: ``u ** 3`` the same 32 are within 0.04%, and on the spike, whose position
+#: embeddings keep a zero token from being nothing, within 0.9%
+#: (`tests/test_independence.py`, `tests/test_qwen_backend.py`). The path is
+#: the same straight line either way; only where it is sampled moves.
+IG_STEPS = 32
+IG_CHUNK = 16
+IG_POWER = 3
+
+
+def ig_schedule(steps: int, power: float = 1.0) -> tuple[torch.Tensor, torch.Tensor]:
+    """Integrated gradients' points on the path, and each one's quadrature weight.
+
+    The midpoint rule in ``u``, mapped to ``alpha = u ** power``: the integral
+    over alpha is the integral over u of ``power * u ** (power - 1)``, so the
+    weights are that over ``steps``, and they sum to one. ``power`` 1 is the
+    textbook uniform Riemann sum.
+    """
+    u = (torch.arange(steps, dtype=torch.float64) + 0.5) / steps
+    return u**power, power * u ** (power - 1) / steps
+
+
 # A randomly initialised model answers every question with noise. It says so in
 # its own version string, because ``model_version`` travels in the response and
 # is the only thing a caller downstream has to go on.
@@ -376,6 +430,10 @@ class PrefillOnlyModel(nn.Module):
         n = prefix.tokens
         hidden = self._embed_inputs(token_embeddings, positions, segment_types)
         rest = hidden[:, n:]
+        # A batch of several variants of one request -- integrated gradients'
+        # interpolation steps -- shares one schema block, so the cached prefix
+        # is broadcast rather than recomputed per variant.
+        batch = rest.shape[0]
         # Rows for the non-schema tokens, columns for the whole sequence. The
         # schema is a prefix in this layout, so the concatenation below is
         # already in the order these columns expect; it is not a coincidence to
@@ -383,7 +441,7 @@ class PrefillOnlyModel(nn.Module):
         block = ~mask[n:, :]
         for index, layer in enumerate(self.encoder.layers):
             normed = layer.norm1(rest)
-            keys = torch.cat([prefix.layers[index], normed], dim=1)
+            keys = torch.cat([prefix.layers[index].expand(batch, -1, -1), normed], dim=1)
             attended, _ = layer.self_attn(normed, keys, keys, attn_mask=block, need_weights=False)
             rest = rest + layer.dropout1(attended)
             rest = rest + layer._ff_block(layer.norm2(rest))
@@ -391,7 +449,7 @@ class PrefillOnlyModel(nn.Module):
         # The schema's states come straight out of the cache. Nothing in the
         # schema block is recomputed, which is the entire point and is what
         # the first version of this got wrong.
-        return self.norm(torch.cat([prefix.outputs, rest], dim=1))
+        return self.norm(torch.cat([prefix.outputs.expand(batch, -1, -1), rest], dim=1))
 
 
 def _to_int8_and_back(weight: torch.Tensor) -> torch.Tensor:
@@ -464,6 +522,15 @@ class TorchReadoutBackend:
         #: comparing them needs; forcing "span_head" on an untrained head is
         #: allowed there and labelled, never served by default.
         self.evidence_mode = "auto"
+        #: What "auto" resolves to on a checkpoint never shown a rationale: one
+        #: of `UNSUPERVISED_EVIDENCE_METHODS`. A serving knob rather than a
+        #: checkpoint flag, because it says nothing about the weights -- and it
+        #: cannot select the span head, which only training can license.
+        self.unsupervised_evidence = UNSUPERVISED_EVIDENCE
+        #: Integrated gradients' interpolation steps, and the steps per pass.
+        self.ig_steps = IG_STEPS
+        self.ig_chunk = IG_CHUNK
+        self.ig_power = IG_POWER
 
     @property
     def model_version(self) -> str:
@@ -656,6 +723,17 @@ class TorchReadoutBackend:
 
     def _encode(self, compiled: CompiledRequest, embeddings: torch.Tensor, spans: _Spans):
         """One request's hidden states, through the schema prefix cache if it is on."""
+        return self._encode_variants(compiled, embeddings, spans)[0]
+
+    def _encode_variants(self, compiled: CompiledRequest, embeddings: torch.Tensor, spans: _Spans):
+        """Hidden states for one or more variants of one request: (B, T, d).
+
+        Every variant shares the request's layout, mask and schema block --
+        integrated gradients' interpolation steps differ only in the state's
+        input embeddings -- so one cached schema prefix serves all of them.
+        It is filled from the first variant; any would do, because a schema
+        token never attends to the state.
+        """
         mask = self._cached_mask(compiled)
         if mask.shape[0] != embeddings.shape[1]:
             raise ValueError(
@@ -665,10 +743,10 @@ class TorchReadoutBackend:
             )
         positions, segments = spans.positions(self.device), spans.segment_types(self.device)
         self._last_cached_tokens = 0
-        prefix = self._prefix_for(compiled, embeddings, mask, positions, segments)
+        prefix = self._prefix_for(compiled, embeddings[:1], mask, positions, segments)
         if prefix is None:
-            return self.model(embeddings, mask, positions, segments)[0]
-        return self.model.forward_with_prefix(embeddings, mask, positions, segments, prefix)[0]
+            return self.model(embeddings, mask, positions, segments)
+        return self.model.forward_with_prefix(embeddings, mask, positions, segments, prefix)
 
     # -- evidence --------------------------------------------------------
 
@@ -702,13 +780,173 @@ class TorchReadoutBackend:
     def _resolved_evidence_mode(self) -> str:
         if self.evidence_mode not in EVIDENCE_MODES:
             raise ValueError(f"evidence_mode must be one of {EVIDENCE_MODES}")
+        if self.unsupervised_evidence not in UNSUPERVISED_EVIDENCE_CHOICES:
+            raise ValueError(
+                f"unsupervised_evidence must be one of {UNSUPERVISED_EVIDENCE_CHOICES}"
+            )
         if self.evidence_mode != "auto":
             return self.evidence_mode
-        return "span_head" if self.config.evidence_supervised else "gradient_x_input"
+        return "span_head" if self.config.evidence_supervised else self.unsupervised_evidence
+
+    @staticmethod
+    def _selected_label(kind: str, logits: torch.Tensor) -> int:
+        """The answer's selected label; calibration is monotone, so the raw argmax.
+
+        For a Noul, 1 for the side its logit falls on and 0 for the other.
+        """
+        if kind == "noul":
+            return int(bool(logits[0] >= 0))
+        return int(torch.argmax(logits))
+
+    @staticmethod
+    def _log_prob(kind: str, logits: torch.Tensor, label: int) -> torch.Tensor:
+        """The log-probability of ``label`` (as `_selected_label` numbers it)."""
+        if kind == "noul":
+            return nn.functional.logsigmoid(logits[0] if label else -logits[0])
+        return torch.log_softmax(logits, dim=-1)[label]
+
+    def path_logits(
+        self,
+        compiled: CompiledRequest,
+        request: SystemOneRequest,
+        alphas: torch.Tensor,
+        *,
+        embeddings: torch.Tensor | None = None,
+        spans: _Spans | None = None,
+    ) -> tuple[list[dict[str, torch.Tensor]], torch.Tensor]:
+        """Per-question logits at points on integrated gradients' path.
+
+        The path is a straight line from the baseline to the input, and only
+        the **state's** input embeddings move along it: at ``alpha`` a state
+        token's embedding is ``alpha * x``. Schema and readout tokens stay what
+        they are, so the schema block -- and its cached prefix -- is identical
+        at every step, and each question's readout sees only its own schema at
+        every step, exactly as at the input.
+
+        **The baseline is the zero embedding.** Position and segment are added
+        on top of the token embedding, so a zero row is still a state token at
+        its position: the state with its words taken out and nothing put in
+        their place. Padding or end-of-text would put something in -- they are
+        words to a pretrained backbone, with meanings of their own, and the
+        spike has no pad token at all -- and attributions against them would
+        measure the distance to that meaning. And gradient x input is this
+        method with the same baseline and one step at the input, so the two
+        differ in the one thing being tested, the path, and nothing else.
+
+        Returns one logits dict per alpha, and the state rows along the path
+        (alphas x state tokens x width), the leaf gradients are taken against.
+        """
+        if embeddings is None or spans is None:
+            with torch.no_grad():
+                embeddings, spans = self._embed(compiled)
+        embeddings = embeddings.detach()
+        state = torch.tensor(spans.state, dtype=torch.long, device=embeddings.device)
+        alphas = alphas.to(device=embeddings.device, dtype=embeddings.dtype)
+        path = (alphas.view(-1, 1, 1) * embeddings[0, state]).requires_grad_(True)
+        variants = embeddings.expand(len(alphas), -1, -1).index_copy(1, state, path)
+        hidden = self._encode_variants(compiled, variants, spans)
+        return [self._heads(compiled, request, row, spans) for row in hidden], path
+
+    def integrated_gradients(
+        self,
+        compiled: CompiledRequest,
+        request: SystemOneRequest,
+        *,
+        embeddings: torch.Tensor | None = None,
+        spans: _Spans | None = None,
+        raw: dict[str, torch.Tensor] | None = None,
+    ) -> dict[str, torch.Tensor]:
+        """Signed integrated gradients: one value per state token per question.
+
+        The selected label is fixed at the input and its log-probability is
+        integrated along `path_logits`' path over ``ig_steps`` points spaced
+        by `ig_schedule` (crowded towards the baseline -- see `IG_POWER` for
+        why), ``ig_chunk`` of them to one batched forward pass.
+        Each question then takes one backward pass per chunk through that
+        shared graph, as gradient x input takes one per question through the
+        answer's. Everything a question's value depends on is what its answer
+        depends on, at every step, so it is exactly as independent of the
+        other questions as the answer is.
+
+        Summed over the state, a question's values approximate its
+        log-probability at the input minus at the baseline: completeness, the
+        property that defines the method, asserted in
+        `tests/test_independence.py`.
+        """
+        steps, chunk = int(self.ig_steps), max(1, int(self.ig_chunk))
+        if steps < 1:
+            raise ValueError("ig_steps must be at least 1")
+        if embeddings is None or spans is None:
+            with torch.no_grad():
+                embeddings, spans = self._embed(compiled)
+        embeddings = embeddings.detach()
+        if raw is None:
+            with torch.no_grad():
+                hidden = self._encode(compiled, embeddings, spans)
+                raw = self._heads(compiled, request, hidden, spans)
+        questions = [(q.question_id, q.kind) for q in compiled.schema.questions]
+        labels = {qid: self._selected_label(kind, raw[qid]) for qid, kind in questions}
+        state = torch.tensor(spans.state, dtype=torch.long, device=embeddings.device)
+        inputs = embeddings[0, state]
+        totals = {qid: torch.zeros_like(inputs) for qid, _ in questions}
+        alphas, weights = ig_schedule(steps, self.ig_power)
+        weights = weights.to(device=inputs.device, dtype=inputs.dtype)
+        # The cache report describes the request, and these passes are not
+        # requests: a path pass hitting the prefix the answer has just filled
+        # must not turn the answer's miss into a reported hit.
+        reported = self._last_cached_tokens
+        try:
+            with torch.enable_grad():
+                for begin in range(0, steps, chunk):
+                    heads, path = self.path_logits(
+                        compiled,
+                        request,
+                        alphas[begin : begin + chunk],
+                        embeddings=embeddings,
+                        spans=spans,
+                    )
+                    for index, (qid, kind) in enumerate(questions):
+                        target = torch.stack(
+                            [self._log_prob(kind, logits[qid], labels[qid]) for logits in heads]
+                        ).sum()
+                        (gradient,) = torch.autograd.grad(
+                            target, path, retain_graph=index < len(questions) - 1
+                        )
+                        step_weights = weights[begin : begin + chunk].view(-1, 1, 1)
+                        totals[qid] += (gradient * step_weights).sum(dim=0)
+        finally:
+            self._last_cached_tokens = reported
+        # (x - baseline) . integral of the gradient along the path; the
+        # baseline is zero.
+        return {qid: (inputs * totals[qid]).sum(dim=-1) for qid, _ in questions}
+
+    def path_difference(
+        self, compiled: CompiledRequest, request: SystemOneRequest
+    ) -> dict[str, float]:
+        """What each question's integrated gradients must sum to.
+
+        The selected label's log-probability at the input minus at the
+        baseline -- the two ends of `path_logits`' path, in one pass. Summed
+        attributions that miss it by more than quadrature error are wrong.
+        """
+        reported = self._last_cached_tokens
+        try:
+            with torch.no_grad():
+                (baseline, full), _ = self.path_logits(compiled, request, torch.tensor([0.0, 1.0]))
+        finally:
+            self._last_cached_tokens = reported
+        out = {}
+        for question in compiled.schema.questions:
+            qid, kind = question.question_id, question.kind
+            label = self._selected_label(kind, full[qid])
+            at_input = self._log_prob(kind, full[qid], label)
+            out[qid] = float(at_input - self._log_prob(kind, baseline[qid], label))
+        return out
 
     def _evidence(
         self,
         compiled: CompiledRequest,
+        request: SystemOneRequest,
         embeddings: torch.Tensor,
         hidden: torch.Tensor,
         spans: _Spans,
@@ -719,13 +957,18 @@ class TorchReadoutBackend:
         ``gradient_x_input`` attributes the label the head ranks first -- the
         selected one, since calibration is monotone -- as the gradient of its
         log-probability with respect to each state token's input embedding,
-        dotted with that embedding. Only positive attribution is evidence *for*
-        the answer; it is scaled by the answer's largest, so the scores say
-        which tokens mattered most to this answer and not how much in absolute
-        terms. For a Noul the selected side is the one its logit falls on.
+        dotted with that embedding. ``integrated_gradients`` integrates that
+        gradient along the straight path from a zero embedding to the input
+        (`integrated_gradients`). For both, only positive attribution is
+        evidence *for* the answer; it is scaled by the answer's largest, so the
+        scores say which tokens mattered most to this answer and not how much
+        in absolute terms. For a Noul the selected side is the one its logit
+        falls on.
 
-        One backward pass per question, each through the same forward graph:
-        prefill-only still, one forward, and no decoding.
+        Gradient x input is one backward pass per question through the
+        answer's own forward graph. Integrated gradients is ``ig_steps /
+        ig_chunk`` batched forward passes more, and one backward per question
+        per pass: still prefill-only, and still no decoding.
         """
         offsets = self.state_offsets(compiled)
         if len(offsets) != len(spans.state):
@@ -733,6 +976,13 @@ class TorchReadoutBackend:
         method = self._resolved_evidence_mode()
         out: dict[str, tuple[tuple[int, int, float], ...]] = {}
         state = spans.state
+        integrated = (
+            self.integrated_gradients(
+                compiled, request, embeddings=embeddings, spans=spans, raw=raw
+            )
+            if method == "integrated_gradients" and state
+            else {}
+        )
         for compiled_q in compiled.schema.questions:
             qid = compiled_q.question_id
             if not state:
@@ -741,13 +991,13 @@ class TorchReadoutBackend:
             if method == "span_head":
                 scores = torch.sigmoid(self.evidence_logits(hidden, spans, qid))
             else:
-                logits = raw[qid]
-                if compiled_q.kind == "noul":
-                    target = nn.functional.logsigmoid(logits[0] if logits[0] >= 0 else -logits[0])
+                if method == "integrated_gradients":
+                    attribution = integrated[qid]
                 else:
-                    target = torch.log_softmax(logits, dim=-1)[int(torch.argmax(logits))]
-                (gradient,) = torch.autograd.grad(target, embeddings, retain_graph=True)
-                attribution = (gradient[0, state] * embeddings[0, state]).sum(dim=-1)
+                    label = self._selected_label(compiled_q.kind, raw[qid])
+                    target = self._log_prob(compiled_q.kind, raw[qid], label)
+                    (gradient,) = torch.autograd.grad(target, embeddings, retain_graph=True)
+                    attribution = (gradient[0, state] * embeddings[0, state]).sum(dim=-1)
                 attribution = attribution.clamp_min(0.0)
                 peak = attribution.max()
                 scores = attribution / peak if peak > 0 else torch.zeros_like(attribution)
@@ -1004,11 +1254,14 @@ class TorchReadoutBackend:
         evidence: dict[str, tuple[tuple[int, int, float], ...]] = {}
         method = None
         try:
-            if request.options.include_evidence:
-                # Attribution needs gradients, so its pass is built with
-                # autograd on; the span head does not, and stays on the
-                # no-grad path the plain answer takes. Either way it is one
-                # forward pass: the answer and its evidence share it.
+            # "none" serves no spans: the answer says `unavailable`, and the
+            # pass stays the plain no-grad one.
+            if request.options.include_evidence and self._resolved_evidence_mode() != "none":
+                # Gradient x input differentiates the answer's own pass, so
+                # that pass is built with autograd on; the span head does not,
+                # and stays on the no-grad path the plain answer takes, and so
+                # does the answer under integrated gradients, whose gradients
+                # come from passes of its own along the path.
                 attributing = self._resolved_evidence_mode() == "gradient_x_input"
                 with torch.enable_grad() if attributing else torch.no_grad():
                     embeddings, spans = self._embed(compiled)
@@ -1016,7 +1269,9 @@ class TorchReadoutBackend:
                         embeddings = embeddings.detach().requires_grad_(True)
                     hidden = self._encode(compiled, embeddings, spans)
                     raw = self._heads(compiled, request, hidden, spans)
-                    evidence, method = self._evidence(compiled, embeddings, hidden, spans, raw)
+                    evidence, method = self._evidence(
+                        compiled, request, embeddings, hidden, spans, raw
+                    )
                 length = int(embeddings.shape[1])
             else:
                 with torch.no_grad():

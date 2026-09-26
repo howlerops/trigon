@@ -65,8 +65,9 @@ export interface EvidenceSpan {
    * How strongly this span drove the answer. Under `span_head` it is the
    * head's probability that the span is part of a human rationale, fitted
    * with a proper scoring rule and never calibrated or gated; under
-   * `gradient_x_input` it is relative within this answer, 1 being its
-   * strongest token, and is not a probability at all.
+   * `gradient_x_input` and `integrated_gradients` it is relative within
+   * this answer, 1 being its strongest token, and is not a probability at
+   * all.
    */
   score: number;
   /**
@@ -105,11 +106,13 @@ export interface ChoiceAnswer {
    * rationales. `gradient_x_input`: attribution of the selected label to
    * each state token, from a model never shown a rationale -- a statement
    * about the model, not a prediction of what a person would highlight.
-   * `lexical_overlap`: the lexical floor's word matches. `unavailable`:
-   * this backend cannot attribute, and `evidence` is empty for that reason
-   * rather than because nothing mattered.
+   * `integrated_gradients`: the same kind of attribution, integrated along
+   * a path from an empty state to this one. `lexical_overlap`: the lexical
+   * floor's word matches. `unavailable`: this backend cannot attribute,
+   * and `evidence` is empty for that reason rather than because nothing
+   * mattered.
    */
-  evidence_method?: "span_head" | "gradient_x_input" | "lexical_overlap" | "unavailable" | null;
+  evidence_method?: "span_head" | "gradient_x_input" | "integrated_gradients" | "lexical_overlap" | "unavailable" | null;
   /**
    * Present when a conformal profile was applied: the options that survive
    * at the profile's coverage target. A singleton set is the useful case;
@@ -177,11 +180,13 @@ export interface ScoreAnswer {
    * rationales. `gradient_x_input`: attribution of the selected label to
    * each state token, from a model never shown a rationale -- a statement
    * about the model, not a prediction of what a person would highlight.
-   * `lexical_overlap`: the lexical floor's word matches. `unavailable`:
-   * this backend cannot attribute, and `evidence` is empty for that reason
-   * rather than because nothing mattered.
+   * `integrated_gradients`: the same kind of attribution, integrated along
+   * a path from an empty state to this one. `lexical_overlap`: the lexical
+   * floor's word matches. `unavailable`: this backend cannot attribute,
+   * and `evidence` is empty for that reason rather than because nothing
+   * mattered.
    */
-  evidence_method?: "span_head" | "gradient_x_input" | "lexical_overlap" | "unavailable" | null;
+  evidence_method?: "span_head" | "gradient_x_input" | "integrated_gradients" | "lexical_overlap" | "unavailable" | null;
   /**
    * Levels surviving the conformal profile, if one was applied.
    */
@@ -228,11 +233,13 @@ export interface NoulAnswer {
    * rationales. `gradient_x_input`: attribution of the selected label to
    * each state token, from a model never shown a rationale -- a statement
    * about the model, not a prediction of what a person would highlight.
-   * `lexical_overlap`: the lexical floor's word matches. `unavailable`:
-   * this backend cannot attribute, and `evidence` is empty for that reason
-   * rather than because nothing mattered.
+   * `integrated_gradients`: the same kind of attribution, integrated along
+   * a path from an empty state to this one. `lexical_overlap`: the lexical
+   * floor's word matches. `unavailable`: this backend cannot attribute,
+   * and `evidence` is empty for that reason rather than because nothing
+   * mattered.
    */
-  evidence_method?: "span_head" | "gradient_x_input" | "lexical_overlap" | "unavailable" | null;
+  evidence_method?: "span_head" | "gradient_x_input" | "integrated_gradients" | "lexical_overlap" | "unavailable" | null;
   /**
    * Calibrated probability that the judgement holds. There is no
    * confidence field by design: for a binary question the probability

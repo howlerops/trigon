@@ -1246,6 +1246,19 @@ checkpoint whose trainer fitted it to human rationales
 with respect to each state token's input embedding, dotted with that
 embedding, positive part, scaled by the answer's largest.
 
+**Integrated gradients is built and is not the default** (2026-09-25). The
+same log-probability, its gradient integrated along the straight path from a
+zero embedding to each state token's — state tokens only, so the schema
+prefix is unchanged at every step — with the same positive part and scaling,
+served as `integrated_gradients` when a deployment asks for it
+(`TorchReadoutBackend.unsupervised_evidence`, `TRIGON_UNSUPERVISED_EVIDENCE`,
+`--unsupervised-evidence`). **The rule: the unsupervised default flips from
+gradient × input to integrated gradients only once integrated gradients is
+measured, on the backbone, over three or more seeds, to beat *every word* on
+token F1** — the bar gradient × input failed. Better argued is not measured,
+and gradient × input was argued too. `scripts/train_corpus.py --weights`
+scores both methods on an existing checkpoint without retraining.
+
 **Why not always the head.** It exists in every checkpoint, initialised at
 random, and a random projection's spans look exactly as confident as a
 trained one's. Serving it untrained would be the silent default this project
@@ -1284,6 +1297,34 @@ two-layer model whose 1,164-token vocabulary splits 64% of HateXplain's words, s
 is a floor for the mechanism, not a verdict on it; the backbone run is what
 decides it.
 
+**On the backbone** (2026-09-25): Qwen2.5-1.5B on HateXplain, four seeds,
+trained with rationales, the range over seeds:
+
+| | Token F1 | IOU F1 |
+| --- | ---: | ---: |
+| `span_head` | 0.715–0.720 | 0.614–0.621 |
+| `gradient_x_input` | 0.287–0.308 | 0.211–0.234 |
+| *rationale lexicon* (floor) | 0.571–0.574 | 0.449–0.454 |
+| *every word* (floor) | 0.434–0.437 | 0.217–0.219 |
+
+The head beats the lexicon on both metrics on every seed, by at least +0.14 token F1
+and +0.16 IOU F1, so the first falsifier below did not fire. **The second
+did:** gradient × input does not beat highlighting every word on token F1 on
+any seed, and it is no better on the backbone than on the spike. It stays the
+default only because nothing measured has replaced it; integrated gradients
+is next, scored the same way.
+
+One reason to expect the path to matter here, which is an argument and not a
+measurement: a pre-norm transformer normalises each token before reading it,
+so its answer barely moves when a token's embedding is scaled — and
+gradient × input is exactly the derivative along that scale. Integrated
+gradients integrates the same direction from zero, where the normalisation
+stops hiding the token. The same property decides its quadrature: on a tiny
+Qwen2 most of the path's change happens in its first 5%, so on one request 32 evenly spaced
+points sum to 12–91% off the difference they must add up to, and the points
+are spaced as `u³` instead (0.04%; `IG_POWER` in `torch_readout.py`). Every
+plausibility report prints the measured completeness error beside the row.
+
 **What would change our mind.**
 
 - *The head is learning a vocabulary, not a reading*, if on Qwen2.5-1.5B its
@@ -1292,7 +1333,36 @@ decides it.
   should not be served under a name that implies more.
 - *Gradient × input is the wrong attribution*, if on the backbone it does not
   beat *every word* on token F1. Integrated gradients is then the next
-  candidate, scored the same way.
+  candidate, scored the same way. **Fired, 2026-09-25**: 0.287–0.308 against
+  0.434–0.437, four seeds. Integrated gradients is built and waits on the same
+  measurement before it may become the default.
+- *Integrated gradients is the wrong attribution too*, if on the backbone it
+  does not beat *every word* on token F1 either. Then no gradient attribution
+  is worth serving on this architecture, and an unsupervised checkpoint should
+  answer `include_evidence` with less, not with a method known to lose to
+  highlighting everything. **Fired, 2026-09-26.** On the eight saved HateXplain
+  checkpoints, scored without retraining:
+  - Rationale arm: integrated gradients reads 0.352–0.384 token F1.
+  - No-rationale arm: it reads 0.193–0.385.
+  - Every word reads 0.434–0.437.
+  - It does beat gradient × input on seven of eight runs, and its IOU F1 clears
+    every word's on the rationale arm (0.292–0.321 against 0.217–0.219).
+
+  Token F1 is the bar, and it misses on every run.
+
+  **The default is now `none`.** An unsupervised checkpoint answers
+  `include_evidence` with no spans and `evidence_method: "unavailable"`. Both
+  gradient methods stay one setting away (`TRIGON_UNSUPERVISED_EVIDENCE`) for
+  an operator who has measured them on their own data.
+
+  **One caveat keeps this from being a verdict on integrated gradients
+  itself.** On the backbone its completeness fails: the summed attributions
+  miss the log-probability difference by a median of 137–179% on the
+  rationale arm and 78–895% on the other. On the float32 spike and a float32
+  toy Qwen2 the median is under 1%. The backbone runs under bf16 autocast on
+  the GPU, and a path integral of bf16 gradients is not the integral it is
+  written as. A float32 path on the backbone would decide it; until then,
+  what failed is this implementation on this hardware.
 - *Plausibility is the wrong target*, if a faithfulness measurement —
   comprehensiveness and sufficiency, deleting the highlighted spans and
   measuring the answer move — shows the head's spans are not what the answer

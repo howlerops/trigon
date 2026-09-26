@@ -261,7 +261,9 @@ class SystemOneRequest(_Strict):
         return questions
 
 
-EvidenceMethod = Literal["span_head", "gradient_x_input", "lexical_overlap", "unavailable"]
+EvidenceMethod = Literal[
+    "span_head", "gradient_x_input", "integrated_gradients", "lexical_overlap", "unavailable"
+]
 
 
 class EvidenceSpan(_Strict):
@@ -279,8 +281,8 @@ class EvidenceSpan(_Strict):
             "How strongly this span drove the answer. Under `span_head` it is the "
             "head's probability that the span is part of a human rationale, fitted with "
             "a proper scoring rule and never calibrated or gated; under "
-            "`gradient_x_input` it is relative within this answer, 1 being its "
-            "strongest token, and is not a probability at all."
+            "`gradient_x_input` and `integrated_gradients` it is relative within this "
+            "answer, 1 being its strongest token, and is not a probability at all."
         ),
     )
 
@@ -300,7 +302,9 @@ _EVIDENCE_METHOD_DESCRIPTION = (
     "How `evidence` was produced. `span_head`: a head trained on human rationales. "
     "`gradient_x_input`: attribution of the selected label to each state token, "
     "from a model never shown a rationale -- a statement about the model, not a "
-    "prediction of what a person would highlight. `lexical_overlap`: the lexical "
+    "prediction of what a person would highlight. `integrated_gradients`: the same "
+    "kind of attribution, integrated along a path from an empty state to this one. "
+    "`lexical_overlap`: the lexical "
     "floor's word matches. `unavailable`: this backend cannot attribute, and "
     "`evidence` is empty for that reason rather than because nothing mattered."
 )

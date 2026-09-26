@@ -23,6 +23,8 @@ def _engine(
     domain: str | None = None,
     temperature_path: str | None = None,
     weights: str | None = None,
+    unsupervised_evidence: str | None = None,
+    ig_steps: int | None = None,
 ):
     from .calibration.temperature import TemperatureScaler
     from .engine import Engine, EngineConfig
@@ -36,6 +38,10 @@ def _engine(
         from .backends.torch_readout import TorchReadoutBackend
 
         impl = TorchReadoutBackend.load(weights) if weights else TorchReadoutBackend()
+        if unsupervised_evidence:
+            impl.unsupervised_evidence = unsupervised_evidence
+        if ig_steps:
+            impl.ig_steps = ig_steps
         compiler = impl.make_compiler()
     else:
         raise SystemExit(f"unknown backend {backend!r}; try 'lexical' or 'torch'")
@@ -69,7 +75,14 @@ def cmd_ask(args: argparse.Namespace) -> int:
 
     # Build the engine first: a bad --backend should fail before we consume
     # stdin, which the caller cannot rewind.
-    engine = _engine(args.backend, args.domain, args.temperatures, args.weights)
+    engine = _engine(
+        args.backend,
+        args.domain,
+        args.temperatures,
+        args.weights,
+        unsupervised_evidence=args.unsupervised_evidence,
+        ig_steps=args.ig_steps,
+    )
     raw = sys.stdin.read() if args.request == "-" else pathlib.Path(args.request).read_text()
     response = engine.answer(SystemOneRequest.model_validate_json(raw))
     print(response.model_dump_json(indent=2, exclude_none=True))
@@ -89,6 +102,8 @@ def cmd_serve(args: argparse.Namespace) -> int:
     config.backend = args.backend
     if args.weights:
         config.weights = args.weights
+    if args.unsupervised_evidence:
+        config.unsupervised_evidence = args.unsupervised_evidence
     if config.backend == "torch" and not config.weights:
         print(
             "warning: serving torch with no --weights means randomly initialised "
@@ -1009,6 +1024,17 @@ def build_parser() -> argparse.ArgumentParser:
     ask.add_argument("request")
     ask.add_argument("--temperatures", default=None, help="path to fitted temperatures")
     ask.add_argument("--weights", default=None, help="a checkpoint written by 'trigon train'")
+    unsupervised_evidence_help = (
+        "the attribution a checkpoint never trained on rationales serves as evidence: "
+        "none (the default: no spans, `unavailable`), gradient_x_input or "
+        "integrated_gradients. Neither gradient method beats highlighting every word "
+        "on the backbone (docs/decisions.md). A checkpoint trained on rationales "
+        "serves its span head either way"
+    )
+    ask.add_argument("--unsupervised-evidence", default=None, help=unsupervised_evidence_help)
+    ask.add_argument(
+        "--ig-steps", type=int, default=None, help="integrated gradients' points on the path"
+    )
     ask.set_defaults(func=cmd_ask)
 
     serve = sub.add_parser("serve", help="run the reference gateway")
@@ -1016,6 +1042,11 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--weights", default=None, help="a checkpoint written by 'trigon train'")
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8000)
+    serve.add_argument(
+        "--unsupervised-evidence",
+        default=None,
+        help=unsupervised_evidence_help + " (or TRIGON_UNSUPERVISED_EVIDENCE)",
+    )
     serve.add_argument(
         "--compat",
         action="store_true",

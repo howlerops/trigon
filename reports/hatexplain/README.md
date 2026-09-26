@@ -1,4 +1,4 @@
-# HateXplain — evidence against human rationales, on the CPU spike
+# HateXplain — evidence against human rationales
 
 HateXplain (Mathew et al., AAAI 2021), Punyajoy Saha and co-authors. MIT
 (repository LICENSE, Copyright (c) 2020 Punyajoy Saha); the authors' dataset
@@ -18,6 +18,89 @@ Rationale: the tokens at least half of the rationale-giving annotators
 marked, only on posts whose majority is hateful or offensive. Split by a hash
 of the post id, a quarter held out; the evaluation set is topped up to the
 5,000-case floor from unseen training rows.
+
+## On Qwen2.5-1.5B: the span head reads, and gradient × input does not
+
+The backbone runs the spike could only set up: Qwen2.5-1.5B with LoRA rank 16,
+lr 1e-4, 3 epochs, on the same splits (13,229 training posts, 5,000
+evaluated). There are two arms of four seeds on `NVIDIA A10`: **with**
+rationale supervision (`qwen15b-e3-lr1e-4-rationales-*`) and **without** it
+(`--rationale-weight 0`, `qwen15b-e3-lr1e-4-norationales-*`). Commit `3a845d2`,
+clean tree, about 41 minutes a seed.
+
+**Plausibility against the human rationales, rationale arm, four seeds:**
+
+| Highlighter | Token F1 | IOU F1 |
+| --- | ---: | ---: |
+| **`span_head`, trained on rationales** | **0.7148–0.7197** | **0.6143–0.6213** |
+| `gradient_x_input`, same weights | 0.2871–0.3081 | 0.2114–0.2336 |
+| `gradient_x_input`, never shown a rationale (other arm) | 0.1790–0.2993 | 0.1416–0.2251 |
+| *rationale lexicon* (floor) | 0.5714–0.5736 | 0.4491–0.4544 |
+| *every word* (floor) | 0.4341–0.4369 | 0.2170–0.2193 |
+
+**The first falsifier in `docs/decisions.md` did not fire.** The span head
+beats the rationale lexicon on both metrics, on every seed, by +0.14 token F1
+and +0.16 IOU F1. On the spike it lost to the same lexicon by 0.08. Above the
+word list, what the head adds is context: which occurrences of a word the
+annotators marked, and the non-lexical spans a list cannot hold.
+
+**The second falsifier fired.** Gradient × input does not beat highlighting
+every word on token F1, on either arm or any seed. So as an unsupervised
+attribution it is worse than trivial. Every checkpoint trained without
+rationales served it by default, the deployed Banking77 model included, until
+the change recorded below. The
+decision names integrated gradients as the next candidate, scored the same
+way; it is being built and will be scored on these same checkpoints without
+retraining. Until then, `evidence_method: "gradient_x_input"` should be read
+as unvalidated, and the response already says which method produced the
+spans.
+
+**Integrated gradients, scored on the same eight checkpoints**
+(`qwen15b-e3-lr1e-4-{rationales,norationales}-igscore-*`: `--weights`, no
+retraining, commit `5a19070`; the reloaded models reproduce their original
+calibration decisions seed for seed):
+
+| Highlighter | Rationale arm, token F1 | No-rationale arm, token F1 | Rationale arm, IOU F1 |
+| --- | ---: | ---: | ---: |
+| `integrated_gradients` | 0.3524–0.3839 | 0.1934–0.3849 | 0.2923–0.3214 |
+| `gradient_x_input` | 0.2873–0.3075 | 0.1793–0.2998 | 0.2138–0.2358 |
+| *every word* | 0.4341–0.4369 | 0.4341–0.4369 | 0.2170–0.2193 |
+
+It beats gradient × input on seven of eight checkpoints, and still misses
+*every word* on token F1 on all eight. **So neither unsupervised attribution
+is served by default any more.** A checkpoint never trained on rationales
+answers `include_evidence` with `evidence_method: "unavailable"`, and an
+operator can opt into either method with `TRIGON_UNSUPERVISED_EVIDENCE`.
+
+**Integrated gradients is not complete on the backbone.** The summed
+attributions miss the log-probability difference they must equal: the median
+error is 137–179% on the rationale arm and 78–895% on the other, against
+under 1% in float32 on CPU. The backbone runs under bf16 autocast. This rules
+out the implementation on this hardware, not the method. A float32 path is
+the open item.
+
+**Accuracy and calibration, both arms** (majority label, three classes,
+marginal 0.4104; every blocking gate passes on all eight runs):
+
+| Seed | Accuracy, rationales | Accuracy, none | Brier, rationales | Brier, none | ECE, rationales | ECE, none |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 0 | 0.6970 | 0.6478 | 0.4102 | 0.4582 | 0.0271 | 0.0224 |
+| 1 | 0.6854 | 0.5688 | 0.4232 | 0.5334 | 0.0272 | 0.0226 |
+| 2 | 0.6938 | 0.6836 | 0.4119 | 0.4201 | 0.0277 | 0.0185 |
+| 3 | 0.6930 | 0.6772 | 0.4086 | 0.4145 | 0.0237 | 0.0300 |
+| median | **0.6934** | 0.6625 | **0.4111** | 0.4392 | 0.0272 | 0.0225 |
+
+**Rationale supervision also made the classifier better and steadier.** The
+median is +0.031 accuracy, Brier is better on all four seeds, and the
+accuracy spread narrows from 0.115 (0.5688–0.6836) to 0.012. Four seeds a
+side is enough to call the spread, and the medians differ by less than the
+unsupervised arm's range, so the accuracy gain itself is suggestive rather
+than established. ECE is slightly higher with rationales and inside the gate
+on every seed. The floor's p95 is 0.017–0.022, so several of these ECEs are
+within noise of perfect.
+
+The CPU spike results below are unchanged. They are what the backbone was
+measured against.
 
 ## Accuracy and calibration
 
