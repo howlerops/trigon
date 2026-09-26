@@ -305,6 +305,11 @@ def launch(args) -> None:
         app.deploy(name=deployed)
     job = modal.Function.from_name(deployed, "train_one").with_options(gpu=args.gpu)
     calls = {seed: job.spawn(args.corpus, seed, flags, run).object_id for seed in seeds}
+    # Kept on the Volume, because a run's calls are the only handle that can
+    # cancel it: several runs share one per-commit app, so stopping the app
+    # stops all of them. The first runs printed their calls and saved nothing,
+    # and one expensive sweep could only be stopped by stopping its neighbours.
+    _write_calls(run_id, calls)
 
     print(f"{args.corpus}: seeds {seeds}, gpu={args.gpu}, commit {commit[:12]}, app {deployed}")
     print(f"flags: {' '.join(flags)}")
@@ -313,12 +318,27 @@ def launch(args) -> None:
     print(f"collect with: python scripts/modal_train.py collect {run_id}")
 
 
+def _write_calls(run_id: str, calls: dict) -> None:
+    import io
+
+    with runs.batch_upload(force=True) as batch:
+        batch.put_file(io.BytesIO(json.dumps(calls).encode()), f"{run_id}/calls.json")
+
+
+def cancel(args) -> None:
+    """Cancel a run's queued and running seeds, and nothing else in its app."""
+    data = b"".join(runs.read_file(f"{args.run_id}/calls.json"))
+    for seed, call_id in json.loads(data).items():
+        modal.FunctionCall.from_id(call_id).cancel()
+        print(f"cancelled seed {seed} ({call_id})")
+
+
 def status(args) -> None:
     try:
         entries = sorted(entry.path for entry in runs.listdir(args.run_id))
     except Exception:  # noqa: BLE001 - the SDK raises a bare not-found here
         entries = []
-    done = [e for e in entries if e.endswith(".json")]
+    done = [e for e in entries if e.endswith(".json") and not e.endswith("/calls.json")]
     print(f"{args.run_id}: {len(done)} seed(s) finished")
     for name in (e for e in entries if e.endswith(".log")):
         text = b"".join(runs.read_file(name)).decode(errors="replace")
@@ -350,7 +370,7 @@ def collect(args) -> None:
     payloads = [
         json.loads(b"".join(runs.read_file(name)).decode())
         for name in names
-        if name.endswith(".json")
+        if name.endswith(".json") and not name.endswith("/calls.json")
     ]
     if not payloads:
         raise SystemExit(f"nothing on the Volume under {args.run_id} yet")
@@ -389,7 +409,7 @@ def main(argv: list[str] | None = None) -> int:
     go.add_argument("--prefix", default="")
     go.add_argument("--max-batch-cells", type=int, default=50_000_000)
     go.add_argument("--allow-dirty", action="store_true")
-    for name in ("status", "collect"):
+    for name in ("status", "collect", "cancel"):
         command = sub.add_parser(name)
         command.add_argument("run_id")
         if name == "collect":
@@ -398,7 +418,7 @@ def main(argv: list[str] | None = None) -> int:
                 "--models", action="store_true", help="also download seed checkpoints"
             )
     args = parser.parse_args(argv)
-    {"launch": launch, "status": status, "collect": collect}[args.command](args)
+    {"launch": launch, "status": status, "collect": collect, "cancel": cancel}[args.command](args)
     return 0
 
 
