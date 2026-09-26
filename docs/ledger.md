@@ -129,6 +129,18 @@ twenty-two runs** — the investigation is closed and the evidence is in
   floors — the lexical floor, a word list fitted to the training split's
   highlights, and every word. `train_corpus.py` appends it for any corpus
   with rationales and trains the evidence head on them.
+- **Faithfulness of evidence** (`trigon.evals.faithfulness`, 2026-09-26).
+  ERASER's comprehensiveness and sufficiency, as AOPC over the top 1–50% of
+  words by each method's own scores. Every probe deletes words from the
+  state and re-asks the engine. Two controls are scored the same way, a
+  random ranking and the rationale lexicon, and every row is paired against
+  both with a 95% interval. `train_corpus.py` prints it beside plausibility,
+  `--weights` runs included (`--faithfulness-n`, default 500). Proved on CPU
+  with the spike (`reports/hatexplain/spike-faithfulness-seed0.md`). Every
+  method beats random there. The span head is within 0.013 of the lexicon,
+  and both gradient methods beat the lexicon by about 0.1 on both metrics,
+  the reverse of their plausibility order. The backbone checkpoints are not
+  yet scored.
 - **Training on a GPU, from this sandbox.** `scripts/modal_train.py` runs one
   Modal container per seed and writes each seed's reports to a Volume before
   returning, so a `--detach`ed run outlives the VM that launched it and
@@ -489,9 +501,12 @@ what order, and how each step is known to be done.
   only cause**: the path is rough, and float32 still misses by 130–853%
   (*Believed, then disproved*). Still open: the eight checkpoints rescored
   on the GPU in float32, at 32 points and at 256.
-- **Faithfulness of evidence is unmeasured.** Plausibility says a person would
-  agree with a highlight, not that the model used it. Comprehensiveness and
-  sufficiency — delete the spans, measure the answer move — are not built.
+- **Faithfulness of evidence is unmeasured on the backbone.** Plausibility
+  says a person would agree with a highlight, not that the model used it.
+  Comprehensiveness and sufficiency are built and proved on the CPU spike
+  (*Built*, *Evaluation*). The eight saved HateXplain checkpoints are next,
+  eval-only, and they decide *Plausibility is the wrong target* in
+  `docs/decisions.md`.
 - **$/MTok has a preliminary measurement, and it is not $0.007.** Modal's L4,
   the certified model, $0.80/h as an input: $0.041–0.057 interactive (batch 1,
   two runs 1.4× apart on unchanged code), and $0.0091 at batch 32 offline

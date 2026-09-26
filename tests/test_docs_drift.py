@@ -180,3 +180,13 @@ def test_the_integrated_gradients_quadrature_is_published_as_it_is_served():
         text,
         re.M,
     )
+
+
+def test_the_faithfulness_bins_are_published_as_they_are_scored():
+    """`docs/evals.md` §7 names ERASER's bins; the suite must score those bins."""
+    from trigon.evals.faithfulness import FAITHFULNESS_BINS
+
+    percents = [f"{round(b * 100)}" for b in FAITHFULNESS_BINS]
+    stated = ", ".join(percents[:-1]) + f" and {percents[-1]}%"
+    text = re.sub(r"\s+", " ", (DOCS / "evals.md").read_text())
+    assert f"top {stated} of the post's words" in text

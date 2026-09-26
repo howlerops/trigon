@@ -204,6 +204,10 @@ class RationaleLexicon:
         self.threshold = threshold
         self.min_count = min_count
         self.vocabulary: frozenset[str] = frozenset()
+        #: Share of its training occurrences each word was highlighted in, for
+        #: words seen at least ``min_count`` times. The vocabulary is the words
+        #: at or above ``threshold``; the faithfulness suite ranks by the rate.
+        self.rates: dict[str, float] = {}
 
     def fit(self, cases: Iterable[Case]) -> RationaleLexicon:
         seen: dict[str, int] = {}
@@ -218,12 +222,17 @@ class RationaleLexicon:
                     continue
                 seen[word] = seen.get(word, 0) + 1
                 marked[word] = marked.get(word, 0) + int(hit)
+        self.rates = {w: marked.get(w, 0) / n for w, n in seen.items() if n >= self.min_count}
         self.vocabulary = frozenset(
             w
             for w, n in seen.items()
             if n >= self.min_count and marked.get(w, 0) >= self.threshold * n
         )
         return self
+
+    def rate(self, word: str) -> float:
+        """The training highlight rate of ``word``, normalised; 0 if unseen or rare."""
+        return self.rates.get(_normal(word), 0.0)
 
     def spans(self, text: str) -> list[tuple[int, int]]:
         return [(s, e) for s, e in words(text) if _normal(text[s:e]) in self.vocabulary]
