@@ -31,10 +31,12 @@ do for the spike.
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import hashlib
 import json
 import math
+from collections.abc import Iterator
 from pathlib import Path
 
 import torch
@@ -115,6 +117,30 @@ class RMSNorm(nn.Module):
         return self.weight * x32.to(dtype)
 
 
+class _UpcastLinear(torch.autograd.Function):
+    """``F.linear`` against a low-precision frozen weight, in the input's precision.
+
+    The weight is upcast for the product and dropped, and upcast again for the
+    backward -- which saves the stored weight, not the upcast copy. The
+    obvious ``F.linear(x, weight.float())`` would have autograd keep every
+    layer's float32 copy alive until the backward pass: the whole backbone in
+    float32 again, 5.3 GB of a 1.5B model's projections, held for as long as
+    one integrated-gradients chunk is. This holds one projection's copy at a
+    time, 55 MB at the widest. Only the input's gradient is returned: the
+    weight is frozen, and what IG differentiates is the input.
+    """
+
+    @staticmethod
+    def forward(ctx, x, weight, bias):
+        ctx.save_for_backward(weight)
+        return F.linear(x, weight.to(x.dtype), None if bias is None else bias.to(x.dtype))
+
+    @staticmethod
+    def backward(ctx, grad):
+        (weight,) = ctx.saved_tensors
+        return grad @ weight.to(grad.dtype), None, None
+
+
 class LoRALinear(nn.Module):
     """A frozen projection plus a trainable low-rank update, zero at init.
 
@@ -140,7 +166,12 @@ class LoRALinear(nn.Module):
             nn.init.zeros_(self.lora_b)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        out = self.base(x)
+        weight = self.base.weight
+        if x.dtype != weight.dtype and not torch.is_autocast_enabled(x.device.type):
+            # Full precision against a bf16 backbone (`QwenPrefillModel.full_precision`).
+            out = _UpcastLinear.apply(x, weight, self.base.bias)
+        else:
+            out = self.base(x)
         if self.rank:
             out = out + F.linear(F.linear(x, self.lora_a), self.lora_b) * self.scale
         return out
@@ -267,6 +298,12 @@ class QwenPrefillModel(nn.Module):
         #: activations. Twenty-eight layers of a 1.5B model at a few hundred
         #: tokens times a chunk of eight does not fit a 24 GB card otherwise.
         self.checkpointing = False
+        #: Run the layers under bf16 autocast on the CPU too, as they always do
+        #: on CUDA. Nothing serves this way; it is how a CPU test reproduces
+        #: the GPU's arithmetic (`tests/test_qwen_backend.py`).
+        self.autocast_cpu = False
+        # Set only inside `full_precision`.
+        self._full_precision = False
         self.reset_trainable()
 
     def reset_trainable(self) -> None:
@@ -288,7 +325,28 @@ class QwenPrefillModel(nn.Module):
             self.evidence_bias.zero_()
 
     def _autocast(self, like: torch.Tensor):
-        return torch.autocast("cuda", dtype=torch.bfloat16, enabled=like.is_cuda)
+        enabled = (like.is_cuda or self.autocast_cpu) and not self._full_precision
+        return torch.autocast(like.device.type, dtype=torch.bfloat16, enabled=enabled)
+
+    @contextlib.contextmanager
+    def full_precision(self) -> Iterator[None]:
+        """Every layer in the input's precision: no autocast, frozen weights upcast.
+
+        What integrated gradients runs under (`TorchReadoutBackend.ig_precision`).
+        The weights are still the bf16 ones -- this changes the arithmetic, not
+        the model -- and each is upcast on the fly by `_UpcastLinear`, one
+        projection at a time. TF32 is refused for the duration, because a
+        float32 product with a ten-bit mantissa is most of the way back to
+        where bf16 was.
+        """
+        previous, matmul = self._full_precision, torch.get_float32_matmul_precision()
+        self._full_precision = True
+        torch.set_float32_matmul_precision("highest")
+        try:
+            yield
+        finally:
+            self._full_precision = previous
+            torch.set_float32_matmul_precision(matmul)
 
     @staticmethod
     def _batched(token_embeddings, mask, positions, segment_types):

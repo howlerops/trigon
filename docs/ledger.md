@@ -293,6 +293,7 @@ The most useful section. Each of these was argued for before it was measured.
 | Evidence can be held to the answers' float32 bound across shapes | Gradient × input moved 1.7e-06 when one question was added, past the 1e-06 bound: a backward pass amplifies the forward's rounding ~14×. In float64 it reads 0.0, so the tests compare there. |
 | Asking for evidence leaves the answer bit-identical | Not under gradient × input: autograd takes `nn.TransformerEncoder` off its no-grad fast path, and the answer moves 2e-08. The span head, which needs no gradients, now stays on that path and is exact. |
 | Gradient × input would be a usable unsupervised attribution, and the spike's was below *every word* only because the spike is small | On Qwen2.5-1.5B, four seeds, it is still below highlighting every word: token F1 0.287–0.308 against 0.434–0.437, IOU F1 0.211–0.234 — no better than the spike's 0.30–0.32. The span head on the same weights scores 0.715–0.720. The falsifier in `docs/decisions.md` fired; integrated gradients is built and is not the default until it is measured to clear the same bar |
+| Integrated gradients' completeness failure on the backbone (median 78–895%) is bf16 rounding, and a float32 path fixes it | Half right. On tiny Qwen2s bf16 is the whole failure: median 8.8% in bf16 against 0.04% in float32, and more points do not help. On Qwen2.5-1.5B's own weights on CPU, float32 still misses by 130% and 853% (63× and 200× with a non-zero segment embedding). The path jumps by up to 2.6 nats between points 0.025 apart. Where it is smooth, autograd matches finite differences (−0.5065 against −0.5085); where it is rough, they disagree. The float32 path stays as the default, since it removes the rounding. It does not make the method complete here |
 | Integrated gradients needs only enough evenly spaced steps | On a pre-norm forward the path's change is packed against the zero baseline: 32 evenly spaced points on a tiny Qwen2 summed 12–91% away from the difference they must add up to, and 64 were no better. Spaced as `u³`, 32 are within 0.04% |
 
 ---
@@ -479,8 +480,14 @@ what order, and how each step is known to be done.
   attributions miss the log-probability difference by a median of 78–895%
   across the eight checkpoints, against under 1% in float32 on CPU. The
   backbone runs under bf16 autocast, so the measurement above is of this
-  implementation on this hardware, not of the method. A float32 path through
-  the frozen backbone would settle it.
+  implementation on this hardware, not of the method. **The float32 path is
+  built (2026-09-26) and is IG's default** (`IG_PRECISION`), and bf16 is
+  measured to be a cause on CPU: eight tiny Qwen2s under bf16 autocast miss
+  by a median 8.8% on their worst question (max 86%) and 256 points do not
+  help, where float32 misses by 0.04%. **On the real weights it is not the
+  only cause**: the path is rough, and float32 still misses by 130–853%
+  (*Believed, then disproved*). Still open: the eight checkpoints rescored
+  on the GPU in float32, at 32 points and at 256.
 - **Faithfulness of evidence is unmeasured.** Plausibility says a person would
   agree with a highlight, not that the model used it. Comprehensiveness and
   sufficiency — delete the spans, measure the answer move — are not built.
