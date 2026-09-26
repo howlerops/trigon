@@ -251,6 +251,9 @@ twenty-two runs** — the investigation is closed and the evidence is in
 | **GoEmotions on Qwen2.5-1.5B, four seeds** | **Certified, four of four**: Brier skill +0.2857 to +0.3010 against the +0.02 limit; ECE 0.0034–0.0076 at a floor p95 of 0.0029–0.0033. `joy` carries it (+0.21 lift); `fear` and `disgust` sit barely off their marginals on every seed (`reports/goemotions/README.md`) |
 | **HelpSteer2 annotator distributions under `brier_over_marginal`** | **Certified, four seeds of four**: skill +0.0543 to +0.0658, median +0.0559, against +0.02. The hard-label ablation clears it too (median +0.0475), but only after its calibrator ran |
 | The synthetic suite on Qwen, with the per-primitive gate blocking | **Three seeds of four.** Seed 0's Score head is at ECE 0.0551, which its pooled 0.0408 hid. The median worst primitive is 0.0303, so the configuration still certifies. Banking77 passes on all four seeds (worst 0.0448) |
+| **Faithfulness on Qwen2.5-1.5B, HateXplain, four seeds** | The span head is faithful: comprehensiveness 0.331–0.376 and sufficiency 0.064–0.088, better than the rationale lexicon on both metrics on every seed (intervals clear of zero). Integrated gradients sits level with the lexicon; gradient × input is worse on both. The spike's opposite ranking did not transfer (`reports/hatexplain/README.md`) |
+| Integrated gradients in float32 on the backbone | Completeness error median 107–155% at 32 points and 65–127% at 256. Token F1 below *every word* on 15 of 16 runs. The unsupervised default stays `none` |
+| The same checkpoint on `A10G` rather than `A10` | Accuracy moves by up to 0.0008, and the calibrator chooses differently on two seeds of four. Hardware is a second axis on the GPU too |
 | **Serving cost on Modal's L4, the certified model, re-timed with batches reading the schema cache** | Batch 1: 72.3 ms p50, $0.0410/MTok. The same unchanged path read 102.9 ms in the first run, so the host varies by 1.4×. Batch 8: 46.4 req/s against 16.3 before; batch 32: 60.8 against 14.5, $0.0091/MTok but p50 514 ms. Interactive savings against a $0.25/MTok LLM are 4.2–6.4×; offline, 27–29× (`reports/burn-in/README.md`) |
 | Banking77 accuracy (pilot, 2 seeds) | 0.4640 / 0.4193 against a 1.8% marginal — **it transfers** |
 | **Evidence on HateXplain, the spike, two seeds** | The trained span head: token F1 0.488–0.495, IOU F1 0.330–0.331. **A word list beats it**: 0.573 / 0.452 — every word highlighted in half its training occurrences, very nearly a slur list. Gradient × input 0.30–0.32 token F1, below highlighting every word (0.434) |
@@ -505,14 +508,14 @@ what order, and how each step is known to be done.
   by a median 8.8% on their worst question (max 86%) and 256 points do not
   help, where float32 misses by 0.04%. **On the real weights it is not the
   only cause**: the path is rough, and float32 still misses by 130–853%
-  (*Believed, then disproved*). Still open: the eight checkpoints rescored
-  on the GPU in float32, at 32 points and at 256.
-- **Faithfulness of evidence is unmeasured on the backbone.** Plausibility
-  says a person would agree with a highlight, not that the model used it.
-  Comprehensiveness and sufficiency are built and proved on the CPU spike
-  (*Built*, *Evaluation*). The eight saved HateXplain checkpoints are next,
-  eval-only, and they decide *Plausibility is the wrong target* in
-  `docs/decisions.md`.
+  (*Believed, then disproved*). Rescored on the GPU in float32: the median
+  error is 107–155% at 32 points and 65–127% at 256. It stays open as a
+  property of the straight path, not the arithmetic. A different path or
+  baseline, for example a blurred or mean-embedding baseline, is the next
+  thing to try if unsupervised attribution becomes worth serving.
+- ~~Faithfulness of evidence is unmeasured on the backbone.~~ **Closed,
+  2026-09-26**: the span head beats the lexicon control on comprehensiveness
+  and sufficiency on four seeds of four; the gradient methods do not.
 - **$/MTok has a preliminary measurement, and it is not $0.007.** Modal's L4,
   the certified model, $0.80/h as an input: $0.041–0.057 interactive (batch 1,
   two runs 1.4× apart on unchanged code), and $0.0091 at batch 32 offline
