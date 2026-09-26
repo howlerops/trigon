@@ -14,7 +14,7 @@ narrative sections are a discipline, not a test.
 
 | | |
 | --- | ---: |
-| Commits | 190 |
+| Commits | 218 |
 | Tests | 537 |
 | Python files (`src`, `tests`, `scripts`) | 113 |
 | Lines in `src/` | 12,633 |
