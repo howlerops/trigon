@@ -233,6 +233,7 @@ twenty-two runs** — the investigation is closed and the evidence is in
 | **GoEmotions on Qwen2.5-1.5B, four seeds** | **Certified, four of four**: Brier skill +0.2857 to +0.3010 against the +0.02 limit; ECE 0.0034–0.0076 at a floor p95 of 0.0029–0.0033. `joy` carries it (+0.21 lift); `fear` and `disgust` sit barely off their marginals on every seed (`reports/goemotions/README.md`) |
 | **HelpSteer2 annotator distributions under `brier_over_marginal`** | **Certified, four seeds of four**: skill +0.0543 to +0.0658, median +0.0559, against +0.02. The hard-label ablation clears it too (median +0.0475), but only after its calibrator ran |
 | The synthetic suite on Qwen, with the per-primitive gate blocking | **Three seeds of four.** Seed 0's Score head is at ECE 0.0551, which its pooled 0.0408 hid. The median worst primitive is 0.0303, so the configuration still certifies. Banking77 passes on all four seeds (worst 0.0448) |
+| **Serving cost on Modal's L4, the certified model, re-timed with batches reading the schema cache** | Batch 1: 72.3 ms p50, $0.0410/MTok. The same unchanged path read 102.9 ms in the first run, so the host varies by 1.4×. Batch 8: 46.4 req/s against 16.3 before; batch 32: 60.8 against 14.5, $0.0091/MTok but p50 514 ms. Interactive savings against a $0.25/MTok LLM are 4.2–6.4×; offline, 27–29× (`reports/burn-in/README.md`) |
 | Banking77 accuracy (pilot, 2 seeds) | 0.4640 / 0.4193 against a 1.8% marginal — **it transfers** |
 | **Evidence on HateXplain, the spike, two seeds** | The trained span head: token F1 0.488–0.495, IOU F1 0.330–0.331. **A word list beats it**: 0.573 / 0.452 — every word highlighted in half its training occurrences, very nearly a slur list. Gradient × input 0.30–0.32 token F1, below highlighting every word (0.434) |
 | HateXplain accuracy, the spike, with and without rationale supervision | 0.5798 on both supervised seeds, 0.5664 / 0.5702 without, against a 0.408 marginal; every blocking gate passes on all four. Two seeds a side: not an effect |
@@ -491,21 +492,23 @@ what order, and how each step is known to be done.
 - **Faithfulness of evidence is unmeasured.** Plausibility says a person would
   agree with a highlight, not that the model used it. Comprehensiveness and
   sufficiency — delete the spans, measure the answer move — are not built.
-- **$/MTok has a preliminary measurement: $0.0574, not $0.007.** Modal's L4,
-  the certified model, batch 1, $0.80/h as an input
-  (`reports/burn-in/modal-l4/`). It closes on a rented, dedicated L4.
-- ~~The batched serving path does not use the schema cache.~~ **Closed in
-  code, 2026-09-26; the GPU re-time is pending.** The record: at batch 8
+- **$/MTok has a preliminary measurement, and it is not $0.007.** Modal's L4,
+  the certified model, $0.80/h as an input: $0.041–0.057 interactive (batch 1,
+  two runs 1.4× apart on unchanged code), and $0.0091 at batch 32 offline
+  (`reports/burn-in/README.md`). It closes on a rented, dedicated L4.
+- ~~The batched serving path does not use the schema cache.~~ **Closed,
+  2026-09-26, and re-timed on the L4**: the certified model serves 46.4 req/s
+  at batch 8 and 60.8 at batch 32, against 16.3 and 14.5 before
+  (`reports/burn-in/README.md`). The record: at batch 8
   and 32 the L4 burn-in's computed tokens equalled its billed ones, every
   batched row was slower per request than batch 1 and failed the latency
   target, and `Engine.answer_many` paid full price for the 97% of the
   sequence that batch 1 reads from the cache. `infer_many` now groups a
   batch by schema and reads one cached prefix per group; on a loaded CPU the
   spike's batched throughput rose 3.9–4.1× and computed tokens fell to 2.7%
-  of billed at every batch size (`reports/cache/README.md`). The L4 rows in
-  `reports/burn-in/modal-l4/` still describe the old path until
-  `modal run scripts/modal_burn_in.py` is rerun; whether batching then beats
-  batch 1 on the certified model is not known.
+  of billed at every batch size (`reports/cache/README.md`). On the L4,
+  batching now beats batch 1 on throughput. Only batch 1 meets the 150 ms p50
+  target.
 - ~~The KV cache is off by default because nobody has timed it.~~ **Closed.**
   Timed on an idle machine: 6× at the served shape, 23× at 256 options
   (`reports/cache/README.md`). It is on by default now and `/healthz` reports

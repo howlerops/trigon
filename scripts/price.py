@@ -13,7 +13,7 @@ actually send and running it through the same tokenizer. Prices per token are
 `docs/roadmap.md` records the one cost figure this project inherited
 ($0.007/MTok on an L4) as arithmetic over unsourced inputs. A preliminary
 burn-in of the certified model on Modal's L4 measured **$0.0574/MTok billed**
-at batch 1 (`reports/burn-in/modal-l4/`), eight times that; the example
+at batch 1 (`reports/burn-in/README.md`), eight times that; the example
 command above uses it.
 
 So the headline this prints is the **token ratio**, which needs no price at

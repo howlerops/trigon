@@ -21,7 +21,7 @@ next, and what each step would have to show to count.
 | A.3 real backbone | ✅ **Done.** All three synthetic questions certify on four seeds, `size` included (`reports/synthetic/`) |
 | A.4 CI's hardware | Blocked on Actions billing |
 | A.5 length bucketing | ✅ **Measured.** 1.13× faster (1.09–1.18×) with outcomes unchanged, four seeds per arm; not the 2.82× it was sized by (`reports/helpsteer2/README.md`) |
-| B.1 L4 burn-in | 🟡 **Preliminary, on Modal's L4.** The certified model: p50 102.9 ms, **$0.0574/MTok** billed at $0.80/h, which is 8× the inherited $0.007. Savings against a $0.25/MTok LLM are **4.2–4.5×**, not 63–96× (`reports/burn-in/modal-l4/`). A rented, dedicated L4 still closes it |
+| B.1 L4 burn-in | 🟡 **Preliminary, on Modal's L4, two runs.** The certified model, interactive (batch 1, p50 72–103 ms): **$0.041–0.057/MTok**, 4.2–6.4× cheaper than a $0.25/MTok LLM. Batched, now that batches read the schema cache: $0.0119 at batch 8 (p50 171 ms) and $0.0091 at batch 32 (514 ms, offline only), 20–29×. The inherited $0.007 is still out of reach (`reports/burn-in/README.md`). A rented, dedicated L4 still closes it |
 | B.2 / B.3 | Done |
 | C.1 publish weights | 🟡 **Decided and packaged (Q21).** The certified adapter, calibrators and model card are in `releases/banking77-qwen15b-v1/` and on the Modal Volume. What is left is attaching the bundle to a GitHub Release, which needs a token or the UI |
 | C.2 / C.3 | Done |

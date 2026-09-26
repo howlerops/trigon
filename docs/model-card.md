@@ -156,7 +156,7 @@ rather than on one run. This model predates that rule.
 the inherited figure.** The $0.007/MTok the project's economics rested on
 was arithmetic over unsourced inputs. On Modal's L4 the certified Qwen2.5-1.5B
 Banking77 model costs **$0.0574 per million billed tokens** at batch 1, at a
-$0.80/hour price taken as an input (`reports/burn-in/modal-l4/`). That is a
+$0.80/hour price taken as an input (`reports/burn-in/README.md`). That is a
 serverless L4 rather than the dedicated one the cost model assumes, so B.1
 stays open.
 
