@@ -60,10 +60,11 @@ mask gives the answer. `tests/test_independence.py` asserts it for both.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import math
 import time
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from pathlib import Path
 
 try:  # pragma: no cover - exercised by the import error path only
@@ -134,6 +135,26 @@ EVIDENCE_MODES = ("auto", "span_head", *UNSUPERVISED_EVIDENCE_CHOICES)
 IG_STEPS = 32
 IG_CHUNK = 16
 IG_POWER = 3
+#: The arithmetic integrated gradients' path runs in, and what it may be set
+#: to. ``"float32"`` is every layer in the embeddings' precision: no autocast,
+#: and a bf16 backbone's frozen weights upcast one projection at a time
+#: (`QwenPrefillModel.full_precision`). ``"autocast"`` is whatever the answer
+#: runs in -- bf16 on CUDA for the backbone. The spike has no autocast and
+#: float32 weights, so for it the two are the same arithmetic.
+#:
+#: **Float32 because completeness is a sum of large terms that cancel.** Each
+#: token's attribution is a dot product of the input with an integrated
+#: gradient, and the log-probability difference they must add up to is a
+#: small remainder of those terms; a gradient carried in bf16's eight bits is
+#: a relative error per term that the remainder does not share, so the miss
+#: grows with how much cancels. Eight 2-layer toy Qwen2s under CPU bf16
+#: autocast miss by a median 8.8% on their worst question (max 86%), 256
+#: points instead of 32 do not help (9.3%, 122%) because it is not
+#: quadrature, and float32 misses by a median 0.04%
+#: (`tests/test_qwen_backend.py`). The answer and gradient x input stay in
+#: the precision they were served in: only IG sums its gradients.
+IG_PRECISIONS = ("float32", "autocast")
+IG_PRECISION = "float32"
 
 
 def ig_schedule(steps: int, power: float = 1.0) -> tuple[torch.Tensor, torch.Tensor]:
@@ -531,6 +552,7 @@ class TorchReadoutBackend:
         self.ig_steps = IG_STEPS
         self.ig_chunk = IG_CHUNK
         self.ig_power = IG_POWER
+        self.ig_precision = IG_PRECISION
 
     @property
     def model_version(self) -> str:
@@ -805,6 +827,32 @@ class TorchReadoutBackend:
             return nn.functional.logsigmoid(logits[0] if label else -logits[0])
         return torch.log_softmax(logits, dim=-1)[label]
 
+    @contextlib.contextmanager
+    def _ig_arithmetic(self) -> Iterator[None]:
+        """The precision integrated gradients' path runs in (`IG_PRECISION`).
+
+        Under ``"float32"`` on a model that has a lower-precision path, the
+        schema prefix cache is set aside for the duration and a private one
+        used: a cached prefix belongs to the arithmetic that produced it as
+        well as to the weights, and the answer's bf16 keys under a float32
+        path would put the rounding back in through the schema. The private
+        prefix is computed once per call -- every chunk shares it -- and
+        dropped, so the served cache never holds a float32 block.
+        """
+        if self.ig_precision not in IG_PRECISIONS:
+            raise ValueError(f"ig_precision must be one of {IG_PRECISIONS}")
+        full_precision = getattr(self.model, "full_precision", None)
+        if self.ig_precision == "autocast" or full_precision is None:
+            yield
+            return
+        served = self._prefix_cache
+        self._prefix_cache = {}
+        try:
+            with full_precision():
+                yield
+        finally:
+            self._prefix_cache = served
+
     def path_logits(
         self,
         compiled: CompiledRequest,
@@ -896,7 +944,7 @@ class TorchReadoutBackend:
         # must not turn the answer's miss into a reported hit.
         reported = self._last_cached_tokens
         try:
-            with torch.enable_grad():
+            with torch.enable_grad(), self._ig_arithmetic():
                 for begin in range(0, steps, chunk):
                     heads, path = self.path_logits(
                         compiled,
@@ -926,19 +974,36 @@ class TorchReadoutBackend:
         """What each question's integrated gradients must sum to.
 
         The selected label's log-probability at the input minus at the
-        baseline -- the two ends of `path_logits`' path, in one pass. Summed
+        baseline -- the two ends of `path_logits`' path, in one pass, in the
+        arithmetic the path is integrated in (`ig_precision`). Summed
         attributions that miss it by more than quadrature error are wrong.
+
+        The label is the served answer's, as `integrated_gradients`' is: the
+        two ends in float32 can rank a near-tie the other way from the
+        answer's bf16 pass, and a difference for one label checked against
+        attributions for the other is not a completeness error.
         """
         reported = self._last_cached_tokens
         try:
             with torch.no_grad():
-                (baseline, full), _ = self.path_logits(compiled, request, torch.tensor([0.0, 1.0]))
+                embeddings, spans = self._embed(compiled)
+                answer = self._heads(
+                    compiled, request, self._encode(compiled, embeddings, spans), spans
+                )
+                with self._ig_arithmetic():
+                    (baseline, full), _ = self.path_logits(
+                        compiled,
+                        request,
+                        torch.tensor([0.0, 1.0]),
+                        embeddings=embeddings,
+                        spans=spans,
+                    )
         finally:
             self._last_cached_tokens = reported
         out = {}
         for question in compiled.schema.questions:
             qid, kind = question.question_id, question.kind
-            label = self._selected_label(kind, full[qid])
+            label = self._selected_label(kind, answer[qid])
             at_input = self._log_prob(kind, full[qid], label)
             out[qid] = float(at_input - self._log_prob(kind, baseline[qid], label))
         return out

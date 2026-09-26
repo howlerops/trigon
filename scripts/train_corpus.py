@@ -149,6 +149,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="integrated gradients' points per forward pass (0 = the backend's default)",
     )
     parser.add_argument(
+        "--ig-precision",
+        choices=("float32", "autocast"),
+        default=None,
+        help="the arithmetic integrated gradients' path runs in (default: the backend's, "
+        "float32; `autocast` is the answer's bf16 on a GPU)",
+    )
+    parser.add_argument(
         "--ig-completeness-n",
         type=int,
         default=200,
@@ -548,6 +555,7 @@ def ig_completeness(backend, engine, cases, limit: int) -> dict | None:
         return ordered[min(len(ordered) - 1, int(q * len(ordered)))] if ordered else None
 
     return {
+        "precision": backend.ig_precision,
         "cases": len(pairs),
         "scored": len(errors),
         "median_abs_delta_nats": statistics.median(deltas),
@@ -563,13 +571,15 @@ def render_completeness(result: dict | None, backend) -> list[str]:
     return [
         "Integrated gradients' completeness on the first "
         f"{result['cases']:,} of these cases ({backend.ig_steps} points, "
-        f"`u ** {backend.ig_power}` spacing): relative error of the summed attributions "
-        "against the log-probability difference they must add up to, median "
+        f"`u ** {backend.ig_power}` spacing, {result['precision']} path): relative error "
+        "of the summed attributions against the log-probability difference they must "
+        "add up to, median "
         f"{result['median_relative_error']:.4f}, p90 {result['p90_relative_error']:.4f}, "
         f"max {result['max_relative_error']:.4f}, over the {result['scored']:,} whose "
         f"difference is at least 0.01 nats (median difference "
-        f"{result['median_abs_delta_nats']:.3f}). A large error means too few points, "
-        "and the `integrated gradients` row is then a quadrature artefact, not the method.",
+        f"{result['median_abs_delta_nats']:.3f}). A large error means too few points or "
+        "too little precision, and the `integrated gradients` row is then an artefact of "
+        "the arithmetic, not the method.",
         "",
     ]
 
@@ -623,6 +633,7 @@ def main(argv: list[str] | None = None) -> int:
     backend.to(device)
     backend.ig_steps = args.ig_steps or backend.ig_steps
     backend.ig_chunk = args.ig_chunk or backend.ig_chunk
+    backend.ig_precision = args.ig_precision or backend.ig_precision
     hardware = f"{device} ({hardware})"
     print(f"{args.corpus}: training on {hardware}", file=sys.stderr)
     compiler = backend.make_compiler(option_scoring=OptionScoring(args.option_scoring))

@@ -190,6 +190,27 @@ log-probability difference they must add up to, and `u³`-spaced 0.04%.
 Completeness is asserted on both backbones' forwards and measured on every
 plausibility report.
 
+**Integrated gradients runs in float32 when the answer does not**
+(`IG_PRECISION`). On a GPU the backbone's frozen projections are stored in
+bf16 and every layer runs under bf16 autocast, and the answer and gradient ×
+input stay there. IG's path does not: no autocast, and each bf16 projection
+upcast to float32 as it is used, forward and again backward, one at a time —
+so a 1.5B backbone costs no float32 copy (5.3 GB of projections that autograd
+would otherwise hold for the backward pass), only 55 MB for the widest one,
+and TF32 is refused for the duration. The schema prefix it attends to is
+computed in the same arithmetic and dropped afterwards; the served cache is
+not touched. The reason is completeness: attributions of both signs cancel
+down to a small log-probability difference, and a gradient carried in bf16's
+eight bits is a relative error on every term that the remainder does not
+share, so the error grows with how much cancels. On eight tiny Qwen2s under
+CPU bf16 autocast the worst question missed by a median 8.8% (max 86%), and
+256 points instead of 32 did not help (9.3%, 122%) — rounding, not
+quadrature; the same path in float32 misses by a median 0.04%, and by 0.04%
+at worst with 256 points (`tests/test_qwen_backend.py`). The spike has no autocast, so there the two
+settings are one arithmetic. `ig_precision = "autocast"` (or
+`--ig-precision autocast` on `scripts/train_corpus.py`) restores the old
+path, for measuring what it cost.
+
 **Evidence is exactly as independent as the answer.** The span head reads the
 state's final hidden states and the question's own readout; gradient × input
 differentiates the question's own log-probability, and integrated gradients
@@ -234,6 +255,7 @@ definitions of a span:
 | Longest word a subword token is widened to | 32 | `trigon.evidence.MAX_WORD_CHARS` |
 | Integrated gradients' points on the path | 32 | `trigon.backends.torch_readout.IG_STEPS` |
 | Power they are spaced by, `alpha = u ** p` | 3 | `trigon.backends.torch_readout.IG_POWER` |
+| Arithmetic the path runs in | float32 | `trigon.backends.torch_readout.IG_PRECISION` |
 | IOU at which a predicted span matches a human one | 0.5 | `trigon.evals.rationale.IOU_MATCH` |
 
 A token is kept at the threshold, trimmed of whitespace (a byte-level token's

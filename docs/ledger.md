@@ -475,8 +475,12 @@ what order, and how each step is known to be done.
   attributions miss the log-probability difference by a median of 78–895%
   across the eight checkpoints, against under 1% in float32 on CPU. The
   backbone runs under bf16 autocast, so the measurement above is of this
-  implementation on this hardware, not of the method. A float32 path through
-  the frozen backbone would settle it.
+  implementation on this hardware, not of the method. **The float32 path is
+  built (2026-09-26) and is IG's default** (`IG_PRECISION`), and bf16 is
+  measured to be a cause on CPU: eight tiny Qwen2s under bf16 autocast miss
+  by a median 8.8% on their worst question (max 86%) and 256 points do not
+  help, where float32 misses by 0.04%. It closes when the eight checkpoints
+  are rescored on the GPU under it.
 - **Faithfulness of evidence is unmeasured.** Plausibility says a person would
   agree with a highlight, not that the model used it. Comprehensiveness and
   sufficiency — delete the spans, measure the answer move — are not built.
