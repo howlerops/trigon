@@ -1374,9 +1374,23 @@ plausibility report prints the measured completeness error beside the row.
   toy Qwen2 the median is under 1%. The backbone runs under bf16 autocast on
   the GPU, and a path integral of bf16 gradients is not the integral it is
   written as. A float32 path on the backbone would decide it; until then,
-  what failed is this implementation on this hardware.
+  what failed is this implementation on this hardware. **Decided, 2026-09-26:
+  the method fails too.** In float32 the median error is 107–155% at 32
+  points and 65–127% at 256 on the rationale arm, and token F1 stays below
+  *every word* on fifteen of sixteen runs (0.360–0.445 against 0.431–0.456).
+  More points and more precision help without making it complete. The
+  remaining error is the straight path through a pre-norm backbone, which
+  switches tokens back on only near the zero baseline. So the default stays
+  `none` (`reports/hatexplain/README.md`).
 - *Plausibility is the wrong target*, if a faithfulness measurement —
   comprehensiveness and sufficiency, deleting the highlighted spans and
   measuring the answer move — shows the head's spans are not what the answer
   used. Plausibility says a person would agree; it does not say the model
-  looked there. That measurement does not exist yet and is recorded as open.
+  looked there. **Did not fire, 2026-09-26.** Measured on the backbone,
+  four seeds, the span head is the most faithful highlighter as well as the
+  most plausible. Against the rationale lexicon it has higher
+  comprehensiveness (+0.015 to +0.023) and lower sufficiency (−0.009 to
+  −0.017) on every seed, with intervals clear of zero. The gradient methods
+  are the unfaithful ones. On the 128-wide spike the order was reversed, so
+  this is a property of the backbone, not of the head
+  (`reports/hatexplain/README.md`).

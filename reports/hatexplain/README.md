@@ -102,6 +102,70 @@ within noise of perfect.
 The CPU spike results below are unchanged. They are what the backbone was
 measured against.
 
+## On the backbone, the span head is faithful as well as plausible
+
+Eval-only on the same eight checkpoints (`--weights`, no retraining), commit
+`e061a18`, clean tree. Two sweeps per arm:
+- `*-f32faith-*`: integrated gradients in float32 at 32 points on every
+  rationale case, plus faithfulness on 500 cases.
+- `*-igf32-s256-*`: integrated gradients at 256 points on 200 cases, to
+  separate quadrature from arithmetic.
+
+The first sweep ran on `NVIDIA A10` and reproduces the original
+runs' calibration decisions seed for seed.
+
+**Faithfulness, rationale arm, four seeds** (ERASER AOPC over 1/5/10/20/50% of
+words, on the uncalibrated distribution, 500 cases a seed):
+
+| Highlighter | Comprehensiveness ↑ | Sufficiency ↓ | Against the lexicon control |
+| --- | ---: | ---: | --- |
+| **`span_head`** | **0.331–0.376** (median 0.345) | **0.064–0.088** (0.079) | better on **both** metrics on **all four** seeds, 95% intervals clear of zero: comprehensiveness +0.015 to +0.023, sufficiency −0.009 to −0.017 |
+| `integrated_gradients` | 0.284–0.344 (0.302) | 0.074–0.109 (0.093) | level with it: within noise, or worse, on every seed |
+| `gradient_x_input` | 0.201–0.216 (0.206) | 0.180–0.216 (0.189) | worse on both metrics on every seed |
+| *rationale lexicon* | 0.316–0.353 (0.328) | 0.081–0.097 (0.090) | (control) |
+| *random* | 0.069–0.086 (0.073) | 0.311–0.341 (0.328) | (control) |
+
+On the no-rationale arm there is no span head. Gradient × input
+(comprehensiveness 0.103–0.202) and integrated gradients (0.124–0.296) both
+fall below the lexicon on comprehensiveness on every seed.
+
+**The spike's reversal does not survive the backbone.** On the 128-wide spike
+the span head was the most plausible highlighter and the least faithful. On
+Qwen2.5-1.5B it is the most plausible **and** the most faithful:
+- deleting its top words moves the answer more than deleting the rationale
+  lexicon's words;
+- keeping only its words preserves the answer better.
+
+So it is reading more than a vocabulary, and the answer depends on what it
+highlights. `docs/decisions.md`'s falsifier *Plausibility is the wrong
+target* did not fire.
+
+**Integrated gradients in float32 still does not clear the bar.**
+
+| Run | Completeness error, median | IG token F1 | *Every word* |
+| --- | ---: | ---: | ---: |
+| Rationale arm, 32 points, all cases | 1.07–1.55 | 0.360–0.393 | 0.434–0.437 |
+| Rationale arm, 256 points, 200 cases | 0.65–1.27 | 0.418–0.445 | 0.431–0.456 |
+| No-rationale arm, 32 points | 0.68–7.50 | 0.200–0.386 | 0.434–0.437 |
+| No-rationale arm, 256 points | 0.57–8.26 | 0.238–0.438 | 0.431–0.456 |
+
+Float32 and more points both help:
+- the bf16 medians at 32 points were 1.37–1.79 and 0.78–8.95;
+- 256 points roughly halves the error again.
+
+Even so, completeness is nowhere near holding. Token F1 stays below *every
+word* on fifteen of sixteen runs; one no-rationale seed reaches 0.438
+against 0.431. What remains is the roughness of the straight path through a
+pre-norm backbone, not arithmetic. So the unsupervised default stays `none`.
+
+**The same checkpoint on a different GPU is a different run.** The 256-point
+rationale sweep landed on `A10G`, where every other sweep had `A10`. Same
+weights and code, and accuracy moved by up to 0.0008 (0.6974 against 0.6970,
+0.6846 against 0.6854). The calibrator also chose differently on two seeds:
+on seed 2, isotonic 0.0816 → 0.0523 where the A10 fit 0.0896 → 0.0434.
+Nothing here depends on that, but it is a GPU-side measurement of the ledger's
+open item that "certified on four seeds" means four seeds on one machine.
+
 ## Accuracy and calibration
 
 | Run | Rationales in training | Accuracy | Marginal | ECE | Adaptive ECE | Gates |
