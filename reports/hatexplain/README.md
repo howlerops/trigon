@@ -204,8 +204,39 @@ looks like at 128 wide, and why it is not a result.
   (*Evidence is attribution until it is supervised*): the head has to beat the
   rationale lexicon on both metrics, and gradient × input has to beat every
   word on token F1.
-- **Faithfulness**, which nothing here measures: delete the highlighted spans
-  and measure how far the answer moves.
+- **Faithfulness on the backbone.** It is built and proved on the spike
+  (below), and the eight saved checkpoints are scored eval-only with
+  `--weights`.
+
+## Faithfulness, on the spike
+
+Does the model use what it highlights? This uses ERASER's comprehensiveness
+and sufficiency (`docs/evals.md`, section 7). The top 1–50% of words by each
+method's own scores are deleted from the post, or kept alone, and the post
+is asked again. The weights are `sup-seed0`, retrained at this commit and
+reloaded eval-only with `--weights` (`spike-faithfulness-seed0.md`). They
+reproduce that seed's accuracy, ECE and plausibility to the fourth decimal.
+The latency columns in that report were measured on a shared, oversubscribed
+machine and mean nothing. The table covers 500 of the
+evaluation rationales, with differences paired per case ± a 95% interval:
+
+| Highlighter | Comprehensiveness ↑ | − lexicon | Sufficiency ↓ | − lexicon |
+| --- | ---: | ---: | ---: | ---: |
+| `span_head` | 0.147 | +0.013 ± 0.010 | 0.046 | +0.013 ± 0.014 |
+| `gradient_x_input` | 0.233 | +0.099 ± 0.011 | −0.059 | −0.092 ± 0.016 |
+| `integrated_gradients` | 0.240 | +0.106 ± 0.011 | −0.074 | −0.107 ± 0.015 |
+| *rationale lexicon* | 0.134 | | 0.033 | |
+| *random* | 0.034 | | 0.166 | |
+
+Every method beats the random control by at least +0.11 comprehensiveness
+and −0.12 sufficiency. **On the spike, faithfulness reverses plausibility.**
+The trained head's spans are about as faithful as the word list. They are
+0.013 better on comprehensiveness, an interval that barely clears zero, and
+no better on sufficiency. The gradient methods, which lose to highlighting
+every word on plausibility, are the most faithful by about 0.1 on both
+metrics. The head learned what annotators mark, and the model's answer
+leans on other words as well. One seed of the spike does not decide
+the decision's falsifier; the backbone checkpoints do.
 
 ## Reproducing
 

@@ -179,6 +179,15 @@ The measurements, and the falsifiers they fired, are in `docs/decisions.md`,
 *Evidence is attribution until it is supervised*. The knob cannot select the
 span head.
 
+**Plausible is not faithful.** The plausibility table says whether a person
+would have highlighted the same words. It cannot say whether the model used
+them. `trigon.evals.faithfulness` measures that with ERASER's
+comprehensiveness and sufficiency. It deletes each method's top-ranked words
+from the state and re-asks the engine, and it scores a random control and
+the rationale lexicon the same way. `scripts/train_corpus.py` prints it
+beside plausibility; `docs/evals.md`, section 7, has the definitions and the
+choices.
+
 Integrated gradients' baseline is the zero embedding: position and segment
 are still added, so it is the state with its words taken out rather than a
 state of some real token, and gradient × input is the same method with one

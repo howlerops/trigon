@@ -39,6 +39,11 @@ re-gates an existing checkpoint, and the plausibility table comes with it:
 
     python scripts/train_corpus.py hatexplain --weights run.pt -n 0 --seed 0 \\
         --out reports/hatexplain/rescored-seed0.md
+
+**Faithfulness comes with it** (`trigon.evals.faithfulness`): for the first
+``--faithfulness-n`` rationale cases, comprehensiveness and sufficiency of
+every method the weights can serve, beside a random control and the rationale
+lexicon, each probe a real re-ask of a shorter post through the engine.
 """
 
 from __future__ import annotations
@@ -153,6 +158,21 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=int,
         default=200,
         help="check integrated gradients' completeness on this many rationale cases",
+    )
+    parser.add_argument(
+        "--faithfulness-n",
+        type=int,
+        default=500,
+        help=(
+            "score comprehensiveness and sufficiency on this many rationale cases "
+            "(0 = skip). Each case costs up to ten re-asks per method, deduplicated"
+        ),
+    )
+    parser.add_argument(
+        "--faithfulness-batch",
+        type=int,
+        default=16,
+        help="re-asks per batched forward in the faithfulness suite (1 = one at a time)",
     )
     parser.add_argument(
         "--hard-labels",
@@ -485,6 +505,9 @@ def evidence_section(backend, engine, train, evaluation, args):
         finally:
             backend.evidence_mode = "auto"
     completeness = ig_completeness(backend, engine, scored, args.ig_completeness_n)
+    faithful = (
+        faithfulness_section(backend, engine, scored, train, args) if args.faithfulness_n else None
+    )
     text = "\n".join(
         [
             "",
@@ -503,9 +526,86 @@ def evidence_section(backend, engine, train, evaluation, args):
             render_plausibility(rows),
             "",
             *render_completeness(completeness, backend),
+            *(faithful[0] if faithful else []),
         ]
     )
-    return text, rows, completeness
+    return text, rows, completeness, faithful
+
+
+def faithfulness_section(backend, engine, scored, train, args):
+    """Comprehensiveness and sufficiency for every method the weights can serve.
+
+    `trigon.evals.faithfulness` has the definitions and the choices. The span
+    head is scored only on a checkpoint trained on rationales: an untrained
+    head is a random projection, and the random control already measures one.
+    """
+    import time
+
+    from trigon.backends.torch_readout import UNSUPERVISED_EVIDENCE_METHODS
+    from trigon.evals.faithfulness import (
+        FAITHFULNESS_BINS,
+        engine_scorer,
+        render_faithfulness,
+        run_faithfulness_suite,
+    )
+
+    methods = ["span_head"] if backend.config.evidence_supervised else []
+    methods += list(UNSUPERVISED_EVIDENCE_METHODS)
+    inner = engine_scorer(engine)
+
+    def under(method):
+        def score(case, qid, text):
+            backend.evidence_mode = method
+            try:
+                return inner(case, qid, text)
+            finally:
+                backend.evidence_mode = "auto"
+
+        return score
+
+    scorers = {f"model, {m.replace('_', ' ')}": under(m) for m in methods}
+    started = time.perf_counter()
+    rows, prober = run_faithfulness_suite(
+        scorers,
+        engine,
+        scored,
+        train,
+        n=args.faithfulness_n,
+        batch_size=args.faithfulness_batch,
+        seed=args.seed,
+    )
+    cost = {
+        "cases": rows[0].n,
+        "methods": len(rows),
+        "forwards": prober.forwards,
+        "forward_seconds": round(prober.seconds, 1),
+        "total_seconds": round(time.perf_counter() - started, 1),
+        "batch": args.faithfulness_batch,
+    }
+    bins = ", ".join(f"{b:.0%}" for b in FAITHFULNESS_BINS)
+    lines = [
+        "## Evidence: faithfulness",
+        "",
+        "Did the model use what it highlights? For the label it selects on the",
+        f"full post, over the first {rows[0].n:,} of these cases: **comprehensiveness**",
+        "is how far that label's probability falls when the top-k% of words by",
+        "the method's own scores are deleted from the post and the post is asked",
+        "again (higher: the words mattered); **sufficiency** is how far it falls",
+        "when only those words are kept (lower: they suffice). ERASER's AOPC, the",
+        f"mean over k in {bins}, on the model's uncalibrated distribution.",
+        "`random` and the `rationale lexicon` are controls scored the same way:",
+        "a method that does not beat `random` found nothing the answer needed,",
+        "and one that does not beat the lexicon found no more than vocabulary.",
+        "The `− random` and `− lexicon` columns are the paired per-case",
+        "difference from each control, with a 95% interval.",
+        "",
+        render_faithfulness(rows),
+        "",
+        f"Cost: {cost['forwards']:,} re-asks in {cost['forward_seconds']:.1f} s "
+        f"(batches of {cost['batch']}), {cost['total_seconds']:.1f} s with attribution.",
+        "",
+    ]
+    return lines, rows, cost
 
 
 def ig_completeness(backend, engine, cases, limit: int) -> dict | None:
@@ -701,6 +801,9 @@ def main(argv: list[str] | None = None) -> int:
         if plausibility is not None:
             payload["plausibility"] = [row.to_dict() for row in plausibility[1]]
             payload["ig_completeness"] = plausibility[2]
+            if plausibility[3] is not None:
+                payload["faithfulness"] = [row.to_dict() for row in plausibility[3][1]]
+                payload["faithfulness_cost"] = plausibility[3][2]
         out.with_suffix(".json").write_text(json.dumps(payload, indent=2))
         stem = out.with_suffix("")
         scaler.save(pathlib.Path(f"{stem}-temperatures.json"))

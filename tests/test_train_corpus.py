@@ -234,3 +234,42 @@ def test_the_hard_label_ablation_trains_on_the_majority_and_nothing_else(script)
     assert rewritten[0].expected["q"].distribution is None
     # A case without a distribution is left exactly as it was.
     assert rewritten[1] == plain
+
+
+def test_an_eval_only_run_prints_faithfulness_beside_plausibility(script):
+    """`--weights` runs reach `evidence_section`; it must carry the faithfulness table."""
+    torch = pytest.importorskip("torch")
+    from trigon.backends.torch_readout import ReadoutConfig, TorchReadoutBackend
+    from trigon.engine import Engine
+    from trigon.evals.harness import Case, Expectation
+    from trigon.types import NoulQuestion, SystemOneRequest
+
+    torch.manual_seed(0)
+    backend = TorchReadoutBackend(config=ReadoutConfig(d_model=32, n_layers=1), seed=0)
+    backend.cache_prefixes = True
+    backend.ig_steps, backend.ig_chunk = 4, 4
+    engine = Engine(backend, compiler=backend.make_compiler())
+
+    def case(i):
+        return Case(
+            case_id=f"t/{i}",
+            request=SystemOneRequest(
+                state=f"you are a zorp number {i} today",
+                questions={"toxic": NoulQuestion(instructions="Is this toxic?")},
+            ),
+            expected={"toxic": Expectation(probability=1.0, rationale=((10, 14),))},
+        )
+
+    cases = [case(i) for i in range(4)]
+    args = script.parse_args(["hatexplain", "--faithfulness-n", "2", "--ig-completeness-n", "1"])
+    text, _, _, faithful = script.evidence_section(backend, engine, cases, cases, args)
+    assert "## Evidence: faithfulness" in text
+    # An untrained head is not scored: the random control already is one.
+    assert [row.name for row in faithful[1]] == [
+        "model, gradient x input",
+        "model, integrated gradients",
+        "rationale lexicon",
+        "random",
+    ]
+    assert faithful[2]["cases"] == 2 and faithful[2]["forwards"] > 0
+    assert script.parse_args(["hatexplain"]).faithfulness_n == 500
