@@ -24,15 +24,13 @@ from trigon.evals.datasets import synthetic_outcome_cases  # noqa: E402
 from trigon.evals.harness import run_cases  # noqa: E402
 from trigon.types import (  # noqa: E402
     ChoiceQuestion,
+    DecisionRequest,
     NoulQuestion,
     ScoreQuestion,
-    SystemOneRequest,
 )
 
-SHORT = SystemOneRequest(
-    state="short", questions={"q": NoulQuestion(instructions="Is it present?")}
-)
-LONG = SystemOneRequest(
+SHORT = DecisionRequest(state="short", questions={"q": NoulQuestion(instructions="Is it present?")})
+LONG = DecisionRequest(
     state="a considerably longer piece of state " * 20,
     questions={
         "r": ChoiceQuestion(
@@ -40,7 +38,7 @@ LONG = SystemOneRequest(
         )
     },
 )
-MIXED = SystemOneRequest(
+MIXED = DecisionRequest(
     state="third, different again",
     questions={
         "q": NoulQuestion(instructions="Is it present?"),

@@ -13,7 +13,7 @@ one that actually governs a high-cardinality Choice, and building to a single
 flat context number gets the retrieval trigger wrong -- an option set can fit
 the total budget comfortably and still be inadmissible on its own.
 
-Verified against docs.typesafe.ai and the OpenRouter model listing,
+Verified against the incumbent's published limits and the OpenRouter model listing,
 2026-09-20. Re-check at kickoff; the numbers are cited in docs/decisions.md.
 """
 
@@ -194,7 +194,7 @@ CALIBRATION_GATES: dict[str, float] = {
 # The smallest eval set a published ECE may be computed on.
 #
 # ECE estimators are biased upward at small n, and the bias is the same size as
-# the gate. An independent re-analysis of published Jev benchmarks found ECE
+# the gate. An independent re-analysis of the incumbent's published benchmarks found ECE
 # 0.0505-0.0712 reported at n=60 as evidence of good calibration, and pointed
 # out that at that sample size the same figures are also what serious
 # miscalibration looks like. Simulating it here

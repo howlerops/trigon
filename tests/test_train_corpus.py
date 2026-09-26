@@ -177,12 +177,12 @@ def test_the_baseline_is_fitted_on_train_not_on_evaluation(script, corpus_on_dis
     """A baseline fitted on the split it is scored against is not a baseline,
     it is an oracle with one degree of freedom."""
     from trigon.evals.harness import Case, Expectation
-    from trigon.types import ChoiceQuestion, SystemOneRequest
+    from trigon.types import ChoiceQuestion, DecisionRequest
 
     def case(cid, label):
         return Case(
             case_id=cid,
-            request=SystemOneRequest(
+            request=DecisionRequest(
                 state="x",
                 questions={
                     "q": ChoiceQuestion(
@@ -218,9 +218,9 @@ def test_a_named_cuda_is_refused_rather_than_replaced_by_the_cpu(script):
 
 def test_the_hard_label_ablation_trains_on_the_majority_and_nothing_else(script):
     from trigon.evals.harness import Case, Expectation
-    from trigon.types import ScoreQuestion, SystemOneRequest
+    from trigon.types import DecisionRequest, ScoreQuestion
 
-    request = SystemOneRequest(
+    request = DecisionRequest(
         state="s",
         questions={
             "q": ScoreQuestion(instructions="Rate.", levels=[{"name": str(i)} for i in range(3)])
@@ -242,7 +242,7 @@ def test_an_eval_only_run_prints_faithfulness_beside_plausibility(script):
     from trigon.backends.torch_readout import ReadoutConfig, TorchReadoutBackend
     from trigon.engine import Engine
     from trigon.evals.harness import Case, Expectation
-    from trigon.types import NoulQuestion, SystemOneRequest
+    from trigon.types import DecisionRequest, NoulQuestion
 
     torch.manual_seed(0)
     backend = TorchReadoutBackend(config=ReadoutConfig(d_model=32, n_layers=1), seed=0)
@@ -253,7 +253,7 @@ def test_an_eval_only_run_prints_faithfulness_beside_plausibility(script):
     def case(i):
         return Case(
             case_id=f"t/{i}",
-            request=SystemOneRequest(
+            request=DecisionRequest(
                 state=f"you are a zorp number {i} today",
                 questions={"toxic": NoulQuestion(instructions="Is this toxic?")},
             ),

@@ -4,7 +4,7 @@ import pytest
 
 from trigon.backends.lexical import LexicalBackend
 from trigon.engine import Engine
-from trigon.types import ChoiceQuestion, NoulQuestion, ScoreQuestion, SystemOneRequest
+from trigon.types import ChoiceQuestion, DecisionRequest, NoulQuestion, ScoreQuestion
 
 
 @pytest.fixture
@@ -13,8 +13,8 @@ def engine() -> Engine:
 
 
 @pytest.fixture
-def support_request() -> SystemOneRequest:
-    return SystemOneRequest(
+def support_request() -> DecisionRequest:
+    return DecisionRequest(
         state="The customer writes: my card payment was declined at the store.",
         questions={
             "intent": ChoiceQuestion(

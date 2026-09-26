@@ -85,7 +85,7 @@ from ..schema import (
 )
 from ..schema.compiler import MASK_CACHE_CELLS
 from ..schema.tokens import CallableEstimator
-from ..types import SystemOneRequest
+from ..types import DecisionRequest
 from .base import BackendOutput, QuestionOutput
 from .tokenizer import READOUT_ID, Tokenizer, build_tokenizer, default_tokenizer, describe
 
@@ -743,7 +743,7 @@ class TorchReadoutBackend:
     # -- inference -------------------------------------------------------
 
     def logits(
-        self, compiled: CompiledRequest, request: SystemOneRequest
+        self, compiled: CompiledRequest, request: DecisionRequest
     ) -> tuple[dict[str, torch.Tensor], int]:
         """Differentiable per-question logits, and the sequence length.
 
@@ -869,7 +869,7 @@ class TorchReadoutBackend:
     def path_logits(
         self,
         compiled: CompiledRequest,
-        request: SystemOneRequest,
+        request: DecisionRequest,
         alphas: torch.Tensor,
         *,
         embeddings: torch.Tensor | None = None,
@@ -911,7 +911,7 @@ class TorchReadoutBackend:
     def integrated_gradients(
         self,
         compiled: CompiledRequest,
-        request: SystemOneRequest,
+        request: DecisionRequest,
         *,
         embeddings: torch.Tensor | None = None,
         spans: _Spans | None = None,
@@ -982,7 +982,7 @@ class TorchReadoutBackend:
         return {qid: (inputs * totals[qid]).sum(dim=-1) for qid, _ in questions}
 
     def path_difference(
-        self, compiled: CompiledRequest, request: SystemOneRequest
+        self, compiled: CompiledRequest, request: DecisionRequest
     ) -> dict[str, float]:
         """What each question's integrated gradients must sum to.
 
@@ -1024,7 +1024,7 @@ class TorchReadoutBackend:
     def _evidence(
         self,
         compiled: CompiledRequest,
-        request: SystemOneRequest,
+        request: DecisionRequest,
         embeddings: torch.Tensor,
         hidden: torch.Tensor,
         spans: _Spans,
@@ -1162,7 +1162,7 @@ class TorchReadoutBackend:
     def _heads(
         self,
         compiled: CompiledRequest,
-        request: SystemOneRequest,
+        request: DecisionRequest,
         hidden: torch.Tensor,
         spans: _Spans,
     ) -> dict[str, torch.Tensor]:
@@ -1253,7 +1253,7 @@ class TorchReadoutBackend:
         return out
 
     def logits_batch(
-        self, items: Sequence[tuple[CompiledRequest, SystemOneRequest]]
+        self, items: Sequence[tuple[CompiledRequest, DecisionRequest]]
     ) -> list[dict[str, torch.Tensor]]:
         """One forward pass over several requests, padded to the longest.
 
@@ -1276,7 +1276,7 @@ class TorchReadoutBackend:
         ]
 
     def evidence_logits_batch(
-        self, items: Sequence[tuple[CompiledRequest, SystemOneRequest]]
+        self, items: Sequence[tuple[CompiledRequest, DecisionRequest]]
     ) -> list[tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]]]:
         """:meth:`logits_batch`, plus each question's span-head logits.
 
@@ -1346,7 +1346,7 @@ class TorchReadoutBackend:
 
         return self.model(padded, mask, positions, segments), spans_list
 
-    def infer(self, compiled: CompiledRequest, request: SystemOneRequest) -> BackendOutput:
+    def infer(self, compiled: CompiledRequest, request: DecisionRequest) -> BackendOutput:
         started = time.perf_counter()
         was_training = self.model.training
         self.model.eval()
@@ -1397,7 +1397,7 @@ class TorchReadoutBackend:
         )
 
     def infer_many(
-        self, batch: Sequence[tuple[CompiledRequest, SystemOneRequest]]
+        self, batch: Sequence[tuple[CompiledRequest, DecisionRequest]]
     ) -> list[BackendOutput]:
         """Several requests, one forward pass per schema.
 

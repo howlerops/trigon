@@ -79,7 +79,7 @@ from dataclasses import dataclass, field
 
 from ..engine import Engine
 from ..schema import render_state
-from ..types import SystemOneRequest
+from ..types import DecisionRequest
 from .harness import Case
 from .rationale import RationaleLexicon, rationale_cases, words
 
@@ -208,7 +208,7 @@ class Prober:
         self.forwards = 0
         self.seconds = 0.0
 
-    def _request(self, case: Case, text: str) -> SystemOneRequest:
+    def _request(self, case: Case, text: str) -> DecisionRequest:
         options = case.request.options.model_copy(
             update={
                 "include_evidence": False,

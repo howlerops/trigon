@@ -102,7 +102,7 @@ def main() -> int:
 
     import json
 
-    url = f"http://127.0.0.1:{args.port}/v1/systemone"
+    url = f"http://127.0.0.1:{args.port}/v1/decide"
     payload = json.dumps(BODY).encode()
     latencies: list[float] = []
     errors = [0]

@@ -24,11 +24,11 @@ from ..engine import Engine
 from ..types import (
     ChoiceAnswer,
     ChoiceQuestion,
+    DecisionRequest,
+    DecisionResponse,
     NoulAnswer,
     NoulQuestion,
     ScoreAnswer,
-    SystemOneRequest,
-    SystemOneResponse,
 )
 
 __all__ = [
@@ -88,7 +88,7 @@ class Case:
     """One request plus what the right answers were."""
 
     case_id: str
-    request: SystemOneRequest
+    request: DecisionRequest
     expected: dict[str, Expectation] = field(default_factory=dict)
     domain: str = "general"
     tags: tuple[str, ...] = ()
@@ -120,7 +120,7 @@ class QuestionOutcome:
 @dataclass(frozen=True)
 class CaseOutcome:
     case: Case
-    response: SystemOneResponse
+    response: DecisionResponse
     questions: dict[str, QuestionOutcome]
     latency_ms: float
 
@@ -270,7 +270,7 @@ def run_cases(engine: Engine, cases: Iterable[Case], batch_size: int = 1) -> lis
     return outcomes
 
 
-def _align(case: Case, response: SystemOneResponse) -> dict[str, QuestionOutcome]:
+def _align(case: Case, response: DecisionResponse) -> dict[str, QuestionOutcome]:
     """Put answers back in the caller's declared label order.
 
     Metrics index into these vectors, so an ordering mistake here would silently

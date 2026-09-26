@@ -4,8 +4,8 @@
 assert without earning. These tests earn it in the only two ways available
 without running their service:
 
-1. the **exact example bodies from their documentation** (docs.typesafe.ai,
-   read 2026-09-21) are accepted and answered, and every field their example
+1. the **exact example bodies from their documentation** (read
+   2026-09-21) are accepted and answered, and every field their example
    response carries comes back with the right name and the right type;
 2. the compat path and the native path return the **same numbers** for the
    same question, so the adapter is a translation and not a second model.
@@ -24,6 +24,7 @@ from fastapi.testclient import TestClient
 
 from trigon.server.app import build_app
 from trigon.server.compat import (
+    COMPAT_PATH,
     CompatError,
     build_compat_app,
     to_native,
@@ -34,7 +35,7 @@ from trigon.types import ChoiceQuestion, NoulQuestion, ScoreQuestion
 # Their documented example, verbatim.
 CHOICE_REQUEST = {
     "state": "My running shoes arrived in the wrong size. Can I swap them for a size 10?",
-    "model": "jev-latest",
+    "model": "incumbent-model",
     "questions": {
         "department": {
             "type": "choice",
@@ -50,7 +51,7 @@ CHOICE_REQUEST = {
 
 SCORE_REQUEST = {
     "state": "The export button does nothing, but you can still copy the table by hand.",
-    "model": "jev-latest",
+    "model": "incumbent-model",
     "questions": {
         "bug_severity": {
             "type": "score",
@@ -66,7 +67,7 @@ SCORE_REQUEST = {
 
 NOUL_REQUEST = {
     "state": "I have asked three times now. Can I please just talk to a real person?",
-    "model": "jev-latest",
+    "model": "incumbent-model",
     "questions": {
         "is_human_escalation": {
             "type": "noul",
@@ -132,7 +133,7 @@ def test_structured_instructions_and_criteria_are_serialised_not_summarised():
     that produces a plausible answer, which is the worst kind here."""
     payload = {
         "state": "x",
-        "model": "jev-latest",
+        "model": "incumbent-model",
         "questions": {
             "q": {
                 "type": "choice",
@@ -189,7 +190,7 @@ def test_requests_their_contract_would_reject_are_rejected(payload, because):
 
 
 def test_the_choice_response_carries_exactly_their_fields(client):
-    body = client.post("/v1/systemone", json=CHOICE_REQUEST).json()
+    body = client.post(COMPAT_PATH, json=CHOICE_REQUEST).json()
     assert set(body) == {"model", "answers", "usage"}
     answer = body["answers"]["department"]
     assert set(answer) == {"type", "choice", "confidence", "probabilities"}
@@ -201,7 +202,7 @@ def test_the_choice_response_carries_exactly_their_fields(client):
 
 
 def test_the_score_response_carries_a_legend_rebuilt_from_the_request(client):
-    body = client.post("/v1/systemone", json=SCORE_REQUEST).json()
+    body = client.post(COMPAT_PATH, json=SCORE_REQUEST).json()
     answer = body["answers"]["bug_severity"]
     assert set(answer) == {"type", "score", "confidence", "legend", "probabilities"}
     assert answer["legend"] == {
@@ -222,7 +223,7 @@ def test_a_noul_answer_has_no_confidence_field(client):
     An adapter that invented one -- `max(p, 1 - p)` is the obvious guess --
     would be adding a number no model produced to a response a caller trusts.
     """
-    body = client.post("/v1/systemone", json=NOUL_REQUEST).json()
+    body = client.post(COMPAT_PATH, json=NOUL_REQUEST).json()
     for qid in ("is_human_escalation", "is_repeat_contact"):
         answer = body["answers"][qid]
         assert set(answer) == {"type", "noul"}
@@ -231,15 +232,15 @@ def test_a_noul_answer_has_no_confidence_field(client):
 
 def test_usage_reports_prefill_as_input_and_zero_output(client):
     """Zero is the measurement. There is no decode half to charge for."""
-    body = client.post("/v1/systemone", json=CHOICE_REQUEST).json()
+    body = client.post(COMPAT_PATH, json=CHOICE_REQUEST).json()
     assert body["usage"]["input_tokens"] > 0
     assert body["usage"]["output_tokens"] == 0
 
 
 def test_the_response_names_the_build_that_answered_not_the_one_requested(client):
-    """`model: jev-latest` goes in; what comes back is what actually ran."""
-    body = client.post("/v1/systemone", json=CHOICE_REQUEST).json()
-    assert body["model"] != "jev-latest"
+    """`model: incumbent-model` goes in; what comes back is what actually ran."""
+    body = client.post(COMPAT_PATH, json=CHOICE_REQUEST).json()
+    assert body["model"] != "incumbent-model"
     assert body["model"]
 
 
@@ -258,9 +259,9 @@ def test_the_compat_path_and_the_native_path_answer_identically():
         for payload in (CHOICE_REQUEST, SCORE_REQUEST, NOUL_REQUEST):
             translated = to_native(payload)
             native = http.post(
-                "/v1/systemone", json=translated.model_dump(mode="json", exclude_none=True)
+                "/v1/decide", json=translated.model_dump(mode="json", exclude_none=True)
             ).json()
-            compat = http.post("/compat/v1/systemone", json=payload).json()
+            compat = http.post("/compat" + COMPAT_PATH, json=payload).json()
             for qid, answer in compat["answers"].items():
                 mirror = native["answers"][qid]
                 if answer["type"] == "noul":
@@ -278,8 +279,8 @@ def test_the_compat_path_and_the_native_path_answer_identically():
 
 
 def test_a_malformed_request_is_a_422_not_a_500(client):
-    assert client.post("/v1/systemone", json={"state": "x"}).status_code == 422
-    assert client.post("/v1/systemone", content=b"{not json").status_code == 422
+    assert client.post(COMPAT_PATH, json={"state": "x"}).status_code == 422
+    assert client.post(COMPAT_PATH, content=b"{not json").status_code == 422
 
 
 def test_an_oversized_request_is_a_422_because_their_contract_has_no_413():
@@ -288,20 +289,20 @@ def test_an_oversized_request_is_a_422_because_their_contract_has_no_413():
 
     payload = {
         "state": "word " * (DEFAULT_BUDGET.state_tokens * 2),
-        "model": "jev-latest",
+        "model": "incumbent-model",
         "questions": {"q": {"type": "noul", "instructions": "over budget?"}},
     }
     with TestClient(build_compat_app(ServerConfig(backend="lexical"))) as http:
-        assert http.post("/v1/systemone", json=payload).status_code == 422
+        assert http.post(COMPAT_PATH, json=payload).status_code == 422
     with TestClient(build_app(ServerConfig(backend="lexical"))) as http:
-        assert http.post("/compat/v1/systemone", json=payload).status_code == 422
+        assert http.post("/compat" + COMPAT_PATH, json=payload).status_code == 422
         # And the native path still reports it the way our own contract does.
         # Pinned because a 422 is also what a *malformed* request gets: without
         # this the test would keep passing if the payload stopped being
         # oversized and started being invalid, which is a different code path
         # and not the one this test is about.
         native = http.post(
-            "/v1/systemone", json=to_native(payload).model_dump(mode="json", exclude_none=True)
+            "/v1/decide", json=to_native(payload).model_dump(mode="json", exclude_none=True)
         )
         assert native.status_code == 413
         assert native.json()["error"]["type"] == "schema_too_large"
@@ -317,14 +318,14 @@ def test_anything_their_envelope_accepts_ours_accepts_too():
 
     payload = {
         "state": "word " * (COMPAT_BUDGET.state_tokens // 2),
-        "model": "jev-latest",
+        "model": "incumbent-model",
         "questions": {
             f"q{i}": {"type": "noul", "instructions": "ok?"}
             for i in range(COMPAT_BUDGET.max_questions)
         },
     }
     with TestClient(build_compat_app(ServerConfig(backend="lexical"))) as http:
-        assert http.post("/v1/systemone", json=payload).status_code == 200
+        assert http.post(COMPAT_PATH, json=payload).status_code == 200
 
 
 # -- the other direction: calling their service -----------------------------
@@ -335,8 +336,8 @@ def test_our_request_translates_out_to_their_shape():
     from trigon.server.compat import to_compat_request
 
     native = to_native(SCORE_REQUEST)
-    out = to_compat_request(native)
-    assert out["model"] == "jev-latest"
+    out = to_compat_request(native, model="incumbent-model")
+    assert out["model"] == "incumbent-model"
     assert out["questions"]["bug_severity"]["type"] == "score"
     assert (
         out["questions"]["bug_severity"]["criteria"]
@@ -348,15 +349,15 @@ def test_an_option_without_a_description_sends_its_name_not_an_empty_string():
     """An empty description is a weaker prompt than no description, and it
     would make a migration comparison unfair to the incumbent."""
     from trigon.server.compat import to_compat_request
-    from trigon.types import ChoiceQuestion, SystemOneRequest
+    from trigon.types import ChoiceQuestion, DecisionRequest
 
-    request = SystemOneRequest(
+    request = DecisionRequest(
         state="x",
         questions={
             "q": ChoiceQuestion(instructions="Pick.", options=[{"name": "alpha"}, {"name": "beta"}])
         },
     )
-    assert to_compat_request(request)["questions"]["q"]["criteria"] == {
+    assert to_compat_request(request, model="incumbent-model")["questions"]["q"]["criteria"] == {
         "alpha": "alpha",
         "beta": "beta",
     }

@@ -19,7 +19,7 @@ from ..backends.lexical import LexicalBackend
 from ..engine import Engine, EngineConfig
 from ..limits import DEFAULT_BUDGET, DEFAULT_LATENCY_TARGET
 from ..schema.compiler import SchemaTooLarge
-from ..types import SystemOneRequest, SystemOneResponse
+from ..types import DecisionRequest, DecisionResponse
 from .config import ServerConfig
 from .limits_middleware import install_guards
 from .routing import RoutingPolicy, TieredRouter
@@ -107,7 +107,7 @@ def build_app(config: ServerConfig | None = None, router: TieredRouter | None = 
     router = router or create_router(config)
 
     app = FastAPI(
-        title="Trigon System One API",
+        title="Trigon API",
         version=__version__,
         description=DESCRIPTION.strip(),
         openapi_tags=[
@@ -132,13 +132,13 @@ def build_app(config: ServerConfig | None = None, router: TieredRouter | None = 
         )
 
     @app.post(
-        "/v1/systemone",
-        response_model=SystemOneResponse,
+        "/v1/decide",
+        response_model=DecisionResponse,
         response_model_exclude_none=True,
         tags=["inference"],
         summary="Answer a map of typed questions about one state",
     )
-    def systemone(request: SystemOneRequest) -> SystemOneResponse:
+    def decide(request: DecisionRequest) -> DecisionResponse:
         try:
             return router.answer(request)
         except SchemaTooLarge:

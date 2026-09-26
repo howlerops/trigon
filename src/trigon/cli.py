@@ -71,7 +71,7 @@ def _engine(
 
 def cmd_ask(args: argparse.Namespace) -> int:
     """Answer one request read from a JSON file or stdin."""
-    from .types import SystemOneRequest
+    from .types import DecisionRequest
 
     # Build the engine first: a bad --backend should fail before we consume
     # stdin, which the caller cannot rewind.
@@ -84,7 +84,7 @@ def cmd_ask(args: argparse.Namespace) -> int:
         ig_steps=args.ig_steps,
     )
     raw = sys.stdin.read() if args.request == "-" else pathlib.Path(args.request).read_text()
-    response = engine.answer(SystemOneRequest.model_validate_json(raw))
+    response = engine.answer(DecisionRequest.model_validate_json(raw))
     print(response.model_dump_json(indent=2, exclude_none=True))
     return 0
 

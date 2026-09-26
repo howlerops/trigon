@@ -19,7 +19,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from trigon.server.app import build_app
-from trigon.server.compat import build_compat_app
+from trigon.server.compat import COMPAT_PATH, build_compat_app
 from trigon.server.config import ServerConfig
 from trigon.server.limits_middleware import RateLimiter
 
@@ -27,7 +27,7 @@ REQUEST = {
     "state": "my card was declined",
     "questions": {"urgent": {"type": "noul", "instructions": "Needs a human?"}},
 }
-COMPAT_REQUEST = {**REQUEST, "model": "jev-latest"}
+COMPAT_REQUEST = {**REQUEST, "model": "incumbent-model"}
 
 
 def _native(**kwargs) -> TestClient:
@@ -45,8 +45,8 @@ def test_an_unconfigured_gateway_authenticates_nothing():
     """The honest default: a self-hosted gateway does not invent a policy its
     operator did not choose."""
     with _native() as http:
-        assert http.post("/v1/systemone", json=REQUEST).status_code == 200
-        assert http.post("/v1/systemone", json=REQUEST, headers={}).status_code == 200
+        assert http.post("/v1/decide", json=REQUEST).status_code == 200
+        assert http.post("/v1/decide", json=REQUEST, headers={}).status_code == 200
 
 
 def test_an_empty_key_list_means_no_auth_not_no_access():
@@ -74,14 +74,14 @@ def test_a_rate_of_zero_is_refused_rather_than_rejecting_everything():
 def test_a_missing_or_wrong_key_is_401_with_a_scheme_a_client_can_act_on():
     with _native(api_keys=frozenset({"secret"})) as http:
         for headers in ({}, {"Authorization": "Bearer wrong"}, {"Authorization": "Basic x"}):
-            response = http.post("/v1/systemone", json=REQUEST, headers=headers)
+            response = http.post("/v1/decide", json=REQUEST, headers=headers)
             assert response.status_code == 401
             # Without this a client cannot tell which scheme to retry under.
             assert response.headers["WWW-Authenticate"] == "Bearer"
             assert response.json()["error"]["type"] == "authentication_error"
         assert (
             http.post(
-                "/v1/systemone", json=REQUEST, headers={"Authorization": "Bearer secret"}
+                "/v1/decide", json=REQUEST, headers={"Authorization": "Bearer secret"}
             ).status_code
             == 200
         )
@@ -90,10 +90,10 @@ def test_a_missing_or_wrong_key_is_401_with_a_scheme_a_client_can_act_on():
 def test_the_compat_path_authenticates_too():
     """It is the path a migrating caller actually points at."""
     with _compat(api_keys=frozenset({"secret"})) as http:
-        assert http.post("/v1/systemone", json=COMPAT_REQUEST).status_code == 401
+        assert http.post(COMPAT_PATH, json=COMPAT_REQUEST).status_code == 401
         assert (
             http.post(
-                "/v1/systemone", json=COMPAT_REQUEST, headers={"Authorization": "Bearer secret"}
+                COMPAT_PATH, json=COMPAT_REQUEST, headers={"Authorization": "Bearer secret"}
             ).status_code
             == 200
         )
@@ -113,8 +113,8 @@ def test_healthz_stays_open():
 def test_the_limit_sheds_with_retry_after_and_a_budget():
     with _native(rate_per_minute=3) as http:
         for _ in range(3):
-            assert http.post("/v1/systemone", json=REQUEST).status_code == 200
-        response = http.post("/v1/systemone", json=REQUEST)
+            assert http.post("/v1/decide", json=REQUEST).status_code == 200
+        response = http.post("/v1/decide", json=REQUEST)
         assert response.status_code == 429
         assert response.json()["error"]["type"] == "rate_limit_error"
         assert int(response.headers["Retry-After"]) >= 1
@@ -153,22 +153,16 @@ def test_a_key_is_counted_by_token_not_by_token_and_address():
     budget per rotation, which is the failure a limiter exists to prevent."""
     with _native(api_keys=frozenset({"a", "b"}), rate_per_minute=1) as http:
         assert (
-            http.post(
-                "/v1/systemone", json=REQUEST, headers={"Authorization": "Bearer a"}
-            ).status_code
+            http.post("/v1/decide", json=REQUEST, headers={"Authorization": "Bearer a"}).status_code
             == 200
         )
         assert (
-            http.post(
-                "/v1/systemone", json=REQUEST, headers={"Authorization": "Bearer a"}
-            ).status_code
+            http.post("/v1/decide", json=REQUEST, headers={"Authorization": "Bearer a"}).status_code
             == 429
         )
         # A different key is a different budget, from the same address.
         assert (
-            http.post(
-                "/v1/systemone", json=REQUEST, headers={"Authorization": "Bearer b"}
-            ).status_code
+            http.post("/v1/decide", json=REQUEST, headers={"Authorization": "Bearer b"}).status_code
             == 200
         )
 

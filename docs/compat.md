@@ -4,7 +4,7 @@ A caller with a working integration should change a base URL and a key and
 keep working. This page is the honest version of that claim: what is
 translated, what is translated *lossily*, and what is not there at all.
 
-The shapes are the published contract (docs.typesafe.ai — `api.md` and the
+The shapes are the incumbent's published contract (its API reference and the
 three primitive pages, read 2026-09-21). `src/trigon/server/compat.py` is the
 translation and `tests/test_compat.py` exercises it with their own example
 bodies, so the mapping is checked against the documentation rather than
@@ -85,7 +85,7 @@ project exists to avoid.
   readout slots are prefill. Cost accounting that multiplies output tokens by a
   rate gets zero because zero is what it costs.
 - **The response names the build that answered**, not the model that was asked
-  for. `model: "jev-latest"` goes in; what comes back is this checkpoint's
+  for. The model name the caller asked for goes in; what comes back is this checkpoint's
   weight-fingerprinted name. A response naming a model it did not run would
   make the one identifier that reaches the caller useless for the case it
   exists for.

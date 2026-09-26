@@ -46,7 +46,7 @@ from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-from ..types import ChoiceQuestion, NoulQuestion, ScoreQuestion, SystemOneRequest
+from ..types import ChoiceQuestion, DecisionRequest, NoulQuestion, ScoreQuestion
 from .harness import Case, Expectation
 
 __all__ = [
@@ -775,7 +775,7 @@ def _annotated_cases(
         cases.append(
             Case(
                 case_id=f"{spec.name}/{split}/{i}",
-                request=SystemOneRequest(state=_state(spec, row), questions=questions),
+                request=DecisionRequest(state=_state(spec, row), questions=questions),
                 expected=expected,
                 domain=spec.name,
                 tags=(spec.name, split, "real"),
@@ -813,7 +813,7 @@ def _score_cases(spec: CorpusSpec, split: str, path: pathlib.Path, limit: int | 
         cases.append(
             Case(
                 case_id=f"{spec.name}/{split}/{i}",
-                request=SystemOneRequest(state=_state(spec, row), questions=questions),
+                request=DecisionRequest(state=_state(spec, row), questions=questions),
                 expected=expected,
                 domain=spec.name,
                 tags=(spec.name, split, "real"),
@@ -885,7 +885,7 @@ def load(
         cases.append(
             Case(
                 case_id=f"{spec.name}/{split}/{i}",
-                request=SystemOneRequest(
+                request=DecisionRequest(
                     state=text,
                     questions={
                         "intent": ChoiceQuestion(instructions=spec.instructions, options=options)
@@ -1032,7 +1032,7 @@ def hatexplain_case(spec: CorpusSpec, post: dict[str, Any], case_id: str) -> Cas
 
     return Case(
         case_id=case_id,
-        request=SystemOneRequest(
+        request=DecisionRequest(
             state=state,
             questions={
                 "label": ChoiceQuestion(instructions=spec.instructions, options=_HATEXPLAIN_OPTIONS)

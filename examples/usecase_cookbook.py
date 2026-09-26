@@ -32,7 +32,7 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "src"))
 
 from trigon.engine import Engine  # noqa: E402
-from trigon.types import NoulAnswer, SystemOneRequest  # noqa: E402
+from trigon.types import DecisionRequest, NoulAnswer  # noqa: E402
 from trigon.usecases import all_use_cases, use_case  # noqa: E402
 
 ESCALATE_BELOW = 0.35
@@ -93,7 +93,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if args.list else 1
 
     case = use_case(args.use_case)
-    request = SystemOneRequest(state=case.state, questions=case.questions)
+    request = DecisionRequest(state=case.state, questions=case.questions)
     engine = _engine(args.weights, args.backend)
     response = engine.answer(request)
 

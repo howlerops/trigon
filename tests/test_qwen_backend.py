@@ -30,9 +30,9 @@ from trigon.schema import SegmentKind  # noqa: E402
 from trigon.training import TrainingConfig, train  # noqa: E402
 from trigon.types import (  # noqa: E402
     ChoiceQuestion,
+    DecisionRequest,
     NoulQuestion,
     ScoreQuestion,
-    SystemOneRequest,
 )
 
 STATE = "The customer writes: my card payment was declined at the store."
@@ -72,7 +72,7 @@ def engine() -> Engine:
 
 
 def _answers(engine: Engine, questions: dict, state: str = STATE) -> dict:
-    response = engine.answer(SystemOneRequest(state=state, questions=questions))
+    response = engine.answer(DecisionRequest(state=state, questions=questions))
     return {k: v.model_dump() for k, v in response.answers.items()}
 
 
@@ -105,7 +105,7 @@ def test_schema_states_do_not_depend_on_state(engine):
     backend, compiler = engine.backend, engine.compiler
 
     def schema_hidden(state: str) -> torch.Tensor:
-        compiled = compiler.compile_request(SystemOneRequest(state=state, questions=BASE))
+        compiled = compiler.compile_request(DecisionRequest(state=state, questions=BASE))
         embeddings, spans = backend._embed(compiled)
         mask = backend._mask_tensor(compiled)
         with torch.no_grad():
@@ -127,7 +127,7 @@ def test_schema_states_do_not_depend_on_state(engine):
 
 def test_the_cached_prefix_path_agrees_with_the_uncached_one():
     plain, cached = _tiny(), _tiny(cache=True)
-    request = SystemOneRequest(state=STATE, questions=BASE)
+    request = DecisionRequest(state=STATE, questions=BASE)
     first = Engine(plain, compiler=plain.make_compiler()).answer(request)
     engine = Engine(cached, compiler=cached.make_compiler())
     engine.answer(request)  # fills the prefix
@@ -143,7 +143,7 @@ def test_the_batched_pass_matches_one_at_a_time():
     backend = _tiny()
     compiler = backend.make_compiler()
     requests = [
-        SystemOneRequest(state=s, questions=BASE)
+        DecisionRequest(state=s, questions=BASE)
         for s in (STATE, "short", "a much longer message about a refund that never arrived")
     ]
     items = [(compiler.compile_request(r), r) for r in requests]
@@ -162,7 +162,7 @@ def test_zero_initialised_adapters_leave_the_backbone_untouched():
     # backbone, and the same heads, so only the adapters differ.
     with_adapters.model.load_state_dict(without.model.state_dict(), strict=False)
     compiled = with_adapters.make_compiler().compile_request(
-        SystemOneRequest(state=STATE, questions=BASE)
+        DecisionRequest(state=STATE, questions=BASE)
     )
     outputs = []
     for backend in (with_adapters, without):
@@ -217,7 +217,7 @@ def test_an_adapter_checkpoint_round_trips_through_the_shared_loader(tmp_path):
     loaded = TorchReadoutBackend.load(path)
     assert isinstance(loaded, QwenReadoutBackend)
     assert loaded.model_version == backend.model_version
-    request = SystemOneRequest(state=STATE, questions=BASE)
+    request = DecisionRequest(state=STATE, questions=BASE)
     a = Engine(backend, compiler=backend.make_compiler()).answer(request)
     b = Engine(loaded, compiler=loaded.make_compiler()).answer(request)
     for qid in BASE:
@@ -237,7 +237,7 @@ def test_evidence_does_not_move_when_a_question_is_added(method):
     compiler = backend.make_compiler()
 
     def evidence(questions):
-        request = SystemOneRequest(
+        request = DecisionRequest(
             state=STATE, questions=questions, options={"include_evidence": True}
         )
         output = backend.infer(compiler.compile_request(request), request)
@@ -256,7 +256,7 @@ def test_integrated_gradients_through_the_cached_prefix_is_complete_and_unbatche
     and the attributions sum to the log-probability difference at the served
     step count -- which on a pre-norm forward needs the points crowded towards
     the baseline: evenly spaced, the same 32 miss by more than a tenth."""
-    request = SystemOneRequest(state=STATE, questions=BASE)
+    request = DecisionRequest(state=STATE, questions=BASE)
     results = {}
     for cache, chunk in ((False, 32), (True, 1), (True, 32)):
         backend = _tiny(cache=cache)
@@ -294,7 +294,7 @@ def _as_on_the_gpu(backend: QwenReadoutBackend) -> QwenReadoutBackend:
 
 
 def _completeness(backend, precision: str, steps: int | None = None) -> dict[str, float]:
-    request = SystemOneRequest(state=STATE, questions=BASE)
+    request = DecisionRequest(state=STATE, questions=BASE)
     compiled = backend.make_compiler().compile_request(request)
     backend.ig_precision = precision
     backend.ig_steps = steps or IG_STEPS
@@ -330,7 +330,7 @@ def test_the_float32_path_is_the_float32_model_on_the_same_weights():
     """Upcasting on the fly (`_UpcastLinear`) computes exactly what a float32
     copy of the rounded weights would, forward and backward, at a fixed shape
     -- without holding that copy."""
-    request = SystemOneRequest(state=STATE, questions=BASE)
+    request = DecisionRequest(state=STATE, questions=BASE)
     upcast = _as_on_the_gpu(_tiny(seed=4))
     copied = _tiny(seed=4)
     copied.model.eval()
@@ -357,7 +357,7 @@ def test_the_float32_path_leaves_the_served_prefix_and_answer_alone():
     plain = _answers(engine, BASE)
     cached = dict(backend._prefix_cache)
     assert cached
-    request = SystemOneRequest(state=STATE, questions=BASE)
+    request = DecisionRequest(state=STATE, questions=BASE)
     compiled = backend.make_compiler().compile_request(request)
     backend.integrated_gradients(compiled, request)
     backend.path_difference(compiled, request)
@@ -380,7 +380,7 @@ def test_integrated_gradients_on_the_float32_path_does_not_move_when_a_question_
     compiler = backend.make_compiler()
 
     def evidence(questions):
-        request = SystemOneRequest(
+        request = DecisionRequest(
             state=STATE, questions=questions, options={"include_evidence": True}
         )
         output = backend.infer(compiler.compile_request(request), request)
@@ -415,6 +415,6 @@ def test_the_evidence_head_trains_and_round_trips_on_the_backbone(tmp_path):
     backend.save(path)
     loaded = TorchReadoutBackend.load(path)
     assert loaded.config.evidence_supervised
-    request = SystemOneRequest(state=STATE, questions=BASE, options={"include_evidence": True})
+    request = DecisionRequest(state=STATE, questions=BASE, options={"include_evidence": True})
     answer = Engine(loaded, compiler=loaded.make_compiler()).answer(request)
     assert {a.evidence_method for a in answer.answers.values()} == {"span_head"}

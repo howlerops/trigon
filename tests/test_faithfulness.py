@@ -33,7 +33,7 @@ from trigon.evals.faithfulness import (
 from trigon.evals.harness import Case, Expectation
 from trigon.evals.rationale import rationale_cases, words
 from trigon.schema import render_state
-from trigon.types import NoulQuestion, SystemOneRequest
+from trigon.types import DecisionRequest, NoulQuestion
 
 
 class _Marked:
@@ -83,7 +83,7 @@ def _case(i: int, state: str, marked: str = "zorp") -> Case:
     at = state.index(marked)
     return Case(
         case_id=f"f/{i}",
-        request=SystemOneRequest(
+        request=DecisionRequest(
             state=state, questions={"toxic": NoulQuestion(instructions="Is this toxic?")}
         ),
         expected={"toxic": Expectation(probability=1.0, rationale=((at, at + len(marked)),))},

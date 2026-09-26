@@ -24,7 +24,7 @@ from typing import Protocol, runtime_checkable
 
 from ..schema import CompiledRequest, SegmentKind
 from ..schema.tokens import TokenEstimator
-from ..types import SystemOneRequest
+from ..types import DecisionRequest
 
 __all__ = ["Backend", "BackendOutput", "QuestionOutput", "estimator_of", "validate_output"]
 
@@ -71,7 +71,7 @@ class Backend(Protocol):
         when an alias moves, so the response always names a concrete build."""
         ...
 
-    def infer(self, compiled: CompiledRequest, request: SystemOneRequest) -> BackendOutput: ...
+    def infer(self, compiled: CompiledRequest, request: DecisionRequest) -> BackendOutput: ...
 
 
 def estimator_of(backend: object) -> TokenEstimator | None:

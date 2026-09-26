@@ -104,7 +104,7 @@ def main() -> int:
     from trigon.bpe import BPETokenizer
     from trigon.schema import SchemaCompiler
     from trigon.schema.tokens import CallableEstimator
-    from trigon.types import SystemOneRequest
+    from trigon.types import DecisionRequest
     from trigon.usecases import all_use_cases, use_case
 
     cases = [use_case(args.use_case)] if args.use_case else all_use_cases()
@@ -134,7 +134,7 @@ def main() -> int:
     rows = []
     for item in cases:
         compiled = compiler.compile_request(
-            SystemOneRequest(state=item.state, questions=item.questions)
+            DecisionRequest(state=item.state, questions=item.questions)
         )
         # Cold: the schema is paid on every request, which is what this
         # repository does today -- `Usage.cached_schema_tokens` reports 0 on

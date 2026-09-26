@@ -88,7 +88,7 @@ def client() -> trigon_client.TrigonClient:
 
 
 def test_it_answers_every_primitive_as_its_declared_type(client):
-    response = client.systemone(
+    response = client.decide(
         state="the card payment was declined at the till",
         questions={
             "intent": trigon_client.choice(
@@ -122,8 +122,8 @@ def test_it_answers_every_primitive_as_its_declared_type(client):
 def test_evidence_comes_back_as_typed_spans_and_only_when_asked(client):
     state = "the card payment was declined at the till"
     questions = {"intent": trigon_client.choice("Card or luggage?", ["card", "luggage"])}
-    assert client.systemone(state=state, questions=questions).answers["intent"].evidence is None
-    answer = client.systemone(
+    assert client.decide(state=state, questions=questions).answers["intent"].evidence is None
+    answer = client.decide(
         state=state, questions=questions, options={"include_evidence": True}
     ).answers["intent"]
     assert answer.evidence_method == "lexical_overlap"
@@ -135,7 +135,7 @@ def test_evidence_comes_back_as_typed_spans_and_only_when_asked(client):
 
 def test_bare_option_names_are_accepted(client):
     """`choice("...", ["a", "b"])` is what someone tries first."""
-    response = client.systemone(
+    response = client.decide(
         state="a parcel never arrived",
         questions={"q": trigon_client.choice("Pick one.", ["shipping", "billing"])},
     )
@@ -143,7 +143,7 @@ def test_bare_option_names_are_accepted(client):
 
 
 def test_usage_and_timing_come_back_typed(client):
-    response = client.systemone(
+    response = client.decide(
         state="hello", questions={"q": trigon_client.noul("Is this a greeting?")}
     )
     assert isinstance(response.usage, trigon_client.Usage)
@@ -156,7 +156,7 @@ def test_usage_and_timing_come_back_typed(client):
 
 
 def test_the_response_names_a_concrete_build(client):
-    response = client.systemone(
+    response = client.decide(
         state="hello", questions={"q": trigon_client.noul("Is this a greeting?")}
     )
     assert any(ch.isdigit() for ch in response.model)
@@ -164,14 +164,14 @@ def test_the_response_names_a_concrete_build(client):
 
 def test_a_rejected_request_raises_with_its_status(client):
     with pytest.raises(trigon_client.TrigonError) as caught:
-        client.systemone(state="x", questions={"q": trigon_client.choice("pick", ["only"])})
+        client.decide(state="x", questions={"q": trigon_client.choice("pick", ["only"])})
     assert caught.value.status == 422
     assert caught.value.payload
 
 
 def test_an_oversized_state_raises_413_not_422(client):
     with pytest.raises(trigon_client.TrigonError) as caught:
-        client.systemone(state="word " * 80000, questions={"q": trigon_client.noul("ok?")})
+        client.decide(state="word " * 80000, questions={"q": trigon_client.noul("ok?")})
     assert caught.value.status == 413
 
 

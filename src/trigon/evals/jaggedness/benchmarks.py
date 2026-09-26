@@ -28,7 +28,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import ClassVar
 
-from ...types import ChoiceQuestion, NoulQuestion, SystemOneRequest
+from ...types import ChoiceQuestion, DecisionRequest, NoulQuestion
 from ..harness import Case, CaseOutcome, Expectation
 
 __all__ = [
@@ -137,7 +137,7 @@ class LiteralReadingBenchmark(Benchmark):
             out.append(
                 Case(
                     case_id=f"{self.name}/{i}",
-                    request=SystemOneRequest(
+                    request=DecisionRequest(
                         state=state,
                         questions={
                             "is_topic": NoulQuestion(
@@ -174,7 +174,7 @@ class CountingBenchmark(Benchmark):
             out.append(
                 Case(
                     case_id=f"{self.name}/{i}",
-                    request=SystemOneRequest(
+                    request=DecisionRequest(
                         state=state,
                         questions={
                             "count": ChoiceQuestion(
@@ -212,7 +212,7 @@ class DateComparisonBenchmark(Benchmark):
             out.append(
                 Case(
                     case_id=f"{self.name}/{i}",
-                    request=SystemOneRequest(
+                    request=DecisionRequest(
                         state=state,
                         questions={
                             "filed_after": NoulQuestion(
@@ -260,7 +260,7 @@ class IndirectionDepthBenchmark(Benchmark):
             out.append(
                 Case(
                     case_id=f"{self.name}/{i}",
-                    request=SystemOneRequest(
+                    request=DecisionRequest(
                         state="\n".join(lines),
                         questions={
                             "category": ChoiceQuestion(
@@ -325,7 +325,7 @@ class ContextRotBenchmark(Benchmark):
                 out.append(
                     Case(
                         case_id=f"{self.name}/{i}/pad{padding}",
-                        request=SystemOneRequest(
+                        request=DecisionRequest(
                             state="\n".join(body),
                             questions={
                                 "topic": ChoiceQuestion(
@@ -400,7 +400,7 @@ class InjectionSteeringBenchmark(Benchmark):
             out.append(
                 Case(
                     case_id=f"{self.name}/{i}/clean",
-                    request=SystemOneRequest(
+                    request=DecisionRequest(
                         state=f"{signal}\n{filler}", questions={"topic": routing}
                     ),
                     expected={"topic": Expectation(label=label)},
@@ -410,7 +410,7 @@ class InjectionSteeringBenchmark(Benchmark):
             out.append(
                 Case(
                     case_id=f"{self.name}/{i}/injected",
-                    request=SystemOneRequest(
+                    request=DecisionRequest(
                         state=f"{signal}\n{injection}\n{filler}", questions={"topic": routing}
                     ),
                     expected={"topic": Expectation(label=label)},
@@ -420,7 +420,7 @@ class InjectionSteeringBenchmark(Benchmark):
             out.append(
                 Case(
                     case_id=f"{self.name}/{i}/guardrail",
-                    request=SystemOneRequest(
+                    request=DecisionRequest(
                         state=f"{signal}\n{injection}\n{filler}",
                         questions={
                             "has_injection": NoulQuestion(
@@ -490,7 +490,7 @@ class ContradictoryCriteriaBenchmark(Benchmark):
             out.append(
                 Case(
                     case_id=f"{self.name}/{i}",
-                    request=SystemOneRequest(
+                    request=DecisionRequest(
                         state=f"The customer writes: I need help with {gloss_a}.",
                         questions={
                             "team": ChoiceQuestion(
@@ -542,7 +542,7 @@ class NegationCoherenceBenchmark(Benchmark):
             out.append(
                 Case(
                     case_id=f"{self.name}/{i}",
-                    request=SystemOneRequest(
+                    request=DecisionRequest(
                         state=state,
                         questions={
                             "affirm": NoulQuestion(instructions=f"Is this ticket about {topic}?"),
@@ -583,7 +583,7 @@ class NoulChoiceAgreementBenchmark(Benchmark):
             out.append(
                 Case(
                     case_id=f"{self.name}/{i}",
-                    request=SystemOneRequest(
+                    request=DecisionRequest(
                         state=state,
                         questions={
                             "as_noul": NoulQuestion(instructions=f"Is this ticket about {topic}?"),

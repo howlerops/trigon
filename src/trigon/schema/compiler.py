@@ -49,11 +49,11 @@ from enum import Enum
 from ..limits import DEFAULT_BUDGET, Budget
 from ..types import (
     ChoiceQuestion,
+    DecisionRequest,
     NoulQuestion,
     Question,
     ScoreQuestion,
     State,
-    SystemOneRequest,
 )
 from .tokens import CharHeuristicEstimator, TokenEstimator
 
@@ -385,7 +385,7 @@ class SchemaCompiler:
 
     # -- full request ----------------------------------------------------
 
-    def compile_request(self, request: SystemOneRequest) -> CompiledRequest:
+    def compile_request(self, request: DecisionRequest) -> CompiledRequest:
         schema = self.compile_schema(request.questions)
         state_text = render_state(request.state)
         state_tokens = self.estimator.count(state_text)
@@ -633,6 +633,6 @@ def compile_schema(questions: dict[str, Question]) -> CompiledSchema:
     return _DEFAULT.compile_schema(questions)
 
 
-def compile_request(request: SystemOneRequest) -> CompiledRequest:
+def compile_request(request: DecisionRequest) -> CompiledRequest:
     """Compile with the default compiler configuration."""
     return _DEFAULT.compile_request(request)

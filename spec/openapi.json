@@ -185,6 +185,136 @@
         "title": "ChoiceQuestion",
         "type": "object"
       },
+      "DecisionRequest": {
+        "additionalProperties": false,
+        "description": "State plus a map of typed questions, answered in a single model pass.",
+        "properties": {
+          "model": {
+            "default": "trigon-workhorse",
+            "description": "Which serving tier to answer from. The response names the concrete build.",
+            "maxLength": 128,
+            "title": "Model",
+            "type": "string"
+          },
+          "options": {
+            "$ref": "#/components/schemas/RequestOptions",
+            "description": "Per-request serving knobs."
+          },
+          "questions": {
+            "additionalProperties": {
+              "discriminator": {
+                "mapping": {
+                  "choice": "#/components/schemas/ChoiceQuestion",
+                  "noul": "#/components/schemas/NoulQuestion",
+                  "score": "#/components/schemas/ScoreQuestion"
+                },
+                "propertyName": "type"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/ChoiceQuestion"
+                },
+                {
+                  "$ref": "#/components/schemas/ScoreQuestion"
+                },
+                {
+                  "$ref": "#/components/schemas/NoulQuestion"
+                }
+              ]
+            },
+            "description": "Questions to answer about this state, keyed by an id of 1-128 characters that the answers come back under. Every question is answered in the same forward pass and none can influence another: adding, removing or reordering questions moves no other answer, exactly.",
+            "maxProperties": 1024,
+            "minProperties": 1,
+            "title": "Questions",
+            "type": "object"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "items": {},
+                "type": "array"
+              }
+            ],
+            "description": "What the questions are about: text, a JSON record, or a list of documents. Never interpreted as instructions -- see the injection-robustness section of docs/training.md.",
+            "title": "State"
+          }
+        },
+        "required": [
+          "state",
+          "questions"
+        ],
+        "title": "DecisionRequest",
+        "type": "object"
+      },
+      "DecisionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "answers": {
+            "additionalProperties": {
+              "discriminator": {
+                "mapping": {
+                  "choice": "#/components/schemas/ChoiceAnswer",
+                  "noul": "#/components/schemas/NoulAnswer",
+                  "score": "#/components/schemas/ScoreAnswer"
+                },
+                "propertyName": "type"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/ChoiceAnswer"
+                },
+                {
+                  "$ref": "#/components/schemas/ScoreAnswer"
+                },
+                {
+                  "$ref": "#/components/schemas/NoulAnswer"
+                }
+              ]
+            },
+            "description": "One answer per question you asked, under the same ids.",
+            "title": "Answers",
+            "type": "object"
+          },
+          "id": {
+            "description": "Unique id for this response.",
+            "title": "Id",
+            "type": "string"
+          },
+          "model": {
+            "description": "The concrete build that answered. Always a pinned version, never a moving alias -- answers change under users when an alias moves. A build trained on nothing says so in this string.",
+            "title": "Model",
+            "type": "string"
+          },
+          "tier": {
+            "default": "workhorse",
+            "description": "Which tier answered. 'premium' when a question was escalated.",
+            "title": "Tier",
+            "type": "string"
+          },
+          "timing": {
+            "$ref": "#/components/schemas/Timing",
+            "description": "Where the time went."
+          },
+          "usage": {
+            "$ref": "#/components/schemas/Usage",
+            "description": "What the request cost, in tokens."
+          }
+        },
+        "required": [
+          "id",
+          "model",
+          "answers"
+        ],
+        "title": "DecisionResponse",
+        "type": "object"
+      },
       "EvidenceSpan": {
         "additionalProperties": false,
         "description": "One span of the state that drove an answer.",
@@ -636,136 +766,6 @@
         "title": "ScoreQuestion",
         "type": "object"
       },
-      "SystemOneRequest": {
-        "additionalProperties": false,
-        "description": "State plus a map of typed questions, answered in a single model pass.",
-        "properties": {
-          "model": {
-            "default": "trigon-workhorse",
-            "description": "Which serving tier to answer from. The response names the concrete build.",
-            "maxLength": 128,
-            "title": "Model",
-            "type": "string"
-          },
-          "options": {
-            "$ref": "#/components/schemas/RequestOptions",
-            "description": "Per-request serving knobs."
-          },
-          "questions": {
-            "additionalProperties": {
-              "discriminator": {
-                "mapping": {
-                  "choice": "#/components/schemas/ChoiceQuestion",
-                  "noul": "#/components/schemas/NoulQuestion",
-                  "score": "#/components/schemas/ScoreQuestion"
-                },
-                "propertyName": "type"
-              },
-              "oneOf": [
-                {
-                  "$ref": "#/components/schemas/ChoiceQuestion"
-                },
-                {
-                  "$ref": "#/components/schemas/ScoreQuestion"
-                },
-                {
-                  "$ref": "#/components/schemas/NoulQuestion"
-                }
-              ]
-            },
-            "description": "Questions to answer about this state, keyed by an id of 1-128 characters that the answers come back under. Every question is answered in the same forward pass and none can influence another: adding, removing or reordering questions moves no other answer, exactly.",
-            "maxProperties": 1024,
-            "minProperties": 1,
-            "title": "Questions",
-            "type": "object"
-          },
-          "state": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "items": {},
-                "type": "array"
-              }
-            ],
-            "description": "What the questions are about: text, a JSON record, or a list of documents. Never interpreted as instructions -- see the injection-robustness section of docs/training.md.",
-            "title": "State"
-          }
-        },
-        "required": [
-          "state",
-          "questions"
-        ],
-        "title": "SystemOneRequest",
-        "type": "object"
-      },
-      "SystemOneResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "answers": {
-            "additionalProperties": {
-              "discriminator": {
-                "mapping": {
-                  "choice": "#/components/schemas/ChoiceAnswer",
-                  "noul": "#/components/schemas/NoulAnswer",
-                  "score": "#/components/schemas/ScoreAnswer"
-                },
-                "propertyName": "type"
-              },
-              "oneOf": [
-                {
-                  "$ref": "#/components/schemas/ChoiceAnswer"
-                },
-                {
-                  "$ref": "#/components/schemas/ScoreAnswer"
-                },
-                {
-                  "$ref": "#/components/schemas/NoulAnswer"
-                }
-              ]
-            },
-            "description": "One answer per question you asked, under the same ids.",
-            "title": "Answers",
-            "type": "object"
-          },
-          "id": {
-            "description": "Unique id for this response.",
-            "title": "Id",
-            "type": "string"
-          },
-          "model": {
-            "description": "The concrete build that answered. Always a pinned version, never a moving alias -- answers change under users when an alias moves. A build trained on nothing says so in this string.",
-            "title": "Model",
-            "type": "string"
-          },
-          "tier": {
-            "default": "workhorse",
-            "description": "Which tier answered. 'premium' when a question was escalated.",
-            "title": "Tier",
-            "type": "string"
-          },
-          "timing": {
-            "$ref": "#/components/schemas/Timing",
-            "description": "Where the time went."
-          },
-          "usage": {
-            "$ref": "#/components/schemas/Usage",
-            "description": "What the request cost, in tokens."
-          }
-        },
-        "required": [
-          "id",
-          "model",
-          "answers"
-        ],
-        "title": "SystemOneResponse",
-        "type": "object"
-      },
       "Timing": {
         "additionalProperties": false,
         "properties": {
@@ -872,14 +872,14 @@
   },
   "info": {
     "description": "Typed, calibrated decisions in one prefill-only forward pass.\n\nSend state plus a map of typed questions; get one typed answer per question,\neach a distribution over exactly the labels you declared. Answers cannot\nviolate the schema: the only vector the model produces is a softmax over your\noption set.",
-    "title": "Trigon System One API",
+    "title": "Trigon API",
     "version": "0.1.0"
   },
   "openapi": "3.1.0",
   "paths": {
     "/compat/v1/systemone": {
       "post": {
-        "operationId": "systemone_compat_v1_systemone_post",
+        "operationId": "compat_decide",
         "requestBody": {
           "content": {
             "application/json": {
@@ -999,7 +999,7 @@
                     "answers",
                     "usage"
                   ],
-                  "title": "Response Systemone Compat V1 Systemone Post",
+                  "title": "Response Compat Decide",
                   "type": "object"
                 }
               }
@@ -1039,6 +1039,47 @@
         ]
       }
     },
+    "/v1/decide": {
+      "post": {
+        "operationId": "decide_v1_decide_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DecisionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DecisionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Answer a map of typed questions about one state",
+        "tags": [
+          "inference"
+        ]
+      }
+    },
     "/v1/models": {
       "get": {
         "operationId": "models_v1_models_get",
@@ -1059,47 +1100,6 @@
         "summary": "Serving tiers and their versions",
         "tags": [
           "ops"
-        ]
-      }
-    },
-    "/v1/systemone": {
-      "post": {
-        "operationId": "systemone_v1_systemone_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SystemOneRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SystemOneResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Answer a map of typed questions about one state",
-        "tags": [
-          "inference"
         ]
       }
     }

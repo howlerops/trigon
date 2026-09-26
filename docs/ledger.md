@@ -56,7 +56,13 @@ twenty-two runs** — the investigation is closed and the evidence is in
   budgets. Per-question independence and schema-prefix cacheability asserted to
   floating-point equality in `tests/test_independence.py` where the shapes
   match, and to a float32 bound where the comparison spans sequence lengths.
-- `/v1/systemone` gateway, `spec/openapi.json` generated from it, drift-tested.
+- `/v1/decide` gateway, `spec/openapi.json` generated from it, drift-tested.
+- **Named after what it does** (2026-09-26, Q23). The native API is
+  `/v1/decide` with `DecisionRequest` / `DecisionResponse` and
+  `client.decide()`; nothing in the project names the incumbent it is a drop-in
+  for. The compat route keeps their path, written once as
+  `trigon.server.compat.COMPAT_PATH`, and `tests/test_no_incumbent_names.py`
+  and the site test fail the build on their name anywhere else.
 - Generated Python and TypeScript SDKs, both dependency-free, both exercised
   against a live gateway in CI.
 - CLI: `ask`, `serve`, `spec`, `eval`, `fit`, `train`.

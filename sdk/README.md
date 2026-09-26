@@ -24,7 +24,7 @@ parses a fixture proves nothing about the server it claims to speak to.
 from trigon_client import TrigonClient, choice, noul
 
 client = TrigonClient("http://localhost:8000")
-response = client.systemone(
+response = client.decide(
     state="my card was declined at the till and I still got charged",
     questions={
         "route": choice("Which queue?", ["billing", "shipping", "account"]),
@@ -42,7 +42,7 @@ response.answers["urgent"].probability  # no confidence field, by design
 import { TrigonClient, choice, noul } from "@trigon/client";
 
 const client = new TrigonClient("http://localhost:8000");
-const response = await client.systemone(
+const response = await client.decide(
   "my card was declined at the till and I still got charged",
   {
     route: choice("Which queue?", ["billing", "shipping", "account"]),

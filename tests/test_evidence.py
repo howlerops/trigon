@@ -34,7 +34,7 @@ from trigon.evidence import merge_spans, token_labels
 from trigon.schema import compile_request
 from trigon.server.app import build_app
 from trigon.server.config import ServerConfig
-from trigon.types import EvidenceSpan, NoulQuestion, SystemOneRequest
+from trigon.types import DecisionRequest, EvidenceSpan, NoulQuestion
 
 SAMPLES = [
     "",
@@ -94,7 +94,7 @@ class _Silent:
 
 def test_a_backend_that_cannot_attribute_says_so():
     """An empty list alone would read as "nothing mattered"."""
-    request = SystemOneRequest(
+    request = DecisionRequest(
         state="anything",
         questions={"q": NoulQuestion(instructions="Is it?")},
         options={"include_evidence": True},
@@ -104,7 +104,7 @@ def test_a_backend_that_cannot_attribute_says_so():
 
 
 def test_evidence_outside_the_state_is_rejected_on_every_path():
-    request = SystemOneRequest(state="short", questions={"q": NoulQuestion(instructions="Is it?")})
+    request = DecisionRequest(state="short", questions={"q": NoulQuestion(instructions="Is it?")})
     compiled = compile_request(request)
     for bad in ((0, 99, 0.5), (3, 3, 0.5), (0, 2, 1.5), (0, 2, float("nan"))):
         output = BackendOutput(
@@ -132,10 +132,10 @@ def test_the_gateway_serves_evidence_and_leaves_the_default_alone():
             }
         },
     }
-    plain = client.post("/v1/systemone", json=body).json()
+    plain = client.post("/v1/decide", json=body).json()
     assert "evidence" not in plain["answers"]["intent"]
     explained = client.post(
-        "/v1/systemone", json={**body, "options": {"include_evidence": True}}
+        "/v1/decide", json={**body, "options": {"include_evidence": True}}
     ).json()
     answer = explained["answers"]["intent"]
     assert answer["evidence_method"] == "lexical_overlap"
@@ -254,7 +254,7 @@ def _rationale_case(i: int, state: str, marked: str | None) -> Case:
         rationale = ((at, at + len(marked)),)
     return Case(
         case_id=f"r/{i}",
-        request=SystemOneRequest(
+        request=DecisionRequest(
             state=state, questions={"toxic": NoulQuestion(instructions="Is this toxic?")}
         ),
         expected={"toxic": Expectation(probability=1.0, rationale=rationale)},

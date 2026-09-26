@@ -21,7 +21,7 @@ import time
 from dataclasses import dataclass
 
 from ..engine import Engine
-from ..types import Answer, NoulAnswer, SystemOneRequest, SystemOneResponse, Timing
+from ..types import Answer, DecisionRequest, DecisionResponse, NoulAnswer, Timing
 
 __all__ = ["RoutingPolicy", "TieredRouter"]
 
@@ -58,7 +58,7 @@ class TieredRouter:
         self.premium = premium
         self.policy = policy or RoutingPolicy()
 
-    def answer(self, request: SystemOneRequest) -> SystemOneResponse:
+    def answer(self, request: DecisionRequest) -> DecisionResponse:
         started = time.perf_counter()
         response = self.workhorse.answer(request)
         if self.premium is None:

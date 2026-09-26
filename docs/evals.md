@@ -194,7 +194,7 @@ this sample size"** is the strongest claim the data supports, and it is a
 different claim from "ECE is 0.03".
 
 This is the failure the whole section exists to prevent, and it has already
-happened in public: an independent re-analysis observed that published Jev ECE
+happened in public: an independent re-analysis observed that the incumbent's published ECE
 figures of 0.0505–0.0712 at n=60 are equally what serious miscalibration looks
 like at that sample size. Reproducible evals are the differentiator, so our own
 numbers have to survive the same scrutiny.

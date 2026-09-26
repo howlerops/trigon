@@ -19,7 +19,7 @@ from trigon.backends.torch_readout import ReadoutConfig, TorchReadoutBackend  # 
 from trigon.engine import Engine  # noqa: E402
 from trigon.evals.harness import Case, Expectation  # noqa: E402
 from trigon.training import TrainingConfig, train  # noqa: E402
-from trigon.types import NoulQuestion, SystemOneRequest  # noqa: E402
+from trigon.types import DecisionRequest, NoulQuestion  # noqa: E402
 
 SHAPE = dict(d_model=64, n_layers=2, n_heads=2, d_ff=64)
 FRUIT = ["apple", "banana", "cherry", "mango", "peach", "plum"]
@@ -44,7 +44,7 @@ def _cases(n: int, seed: int, *, rationale: bool = True) -> list[Case]:
         out.append(
             Case(
                 case_id=f"fruit/{i}",
-                request=SystemOneRequest(
+                request=DecisionRequest(
                     state=state,
                     questions={"fruit": NoulQuestion(instructions="Is a fruit mentioned?")},
                 ),
@@ -63,7 +63,7 @@ def _backend(seed: int = 0) -> TorchReadoutBackend:
 
 
 def _methods(backend) -> set[str]:
-    request = SystemOneRequest.model_validate(
+    request = DecisionRequest.model_validate(
         {**_cases(1, 99)[0].request.model_dump(), "options": {"include_evidence": True}}
     )
     answers = Engine(backend, compiler=backend.make_compiler()).answer(request).answers
@@ -167,7 +167,7 @@ def test_supervision_teaches_the_head_where_the_fruit_is():
     held_out = [c for c in _cases(40, 7) if c.expected["fruit"].rationale]
     top_is_fruit = 0
     for case in held_out:
-        request = SystemOneRequest.model_validate(
+        request = DecisionRequest.model_validate(
             {**case.request.model_dump(), "options": {"include_evidence": True}}
         )
         compiled = engine.compiler.compile_request(request)
@@ -184,7 +184,7 @@ def test_evidence_requests_in_a_batch_are_answered_as_they_would_be_alone():
     backend = _backend()
     compiler = backend.make_compiler()
     requests = [
-        SystemOneRequest.model_validate(
+        DecisionRequest.model_validate(
             {**c.request.model_dump(), "options": {"include_evidence": True}}
         )
         for c in _cases(3, 5)
@@ -206,7 +206,7 @@ def test_the_span_head_leaves_the_answer_exactly_as_it_was():
     request = _cases(1, 4)[0].request
     plain = engine.answer(request).answers["fruit"]
     explained = engine.answer(
-        SystemOneRequest.model_validate(
+        DecisionRequest.model_validate(
             {**request.model_dump(), "options": {"include_evidence": True}}
         )
     ).answers["fruit"]
@@ -237,7 +237,7 @@ def test_the_gateway_serves_the_attribution_it_is_configured_for(tmp_path):
         )
         with TestClient(build_app(config)) as http:
             assert http.get("/healthz").json()["unsupervised_evidence"] == method
-            answer = http.post("/v1/systemone", json=request).json()["answers"]["fruit"]
+            answer = http.post("/v1/decide", json=request).json()["answers"]["fruit"]
             assert answer["evidence_method"] == ("unavailable" if method == "none" else method)
 
     bad = ServerConfig.from_env(

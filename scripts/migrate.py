@@ -7,7 +7,7 @@
 
 **Nobody switches on a promise.** They switch on a diff over their own traffic,
 which is why this exists and why it takes *your* requests rather than shipping
-its own. Give it a JSONL file of `/v1/systemone` request bodies -- a day of
+its own. Give it a JSONL file of `/v1/decide` request bodies -- a day of
 production traffic, replayed -- and it reports where the two systems agree,
 where they diverge, and, if you have outcomes, which one was right.
 
@@ -36,8 +36,12 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "src"))
 
-from trigon.server.compat import compat_answer_to_native, to_compat_request  # noqa: E402
-from trigon.types import SystemOneRequest  # noqa: E402
+from trigon.server.compat import (  # noqa: E402
+    COMPAT_PATH,
+    compat_answer_to_native,
+    to_compat_request,
+)
+from trigon.types import DecisionRequest  # noqa: E402
 
 
 def _selected(answer: dict) -> str | None:
@@ -79,14 +83,16 @@ def _confidence(answer: dict) -> float | None:
     return None
 
 
-def _call_http(url: str, body: dict, timeout: float, key: str | None = None) -> dict:
+def _call_http(
+    url: str, body: dict, timeout: float, key: str | None = None, path: str = "/v1/decide"
+) -> dict:
     import urllib.request
 
     headers = {"Content-Type": "application/json"}
     if key:
         headers["Authorization"] = f"Bearer {key}"
     request = urllib.request.Request(
-        url.rstrip("/") + "/v1/systemone",
+        url.rstrip("/") + path,
         data=json.dumps(body).encode(),
         headers=headers,
     )
@@ -109,7 +115,7 @@ def _call_cmd(command: str, body: dict, timeout: float) -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("requests", help="JSONL of /v1/systemone request bodies")
+    parser.add_argument("requests", help="JSONL of /v1/decide request bodies")
     parser.add_argument("--incumbent", default=None, help="base URL of what you run today")
     parser.add_argument(
         "--incumbent-wire",
@@ -121,6 +127,14 @@ def main() -> int:
             "service and speaks their contract, while a command is a wrapper you "
             "wrote and ours is the shape you have the documentation for. Set it "
             "explicitly when that guess is wrong"
+        ),
+    )
+    parser.add_argument(
+        "--incumbent-model",
+        default=None,
+        help=(
+            "the model name their contract asks for, sent as `model` on the compat "
+            "wire; required with --incumbent-wire compat, since it is theirs to name"
         ),
     )
     parser.add_argument(
@@ -178,13 +192,13 @@ def main() -> int:
         client = TestClient(build_app(ServerConfig(backend=args.backend, weights=args.weights)))
 
         def challenge(body: dict) -> dict:
-            response = client.post("/v1/systemone", json=body)
+            response = client.post("/v1/decide", json=body)
             response.raise_for_status()
             return response.json()
 
     # The incumbent speaks their wire, not ours. This is the whole reason the
     # compatibility adapter is imported here: the first version of this script
-    # sent our body shape to their `/v1/systemone`, which their contract
+    # sent our body shape to their endpoint, which their contract
     # answers with a 422 on every request -- so the artifact written to be
     # pointed at the incumbent could not reach it.
     key = args.incumbent_key or os.environ.get("TRIGON_INCUMBENT_KEY")
@@ -193,16 +207,18 @@ def main() -> int:
     # Neither default is right for both, which is why this is resolved per
     # transport rather than picked once.
     wire = args.incumbent_wire or ("compat" if args.incumbent else "native")
+    if wire == "compat" and not args.incumbent_model:
+        parser.error("--incumbent-model is required to speak the incumbent's wire")
 
     def incumbent(body: dict) -> dict:
         if wire == "native":
             if args.incumbent:
                 return _call_http(args.incumbent, body, args.timeout, key)
             return _call_cmd(args.incumbent_cmd, body, args.timeout)
-        native = SystemOneRequest.model_validate(body)
-        outbound = to_compat_request(native)
+        native = DecisionRequest.model_validate(body)
+        outbound = to_compat_request(native, model=args.incumbent_model)
         raw = (
-            _call_http(args.incumbent, outbound, args.timeout, key)
+            _call_http(args.incumbent, outbound, args.timeout, key, path=COMPAT_PATH)
             if args.incumbent
             else _call_cmd(args.incumbent_cmd, outbound, args.timeout)
         )

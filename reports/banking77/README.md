@@ -70,7 +70,7 @@ same evaluation. The deployed model is seed 2 and does not change.
 ### Deployed
 
 Seed 2 is served at **`https://jbeck018--trigon-serve-gateway.modal.run`**
-by `scripts/modal_serve.py` -- the real gateway, `/v1/systemone`,
+by `scripts/modal_serve.py` -- the real gateway, `/v1/decide`,
 `/compat` and `/healthz`, on an A10G that scales to zero. It takes two
 credentials. First, a Modal proxy auth token (`Modal-Key` / `Modal-Secret`
 headers): without one, Modal's edge refuses the request before any container

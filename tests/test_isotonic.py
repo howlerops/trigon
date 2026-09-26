@@ -185,9 +185,9 @@ def test_the_gateway_serves_the_isotonic_map_it_was_given(tmp_path):
         },
     }
 
-    plain = TestClient(build_app(ServerConfig())).post("/v1/systemone", json=request).json()
+    plain = TestClient(build_app(ServerConfig())).post("/v1/decide", json=request).json()
     mapped_app = build_app(ServerConfig(isotonic_path=str(path)))
-    mapped = TestClient(mapped_app).post("/v1/systemone", json=request).json()
+    mapped = TestClient(mapped_app).post("/v1/decide", json=request).json()
 
     top = mapped["answers"]["intent"]["selected"]
     assert mapped["answers"]["intent"]["probabilities"][top] == pytest.approx(0.42, abs=1e-6)
@@ -295,7 +295,7 @@ def test_the_engine_maps_a_noul_probability_not_its_confidence():
     }
     served = (
         TestClient(build_app(ServerConfig(isotonic_path=path.name)))
-        .post("/v1/systemone", json=request)
+        .post("/v1/decide", json=request)
         .json()
     )
     assert served["answers"]["urgent"]["probability"] == pytest.approx(0.30, abs=1e-6)

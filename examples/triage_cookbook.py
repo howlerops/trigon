@@ -29,7 +29,7 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "src"))
 
 from trigon.engine import Engine  # noqa: E402
-from trigon.types import SystemOneRequest  # noqa: E402
+from trigon.types import DecisionRequest  # noqa: E402
 
 TICKETS = [
     "My card was declined at the till twice and I still got charged once.",
@@ -95,7 +95,7 @@ def main() -> int:
 
     escalated = 0
     for ticket in TICKETS:
-        response = engine.answer(SystemOneRequest(state=ticket, questions=QUESTIONS))
+        response = engine.answer(DecisionRequest(state=ticket, questions=QUESTIONS))
         route = response.answers["route"]
         severity = response.answers["severity"]
         money = response.answers["money_involved"]
@@ -134,9 +134,9 @@ def main() -> int:
     print()
 
     # 1. Adding a question moves none of the others -- exactly, not approximately.
-    first = engine.answer(SystemOneRequest(state=TICKETS[0], questions=QUESTIONS))
+    first = engine.answer(DecisionRequest(state=TICKETS[0], questions=QUESTIONS))
     with_extra = engine.answer(
-        SystemOneRequest(
+        DecisionRequest(
             state=TICKETS[0],
             questions={
                 **QUESTIONS,
@@ -158,7 +158,7 @@ def main() -> int:
 
         engine.conformal = {"accounts": ConformalPredictor.load(profile)}
         covered = engine.answer(
-            SystemOneRequest(
+            DecisionRequest(
                 state=TICKETS[0],
                 questions=QUESTIONS,
                 options={"conformal_profile": "accounts"},

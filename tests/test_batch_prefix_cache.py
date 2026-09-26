@@ -43,9 +43,9 @@ from trigon.backends.torch_readout import ReadoutConfig, TorchReadoutBackend  # 
 from trigon.engine import Engine  # noqa: E402
 from trigon.types import (  # noqa: E402
     ChoiceQuestion,
+    DecisionRequest,
     NoulQuestion,
     ScoreQuestion,
-    SystemOneRequest,
 )
 
 ROUTE = {
@@ -101,7 +101,7 @@ def _dump(response) -> dict:
     return {qid: answer.model_dump() for qid, answer in response.answers.items()}
 
 
-def _schema_tokens(engine: Engine, request: SystemOneRequest) -> int:
+def _schema_tokens(engine: Engine, request: DecisionRequest) -> int:
     return engine.backend._schema_tokens(engine.compiler.compile_request(request))
 
 
@@ -116,7 +116,7 @@ def test_a_batch_on_one_schema_reads_the_prefix_and_answers_as_one_at_a_time_doe
     Float32 bound: the batch pads every request to the longest, so each is
     computed at a different shape from its single-request pass.
     """
-    requests = [SystemOneRequest(state=s, questions=ROUTE) for s in STATES]
+    requests = [DecisionRequest(state=s, questions=ROUTE) for s in STATES]
     single, batched = _engine(kind), _engine(kind)
 
     alone = [single.answer(r) for r in requests]
@@ -134,7 +134,7 @@ def test_the_prefix_a_batch_fills_is_the_prefix_the_single_path_fills_exactly(ki
     path's positions and mask semantics the single path's by construction:
     the prefix is filled from one request's own unpadded tensors, never from
     a padded batch row."""
-    requests = [SystemOneRequest(state=s, questions=ROUTE) for s in STATES]
+    requests = [DecisionRequest(state=s, questions=ROUTE) for s in STATES]
     single, batched = _engine(kind), _engine(kind)
     single.answer(requests[0])
     batched.answer_many(requests)
@@ -151,7 +151,7 @@ def test_the_prefix_a_batch_fills_is_the_prefix_the_single_path_fills_exactly(ki
 
 def test_the_cached_batch_agrees_with_the_uncached_batch(kind):
     """The two batched arms: the cache moves no answer beyond rounding."""
-    requests = [SystemOneRequest(state=s, questions=ROUTE) for s in STATES]
+    requests = [DecisionRequest(state=s, questions=ROUTE) for s in STATES]
     plain = _engine(kind, cache=False).answer_many(requests)
     cached = _engine(kind).answer_many(requests)
     for one, many in zip(plain, cached, strict=True):
@@ -163,11 +163,11 @@ def test_the_cached_batch_agrees_with_the_uncached_batch(kind):
 
 def test_a_mixed_schema_batch_is_one_pass_per_schema_and_still_correct(kind):
     requests = [
-        SystemOneRequest(state=STATES[0], questions=ROUTE),
-        SystemOneRequest(state=STATES[1], questions=SIZE),
-        SystemOneRequest(state=STATES[2], questions=ROUTE),
-        SystemOneRequest(state=STATES[3], questions=SIZE),
-        SystemOneRequest(state=STATES[1], questions={**ROUTE, **SIZE}),
+        DecisionRequest(state=STATES[0], questions=ROUTE),
+        DecisionRequest(state=STATES[1], questions=SIZE),
+        DecisionRequest(state=STATES[2], questions=ROUTE),
+        DecisionRequest(state=STATES[3], questions=SIZE),
+        DecisionRequest(state=STATES[1], questions={**ROUTE, **SIZE}),
     ]
     single, batched = _engine(kind), _engine(kind)
     alone = [single.answer(r) for r in requests]
@@ -189,11 +189,11 @@ def test_cached_schema_tokens_is_reported_per_request_as_one_at_a_time_would(kin
     """Only a hit counts. On a miss the group's first request fills the
     prefix and paid for it; every other request on that schema read it."""
     requests = [
-        SystemOneRequest(state=STATES[0], questions=ROUTE),
-        SystemOneRequest(state=STATES[1], questions=ROUTE),
-        SystemOneRequest(state=STATES[2], questions=SIZE),
-        SystemOneRequest(state=STATES[3], questions=ROUTE),
-        SystemOneRequest(state=STATES[0], questions=SIZE),
+        DecisionRequest(state=STATES[0], questions=ROUTE),
+        DecisionRequest(state=STATES[1], questions=ROUTE),
+        DecisionRequest(state=STATES[2], questions=SIZE),
+        DecisionRequest(state=STATES[3], questions=ROUTE),
+        DecisionRequest(state=STATES[0], questions=SIZE),
     ]
     single, batched = _engine(kind), _engine(kind)
     route, size = _schema_tokens(batched, requests[0]), _schema_tokens(batched, requests[2])
@@ -220,9 +220,9 @@ def test_a_request_does_not_hear_its_neighbours_exactly_at_a_fixed_shape(kind):
     kernel reduces the same way and any difference at all is a leak.
     """
     engine = _engine(kind)
-    target = SystemOneRequest(state=STATES[0], questions=ROUTE)
-    one = SystemOneRequest(state="the card was declined", questions=ROUTE)
-    other = SystemOneRequest(state="the card was blocked", questions=ROUTE)
+    target = DecisionRequest(state=STATES[0], questions=ROUTE)
+    one = DecisionRequest(state="the card was declined", questions=ROUTE)
+    other = DecisionRequest(state="the card was blocked", questions=ROUTE)
     lengths = {engine.compiler.compile_request(r).total_tokens for r in (one, other)}
     assert len(lengths) == 1, "the neighbours must be the same length for this to be exact"
 
@@ -243,8 +243,8 @@ def test_adding_questions_moves_no_other_answer_on_the_batched_cached_path(kind)
     """
     engine = _engine(kind)
     crowd = {f"filler_{i}": NoulQuestion(instructions=f"Is fact {i} present?") for i in range(8)}
-    small = [SystemOneRequest(state=s, questions=ROUTE) for s in STATES]
-    large = [SystemOneRequest(state=s, questions={**crowd, **ROUTE}) for s in STATES]
+    small = [DecisionRequest(state=s, questions=ROUTE) for s in STATES]
+    large = [DecisionRequest(state=s, questions={**crowd, **ROUTE}) for s in STATES]
 
     before = engine.answer_many(small)
     after = engine.answer_many(small[:2] + large + small[2:])
@@ -263,7 +263,7 @@ def test_a_training_mode_batch_neither_reads_nor_fills_the_cache(kind):
     if a prefix from one step were served into the next."""
     engine = _engine(kind)
     backend = engine.backend
-    requests = [SystemOneRequest(state=s, questions=ROUTE) for s in STATES]
+    requests = [DecisionRequest(state=s, questions=ROUTE) for s in STATES]
     items = [(engine.compiler.compile_request(r), r) for r in requests]
 
     backend.model.train()
@@ -279,6 +279,6 @@ def test_a_training_mode_batch_neither_reads_nor_fills_the_cache(kind):
 
 def test_a_batch_with_the_cache_off_computes_everything_and_says_so(kind):
     engine = _engine(kind, cache=False)
-    responses = engine.answer_many([SystemOneRequest(state=s, questions=ROUTE) for s in STATES])
+    responses = engine.answer_many([DecisionRequest(state=s, questions=ROUTE) for s in STATES])
     assert engine.backend._prefix_cache == {}
     assert all(r.usage.cached_schema_tokens == 0 for r in responses)
