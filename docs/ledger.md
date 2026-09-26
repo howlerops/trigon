@@ -65,7 +65,10 @@ twenty-two runs** — the investigation is closed and the evidence is in
   unless an operator configures them.
 - **Batching across requests** — `Engine.answer_many` coalesces forward
   passes, asserted to answer identically to the one-at-a-time path. Off by
-  default: it is 30% slower on CPU.
+  default: it is 30% slower on CPU. **Reads the schema KV cache** (2026-09-26):
+  a batch is grouped by schema and each group computes only its state and
+  readout tokens against one broadcast prefix, spike and Qwen2 alike, with
+  `cached_schema_tokens` per request (`tests/test_batch_prefix_cache.py`).
 - **Compatibility adapter** — the incumbent's published request and response
   shapes, served at their path (`trigon serve --compat`) and mounted under
   `/compat` on the native gateway. Both front doors are asserted to return the
@@ -201,6 +204,7 @@ twenty-two runs** — the investigation is closed and the evidence is in
 | Compat path vs native path | Identical answers through one process, asserted per primitive |
 | Schema KV cache, 77 options | 91.8 ms → 15.3 ms p50, a **6× speedup**; 23× at 256 options |
 | Batching 16 requests into one pass, on CPU | 4.14 ms/request against 3.43 ms serial — a 20% loss |
+| Batched serving through the schema cache, spike shape, loaded CPU | 12.3 → 47.8 req/s at batch 8, 13.0 → 53.6 at 32; computed tokens 100% → 2.7% of billed above batch 1. Not yet timed on a GPU (`reports/cache/README.md`) |
 | Vectorized attention mask | 208 ms → 8.2 ms per request; the whole pass 399 ms → 82.8 ms |
 | Padding waste in a training chunk, HelpSteer2 | 2.82× at chunk 8 in random order; 1.04× length-sorted |
 | Length bucketing, end to end | **1.63×** — 2.7× on the attention term, diluted by everything linear |
@@ -483,11 +487,18 @@ what order, and how each step is known to be done.
 - **$/MTok has a preliminary measurement: $0.0574, not $0.007.** Modal's L4,
   the certified model, batch 1, $0.80/h as an input
   (`reports/burn-in/modal-l4/`). It closes on a rented, dedicated L4.
-- **The batched serving path does not use the schema cache.** At batch 8 and
-  32 the burn-in's computed tokens equal its billed ones. Every batched row
-  is slower per request than batch 1 and fails the latency target. So
-  `Engine.answer_many` pays full price for the 97% of the sequence that
-  batch 1 reads from the cache.
+- ~~The batched serving path does not use the schema cache.~~ **Closed in
+  code, 2026-09-26; the GPU re-time is pending.** The record: at batch 8
+  and 32 the L4 burn-in's computed tokens equalled its billed ones, every
+  batched row was slower per request than batch 1 and failed the latency
+  target, and `Engine.answer_many` paid full price for the 97% of the
+  sequence that batch 1 reads from the cache. `infer_many` now groups a
+  batch by schema and reads one cached prefix per group; on a loaded CPU the
+  spike's batched throughput rose 3.9–4.1× and computed tokens fell to 2.7%
+  of billed at every batch size (`reports/cache/README.md`). The L4 rows in
+  `reports/burn-in/modal-l4/` still describe the old path until
+  `modal run scripts/modal_burn_in.py` is rerun; whether batching then beats
+  batch 1 on the certified model is not known.
 - ~~The KV cache is off by default because nobody has timed it.~~ **Closed.**
   Timed on an idle machine: 6× at the served shape, 23× at 256 options
   (`reports/cache/README.md`). It is on by default now and `/healthz` reports

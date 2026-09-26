@@ -345,7 +345,7 @@ class PrefillOnlyModel(nn.Module):
         ``token_embeddings`` (B, T, d); ``mask`` (T, T) for a single request or
         (B, T, T) when the batch's requests have different layouts, boolean
         "may attend"; ``positions`` and ``segment_types`` (T,) or (B, T), the
-        latter group-local indices and the former in {0: schema, 1: state,
+        former group-local indices and the latter in {0: schema, 1: state,
         2: readout}.
         """
         batched = positions.dim() == 2
@@ -430,15 +430,23 @@ class PrefillOnlyModel(nn.Module):
         n = prefix.tokens
         hidden = self._embed_inputs(token_embeddings, positions, segment_types)
         rest = hidden[:, n:]
-        # A batch of several variants of one request -- integrated gradients'
-        # interpolation steps -- shares one schema block, so the cached prefix
-        # is broadcast rather than recomputed per variant.
+        # A batch that shares one schema block -- integrated gradients'
+        # interpolation steps, or several callers' requests on one schema in
+        # `infer_many` -- broadcasts the cached prefix rather than recomputing
+        # it per sample.
         batch = rest.shape[0]
         # Rows for the non-schema tokens, columns for the whole sequence. The
         # schema is a prefix in this layout, so the concatenation below is
         # already in the order these columns expect; it is not a coincidence to
         # rely on silently, so `_heads` is given the reassembled sequence.
-        block = ~mask[n:, :]
+        if mask.dim() == 3:
+            # Per-sample masks, from a padded batch of requests with different
+            # lengths. Repeated per head with repeat_interleave for the reason
+            # `forward` gives: the attention flattens (batch, head) into one
+            # dimension with each sample's heads adjacent.
+            block = (~mask[:, n:, :]).repeat_interleave(self.config.n_heads, dim=0)
+        else:
+            block = ~mask[n:, :]
         for index, layer in enumerate(self.encoder.layers):
             normed = layer.norm1(rest)
             keys = torch.cat([prefix.layers[index].expand(batch, -1, -1), normed], dim=1)
@@ -1034,21 +1042,42 @@ class TorchReadoutBackend:
         """
         if not self.cache_prefixes or self.model.training:
             return None
-        schema_hash = compiled.schema.schema_hash
-        tokens = sum(
+        prefix, hit = self._lookup_prefix(compiled, embeddings, mask, positions, segments)
+        if hit:
+            # Only a *hit* counts as cached. The request that fills the cache
+            # paid full price for the schema block, and reporting otherwise
+            # would overstate the saving by exactly one request per schema --
+            # which on a gateway serving a handful of schemas is most of them.
+            self._last_cached_tokens = prefix.tokens
+        return prefix
+
+    @staticmethod
+    def _schema_tokens(compiled: CompiledRequest) -> int:
+        """How many leading tokens are the schema block: what a prefix covers."""
+        return sum(
             segment.tokens
             for segment in compiled.segments
             if segment.kind
             in {SegmentKind.SCHEMA_QUESTION, SegmentKind.SCHEMA_OPTION, SegmentKind.SCHEMA_LEVEL}
         )
+
+    def _lookup_prefix(
+        self, compiled, embeddings, mask, positions, segments
+    ) -> tuple[SchemaPrefix, bool]:
+        """The schema prefix for ``compiled``, and whether it was already cached.
+
+        The one place a prefix is looked up or filled, shared by the single and
+        batched paths so both key, fill and bound the cache the same way. The
+        inputs are one request's own, unpadded: a prefix filled from a padded
+        batch row would be a different shape of the same arithmetic, and a
+        cache is exactly where "approximately the prefix" must not be stored.
+        The callers own the training-mode guard.
+        """
+        schema_hash = compiled.schema.schema_hash
+        tokens = self._schema_tokens(compiled)
         cached = self._prefix_cache.get(schema_hash)
         if cached is not None and cached.tokens == tokens:
-            # Only a *hit* counts as cached. The request that fills the cache
-            # paid full price for the schema block, and reporting otherwise
-            # would overstate the saving by exactly one request per schema --
-            # which on a gateway serving a handful of schemas is most of them.
-            self._last_cached_tokens = tokens
-            return cached
+            return cached, True
         prefix = self.model.encode_prefix(
             embeddings, mask, positions, segments, tokens, schema_hash
         )
@@ -1058,7 +1087,7 @@ class TorchReadoutBackend:
             # gateway serving many schemas is a slow memory leak.
             self._prefix_cache.clear()
         self._prefix_cache[schema_hash] = prefix
-        return prefix
+        return prefix, False
 
     def _heads(
         self,
@@ -1300,7 +1329,7 @@ class TorchReadoutBackend:
     def infer_many(
         self, batch: Sequence[tuple[CompiledRequest, SystemOneRequest]]
     ) -> list[BackendOutput]:
-        """Several requests, one forward pass.
+        """Several requests, one forward pass per schema.
 
         `docs/next.md` B.2. Continuous batching over a prefill-only model is
         the easy case and this is why: there is no decode loop, no ragged
@@ -1315,6 +1344,24 @@ class TorchReadoutBackend:
         path, and it is the only property here worth testing, because a batcher
         that quietly mixes two callers' states produces well-formed answers to
         questions nobody asked.
+
+        **With the schema cache on, the batch reads the cached prefix too.**
+        For a long time it did not: the L4 burn-in computed every billed token
+        at batch 8 and 32 where batch 1 computed 3% of them, so batching was
+        slower per request than not batching. Requests are grouped by schema;
+        each group is one padded pass over its state and readout tokens only,
+        attending to one cached prefix broadcast across the group. A batch of
+        one schema -- a classifier deployment -- is one pass; a batch of mixed
+        schemas is one pass per schema, each against its own prefix. The
+        prefix is looked up or filled exactly as the single path does it, from
+        one request's own unpadded tensors (`_lookup_prefix`), so it holds the
+        same values whichever path filled it. `tests/test_batch_prefix_cache.py`
+        is the specification.
+
+        `cached_schema_tokens` is per request and counts only what that request
+        did not compute: on a miss the group's first request fills the prefix
+        and pays for it, and every other request in the group reads it --
+        which is what one-at-a-time serving of the same requests would report.
 
         Returns one `BackendOutput` per input, in order. Falls back to the
         single path for a batch of one rather than paying to pad it.
@@ -1332,49 +1379,65 @@ class TorchReadoutBackend:
 
         started = time.perf_counter()
         was_training = self.model.training
+        # Decided before the switch to eval below, which is this pass's own and
+        # says nothing about the weights: a model in training mode has weights
+        # that move every step, and a prefix belongs to the weights that made it.
+        use_cache = self.cache_prefixes and not was_training
         self.model.eval()
         try:
+            device = self.device
             embedded = [self._embed(compiled) for compiled, _ in batch]
             lengths = [int(e.shape[1]) for e, _ in embedded]
-            width = max(lengths)
-            d_model = self.config.d_model
-            device = self.device
-
-            padded = torch.zeros(len(batch), width, d_model, device=device)
-            positions = torch.zeros(len(batch), width, dtype=torch.long, device=device)
-            segments = torch.zeros(len(batch), width, dtype=torch.long, device=device)
-            masks = torch.zeros(len(batch), width, width, dtype=torch.bool, device=device)
-
-            for i, ((compiled, _), (embeddings, spans)) in enumerate(
-                zip(batch, embedded, strict=True)
-            ):
-                n = lengths[i]
-                padded[i, :n] = embeddings[0]
-                positions[i, :n] = spans.positions(device)
-                segments[i, :n] = spans.segment_types(device)
-                one = self._mask_tensor(compiled)
+            masks = []
+            for (compiled, _), n in zip(batch, lengths, strict=True):
+                one = self._cached_mask(compiled)
                 if one.shape[0] != n:
                     raise ValueError(
                         f"mask is {one.shape[0]} tokens but the sequence is {n}; "
                         "the compiler's estimator must be the backend's tokenizer"
                     )
-                masks[i, :n, :n] = one
-                # A padding row that may attend to nothing is a softmax over an
-                # empty set, which is NaN, and one NaN in a batched attention
-                # poisons every sample sharing the tensor. Letting padding
-                # attend to itself keeps it finite and keeps it isolated: no
-                # real token attends *to* padding, so the value is never read.
-                pad = torch.arange(n, width, device=device)
-                masks[i, pad, pad] = True
+                masks.append(one)
 
+            if use_cache:
+                # Keyed as the cache is, plus the block's length: one schema
+                # hash is one schema block, and the length is what a prefix is
+                # checked against before it is trusted.
+                groups: dict[tuple[str, int], list[int]] = {}
+                for i, (compiled, _) in enumerate(batch):
+                    key = (compiled.schema.schema_hash, self._schema_tokens(compiled))
+                    groups.setdefault(key, []).append(i)
+                passes = list(groups.values())
+            else:
+                passes = [list(range(len(batch)))]
+
+            hidden: list[torch.Tensor] = [torch.empty(0)] * len(batch)
+            cached = [0] * len(batch)
             with torch.no_grad():
-                hidden = self.model(padded, masks, positions, segments)
+                for members in passes:
+                    prefix = None
+                    if use_cache:
+                        first = members[0]
+                        embeddings, spans = embedded[first]
+                        prefix, hit = self._lookup_prefix(
+                            batch[first][0],
+                            embeddings,
+                            masks[first],
+                            spans.positions(device),
+                            spans.segment_types(device),
+                        )
+                        for rank, i in enumerate(members):
+                            cached[i] = prefix.tokens if hit or rank > 0 else 0
+                    states = self._padded_pass(
+                        [embedded[i] for i in members], [masks[i] for i in members], prefix
+                    )
+                    for row, i in enumerate(members):
+                        hidden[i] = states[row, : lengths[i]]
 
             results = []
             for i, ((compiled, request), (_, spans)) in enumerate(
                 zip(batch, embedded, strict=True)
             ):
-                raw = self._heads(compiled, request, hidden[i, : lengths[i]], spans)
+                raw = self._heads(compiled, request, hidden[i], spans)
                 results.append(
                     BackendOutput(
                         outputs={
@@ -1391,17 +1454,58 @@ class TorchReadoutBackend:
                         # batch of eight look eight times more expensive than
                         # the same work unbatched.
                         model_ms=(time.perf_counter() - started) * 1000.0 / len(batch),
-                        # The schema prefix cache is not used on this path: a
-                        # batch's samples can have different schemas and the
-                        # prefix is per-schema, so mixing them would need a
-                        # per-sample gather this does not do yet.
-                        cached_schema_tokens=0,
-                        diagnostics={"sequence_tokens": lengths[i], "batch": len(batch)},
+                        cached_schema_tokens=cached[i],
+                        diagnostics={
+                            "sequence_tokens": lengths[i],
+                            "batch": len(batch),
+                            "passes": len(passes),
+                        },
                     )
                 )
             return results
         finally:
             self.model.train(was_training)
+
+    def _padded_pass(
+        self,
+        embedded: Sequence[tuple[torch.Tensor, _Spans]],
+        masks: Sequence[torch.Tensor],
+        prefix: SchemaPrefix | None,
+    ) -> torch.Tensor:
+        """One forward pass over requests padded to the longest: (B, T, d).
+
+        With ``prefix``, every request shares that schema block: only the rows
+        after it are computed, and the prefix is broadcast across the batch
+        exactly as it is across integrated gradients' steps. Without one, the
+        whole sequence is computed, which is the path for a cache that is off.
+        """
+        device = self.device
+        lengths = [int(e.shape[1]) for e, _ in embedded]
+        width = max(lengths)
+        batch = len(embedded)
+        padded = torch.zeros(
+            batch, width, self.config.d_model, dtype=embedded[0][0].dtype, device=device
+        )
+        positions = torch.zeros(batch, width, dtype=torch.long, device=device)
+        segments = torch.zeros(batch, width, dtype=torch.long, device=device)
+        mask = torch.zeros(batch, width, width, dtype=torch.bool, device=device)
+        for i, ((embeddings, spans), one) in enumerate(zip(embedded, masks, strict=True)):
+            n = lengths[i]
+            padded[i, :n] = embeddings[0]
+            positions[i, :n] = spans.positions(device)
+            segments[i, :n] = spans.segment_types(device)
+            mask[i, :n, :n] = one
+            # A padding row that may attend to nothing is a softmax over an
+            # empty set, which is NaN, and one NaN in a batched attention
+            # poisons every sample sharing the tensor. Letting padding attend
+            # to itself keeps it finite and keeps it isolated: no real token
+            # attends *to* padding, so the value is never read. Padding sits
+            # after every real token, so it is never inside a schema prefix.
+            pad = torch.arange(n, width, device=device)
+            mask[i, pad, pad] = True
+        if prefix is None:
+            return self.model(padded, mask, positions, segments)
+        return self.model.forward_with_prefix(padded, mask, positions, segments, prefix)
 
     def _mask_tensor(self, compiled: CompiledRequest) -> torch.Tensor:
         """The attention mask, built with tensor ops rather than Python loops.

@@ -162,6 +162,11 @@ class Engine:
         produces well-formed answers to questions nobody asked, which is the
         failure this whole project is built against.
 
+        With the schema KV cache on, a batch reads it as a single request
+        does: the torch backends group the batch by schema and compute only
+        the state and readout tokens, against one cached prefix per schema.
+        Each response's `usage.cached_schema_tokens` is its own.
+
         Backends without a batched path fall through to `answer`, so this is
         always safe to call; it is faster only where the backend implements
         one. Requests are batched in arrival order rather than sorted by
