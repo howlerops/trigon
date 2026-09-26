@@ -153,6 +153,11 @@ IG_POWER = 3
 #: quadrature, and float32 misses by a median 0.04%
 #: (`tests/test_qwen_backend.py`). The answer and gradient x input stay in
 #: the precision they were served in: only IG sums its gradients.
+#:
+#: **Necessary, not sufficient, on Qwen2.5-1.5B.** On the real weights the
+#: path itself is rough -- the log-probability jumps by up to 2.6 nats
+#: between points 0.025 apart over part of it -- and float32 still misses
+#: completeness by 130-853% on CPU (`docs/architecture.md`, *Evidence*).
 IG_PRECISIONS = ("float32", "autocast")
 IG_PRECISION = "float32"
 

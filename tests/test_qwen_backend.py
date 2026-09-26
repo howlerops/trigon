@@ -306,7 +306,9 @@ def _completeness(backend, precision: str, steps: int | None = None) -> dict[str
 
 
 def test_integrated_gradients_is_complete_in_float32_and_not_under_bf16_autocast():
-    """The GPU's completeness failure, reproduced on a CPU and fixed.
+    """bf16's share of the GPU's completeness failure, reproduced on a CPU and
+    removed. (It is not the whole failure on the real backbone, whose path is
+    rough: `docs/architecture.md`, *Evidence*.)
 
     A token's attribution is the input dotted with an integrated gradient, and
     the log-probability difference they must add up to is what is left when

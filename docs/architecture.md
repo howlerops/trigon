@@ -206,8 +206,22 @@ share, so the error grows with how much cancels. On eight tiny Qwen2s under
 CPU bf16 autocast the worst question missed by a median 8.8% (max 86%), and
 256 points instead of 32 did not help (9.3%, 122%) — rounding, not
 quadrature; the same path in float32 misses by a median 0.04%, and by 0.04%
-at worst with 256 points (`tests/test_qwen_backend.py`). The spike has no autocast, so there the two
-settings are one arithmetic. `ig_precision = "autocast"` (or
+at worst with 256 points (`tests/test_qwen_backend.py`). The spike has no
+autocast, so there the two settings are one arithmetic.
+
+**Float32 is necessary on the real backbone and not sufficient.** On
+Qwen2.5-1.5B's own weights on a CPU (fresh adapters, so random heads; one
+HateXplain-like post), the float32 path still missed by 130% and 853%, and
+by 63× and 200× with a segment embedding drawn at the token embeddings'
+scale. The path itself is rough there: along the straight line, the
+log-probability moves smoothly for a stretch and then jumps by up to 2.6
+nats between points 0.025 apart. Where it is smooth, autograd agrees with
+finite differences (−0.5065 against −0.5085). Where it is rough, the two
+disagree. With a zero segment embedding the rough stretch is α < 0.05,
+where RMSNorm switches a scaled-down token back on; with a non-zero one it
+is α ≈ 0.55–0.95. In the same stretch bf16 and float32 disagree by up to
+2.6 nats at the same point, which is why bf16 made it worse. Thirty-two
+points cannot integrate that function in either precision. `ig_precision = "autocast"` (or
 `--ig-precision autocast` on `scripts/train_corpus.py`) restores the old
 path, for measuring what it cost.
 
