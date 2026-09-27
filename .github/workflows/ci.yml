@@ -17,8 +17,8 @@ on:
 # `reference-run` opts out below, and for a reason worth stating: it is a
 # four-seed sweep that takes about half an hour, and under this group every
 # commit pushed during it threw the whole thing away. Twenty of one day's
-# twenty-six runs were cancelled that way, which is why A.4 has never
-# produced the measurement it exists for.
+# twenty-six runs were cancelled that way, which is why A.4 went so long
+# without the measurement it exists for.
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
@@ -165,18 +165,23 @@ jobs:
         # because each run is single-threaded by design, so that is cores
         # rather than oversubscription.
         #
-        # `--require none` publishes the spread without gating on it, which is
-        # deliberate and temporary: the point of this change is to *get* the
-        # four-seed measurement on this hardware. docs/next.md A.4 says what
-        # happens next -- block on the verdict once it is known, or replace
-        # the configuration with one whose outcome does not depend on which
-        # machine trains it.
+        # `--require all`: the job fails unless every seed certifies. It ran
+        # `--require none` until the spread on this hardware was known; three
+        # sweeps certified twelve seed-runs of twelve across at least two kinds
+        # of runner (reports/hardware/README.md), which is A.4's done
+        # condition.
+        #
+        # pipefail because the default `run` shell has none, and `| tee` would
+        # otherwise report tee's success as the sweep's. The summary is written
+        # before the exit so a red run still shows which seeds failed.
         run: |
+          set -o pipefail
+          status=0
           python scripts/seed_sweep.py --seeds 0 1 2 3 --jobs 4 \
             -n 8000 --eval-n 6000 --epochs 8 --lr 0.01 \
             --d-model 128 --layers 2 --noise 0.2 --option-scoring auto \
-            --out-dir reports/ci-sweep --name ci --require none --keep-reports \
-            | tee reports/ci-sweep-summary.txt
+            --out-dir reports/ci-sweep --name ci --require all --keep-reports \
+            | tee reports/ci-sweep-summary.txt || status=$?
           {
             echo "## Reference configuration, four seeds on this hardware"
             echo
@@ -184,7 +189,10 @@ jobs:
             cat reports/ci-sweep-summary.txt
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
       - uses: actions/upload-artifact@v4
+        # A failed sweep is the one whose reports matter most.
+        if: always()
         with:
           name: reference-run
           path: reports/
