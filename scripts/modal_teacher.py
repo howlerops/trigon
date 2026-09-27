@@ -513,6 +513,17 @@ def fixture(args) -> None:
     print(f"wrote {len(chosen)} cases to {out}")
 
 
+def _rejections(summaries: list[dict]) -> dict[str, int]:
+    """Rejection counts by kind of reason."""
+    out: dict[str, int] = {}
+    for summary in summaries:
+        for reason, count in summary["rejected"].items():
+            words = reason.split()
+            kind = "primitives not as planned" if words[0] == "primitives" else " ".join(words[:2])
+            out[kind] = out.get(kind, 0) + count
+    return dict(sorted(out.items(), key=lambda kv: -kv[1]))
+
+
 def cost(args) -> None:
     """Dollars per 1k labelled cases, from the seconds each shard recorded."""
     summaries = [
@@ -531,10 +542,7 @@ def cost(args) -> None:
         "questions": sum(s["questions"] for s in summaries),
         "scored_replies": sum(s["scored_replies"] for s in summaries),
         "generated_tokens": sum(s["generated_tokens"] for s in summaries),
-        "rejected": {
-            k: sum(s["rejected"].get(k, 0) for s in summaries)
-            for k in sorted({k for s in summaries for k in s["rejected"]})
-        },
+        "rejected": _rejections(summaries),
         "container_seconds": round(seconds, 1),
         "seconds_by_phase": {
             phase: round(sum(s["seconds"][phase] for s in summaries), 1)
