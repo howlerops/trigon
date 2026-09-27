@@ -44,6 +44,16 @@ re-gates an existing checkpoint, and the plausibility table comes with it:
 ``--faithfulness-n`` rationale cases, comprehensiveness and sufficiency of
 every method the weights can serve, beside a random control and the rationale
 lexicon, each probe a real re-ask of a shorter post through the engine.
+
+**The adversarial + paired stream** (`trigon.evals.paired`) is mixed into
+training by ``--paired-mix`` -- pairs per training case, derived from the
+training split after the validation slice is taken -- and its consistency
+term is weighted by ``--consistency-weight``. Both are 0 by default, which
+trains exactly as before. ``--robustness-n`` measures what it bought on the
+evaluation split, from templates training never saw:
+
+    python scripts/train_corpus.py banking77 --paired-mix 0.5 \
+        --consistency-weight 1.0 --robustness-n 1000 --out run.md
 """
 
 from __future__ import annotations
@@ -56,6 +66,7 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "src"))
 
+from trigon.backends.hub import BACKBONES  # noqa: E402
 from trigon.cli import _fit_calibration  # noqa: E402
 from trigon.engine import Engine  # noqa: E402
 from trigon.evals import (  # noqa: E402
@@ -120,6 +131,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--backbone",
         default=None,
+        choices=sorted(BACKBONES),
         help=(
             "a pinned pretrained backbone from trigon.backends.hub (e.g. qwen2.5-1.5b) "
             "instead of the spike; --d-model and --layers are then the backbone's"
@@ -209,6 +221,45 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "sort each window of accumulate x this many shuffled cases by length "
             "before cutting chunks; 1 turns bucketing off (docs/next.md A.5)"
         ),
+    )
+    parser.add_argument(
+        "--paired-mix",
+        type=float,
+        default=0.0,
+        help=(
+            "adversarial + paired pairs per training case (trigon.evals.paired), "
+            "derived from the training split; 0 (the default) adds none"
+        ),
+    )
+    parser.add_argument(
+        "--paired-kinds",
+        default="injection,padding,paraphrase,negation",
+        help="the kinds of pair --paired-mix derives, in rotation",
+    )
+    parser.add_argument(
+        "--consistency-weight",
+        type=float,
+        default=0.0,
+        help=(
+            "weight of the consistency term on paired cases: symmetric KL where the "
+            "label is held fixed, (P(yes) + P(yes on the complement) - 1)^2 on "
+            "negation pairs. 0 (the default) trains paired cases as plain data"
+        ),
+    )
+    parser.add_argument(
+        "--robustness-n",
+        type=int,
+        default=0,
+        help=(
+            "run the paired robustness benchmarks -- injection, padding, paraphrase, "
+            "negation -- on this many evaluation cases each (0 = skip)"
+        ),
+    )
+    parser.add_argument(
+        "--jaggedness-n",
+        type=int,
+        default=0,
+        help="also run the generic jaggedness suite at this n (0 = skip)",
     )
     parser.add_argument(
         "--device",
@@ -451,6 +502,12 @@ def header(
             + (f" --max-batch-cells {args.max_batch_cells}" if args.max_batch_cells else "")
             + (" --hard-labels" if args.hard_labels else "")
             + (
+                f" --paired-mix {args.paired_mix} --paired-kinds {args.paired_kinds}"
+                f" --consistency-weight {args.consistency_weight}"
+                if args.paired_mix
+                else ""
+            )
+            + (
                 f" --rationale-weight {args.rationale_weight}"
                 if args.rationale_weight != 1.0
                 else ""
@@ -476,6 +533,60 @@ def header(
             "",
         ]
     )
+
+
+def paired_augment(args):
+    """The training split's paired variants, or None when the stream is off."""
+    if not args.paired_mix:
+        return None
+    import functools
+
+    from trigon.evals.paired import paired_stream
+
+    kinds = tuple(k.strip() for k in args.paired_kinds.split(",") if k.strip())
+    return functools.partial(
+        paired_stream, fraction=args.paired_mix, seed=args.seed, pool="train", kinds=kinds
+    )
+
+
+def robustness_section(engine, evaluation, args):
+    """The paired benchmarks on the evaluation split, and optionally the generic suite.
+
+    Built from the evaluation pool of templates, which training never sees,
+    over cases neither training nor calibration saw. Every held-fixed metric is
+    printed beside the accuracy it has to be read with: a model that ignores
+    its input never flips.
+    """
+    from trigon.evals.jaggedness import all_benchmarks, run_jaggedness
+    from trigon.evals.paired import paired_benchmarks
+
+    benchmarks = paired_benchmarks(evaluation, n=args.robustness_n, seed=args.seed)
+    if args.jaggedness_n:
+        benchmarks += all_benchmarks(n=args.jaggedness_n, seed=args.seed)
+    results = run_jaggedness(engine, benchmarks)
+    lines = [
+        "",
+        "## Robustness: the paired benchmarks",
+        "",
+        "Each `paired_*` row derives pairs from the first "
+        f"{args.robustness_n:,} evaluation cases (seeded shuffle) with templates",
+        "from the evaluation pool, which no training case used. Flip rate and",
+        "drift (total variation) compare each answer with the anchor it was derived",
+        "from; incoherence is |P(yes) + P(yes on the complement) - 1|. Read every",
+        "held-fixed metric beside accuracy: a model that ignores its input never",
+        "flips. The generic `jaggedness/*` rows, when present, ask a four-option",
+        "support schema this model was not trained on.",
+        "",
+        "| Benchmark | Metric | Value |",
+        "| --- | --- | ---: |",
+    ]
+    out: dict[str, dict[str, float]] = {}
+    for result in results:
+        out[result.suite] = dict(result.extra)
+        for metric, value in sorted(result.extra.items()):
+            lines.append(f"| `{result.suite}` | {metric} | {value:.4f} |")
+    lines.append("")
+    return "\n".join(lines), out
 
 
 def evidence_section(backend, engine, train, evaluation, args):
@@ -761,6 +872,8 @@ def main(argv: list[str] | None = None) -> int:
                 resume_path=args.resume_path,
                 bucket_window=args.bucket_window,
                 rationale_weight=args.rationale_weight,
+                augment=paired_augment(args),
+                consistency_weight=args.consistency_weight,
             ),
             compiler=compiler,
         )
@@ -799,6 +912,9 @@ def main(argv: list[str] | None = None) -> int:
     markdown = header(
         spec, args, train, calibration, evaluation, marginal, topped_up, hardware
     ) + render_markdown([before, after], gates, slices, gated=after)
+    robustness = robustness_section(calibrated, evaluation, args) if args.robustness_n else None
+    if robustness is not None:
+        markdown += robustness[0]
     plausibility = evidence_section(backend, calibrated, train, evaluation, args)
     if plausibility is not None:
         markdown += plausibility[0]
@@ -809,6 +925,8 @@ def main(argv: list[str] | None = None) -> int:
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(markdown)
         payload = json.loads(render_json([before, after], gates, slices, gated=after))
+        if robustness is not None:
+            payload["robustness"] = robustness[1]
         if plausibility is not None:
             payload["plausibility"] = [row.to_dict() for row in plausibility[1]]
             payload["ig_completeness"] = plausibility[2]

@@ -14,10 +14,10 @@ narrative sections are a discipline, not a test.
 
 | | |
 | --- | ---: |
-| Commits | 218 |
-| Tests | 537 |
-| Python files (`src`, `tests`, `scripts`) | 113 |
-| Lines in `src/` | 12,633 |
+| Commits | 240 |
+| Tests | 692 |
+| Python files (`src`, `tests`, `scripts`) | 128 |
+| Lines in `src/` | 15,584 |
 | Release gates | 9 |
 | Green-tier corpora in the licence audit | 9 |
 | Committed use cases | 3 |
@@ -198,6 +198,16 @@ twenty-two runs** — the investigation is closed and the evidence is in
   Licence read from both primary sources — MIT on the repository, CC BY 4.0 on
   the authors' dataset card — so green; pinned to a commit and a SHA-256.
 
+- **The adversarial and paired stream** (2026-09-27, Q30). `trigon.evals.paired`
+  derives four kinds of variant from a Banking77 or synthetic case, each with
+  a label known by construction: an injected instruction naming a wrong answer,
+  distractor padding, and a reworded question (label held fixed), and a
+  negated question (label derived). Stdlib, deterministic by seed; training
+  and evaluation templates share no wording. An optional consistency term
+  (`losses.consistency_loss`: symmetric KL where the label is held, coherence
+  for negation pairs) is off by default, and off is bit-identical to before.
+  `PairedBenchmark` scores the four kinds on held-out cases (`reports/paired/`).
+
 ### Reference model
 - Prefill-only transformer, byte-level BPE trained on the project's own data,
   batched training with best-epoch selection, int8 quantized twin for the
@@ -226,7 +236,9 @@ twenty-two runs** — the investigation is closed and the evidence is in
 | Vectorized attention mask | 208 ms → 8.2 ms per request; the whole pass 399 ms → 82.8 ms |
 | Padding waste in a training chunk, HelpSteer2 | 2.82× at chunk 8 in random order; 1.04× length-sorted |
 | Length bucketing, end to end | **1.63×** — 2.7× on the attention term, diluted by everything linear |
-| The reference configuration across hardware | 16 of 17 seed-runs certify: 4/4 locally, 12/12 on GitHub. GitHub's runners are heterogeneous: identical code gave bit-identical sweeps on two commits and different ones on a third |
+| The reference configuration across hardware | 20 of 21 seed-runs certify: 4/4 locally, 16/16 on GitHub, the last sweep gated with `--require all`. GitHub's runners are heterogeneous: identical code gave bit-identical sweeps on two commits and different ones on a third |
+| Robustness of the certified Banking77 model, and what the paired stream buys | An injected wrong answer flips it half the time (accuracy on the variant 0.476), and 16 lines of padding take it to 0.064 -- no gate saw either, because every gate reads clean state. Trained with the paired stream: 0.880 and 0.805, flip rate 0.054. It does **not** certify: one seed of four stopped at 0.511 accuracy (`reports/paired/README.md`) |
+| HelpSteer2 aggregated, Qwen2.5-7B against 1.5B, same seeds and splits | Lift +0.0389 median against +0.0268; 7B ahead on every seed by more than twice 1.5B's whole spread. Still 0.011 short of +0.05. $23.73 on A100-80GB, 4.3–4.6 cases/s, 29 GiB peak (`reports/helpsteer2-7b/README.md`) |
 | GPU on this machine | **Checked, absent.** `nvidia-smi` missing, `torch.cuda.is_available()` False |
 | GPU through Modal | **Works.** Asked for an A10G, got a device reporting `NVIDIA A10`; 30.9 cases/s against ~1.1 on this VM's CPU |
 | Qwen2.5 tokenizer, Python port against Rust | **Exact**: 0 of 34,520 texts differ over 10.3M tokens. Speed a wash against the forward pass: Rust 1.8× in bulk, Python 2× per warm call, 2.4× slower on unseen text |
@@ -278,7 +290,8 @@ The most useful section. Each of these was argued for before it was measured.
 | Latency and throughput depend on a model's shape, not its weights, so a random encoder at 1.5B's shape stands in for the real one (`burn_in.py`) | The certified adapter is **1.45× slower** than its stand-in at batch 1 (102.9 against 71.2 ms): GQA, SwiGLU, a bf16 backbone and LoRA are different kernels from `nn.TransformerEncoderLayer`. The shape rows now sit beside a row of the real model |
 | Integrated gradients would rescue unsupervised attribution where gradient × input could not | On Qwen2.5-1.5B it improves on gradient × input on seven of eight checkpoints and still misses *every word* on token F1 on all eight (0.193–0.385 against 0.434–0.437). It is also far from complete under bf16 (median error 78–895%). The unsupervised default is now `none` (`reports/hatexplain/README.md`) |
 | Sortish batching would cut training time by ~2.82× on HelpSteer2 | **1.13×** (1.09–1.18×, four seeds each arm). 2.82× was the padded *attention work*, and on the spike attention is a small share of a step. Outcomes unchanged (`reports/helpsteer2/README.md`, A.5) |
-| The reference configuration fails on GitHub's hardware, so "certified on four seeds" meant four seeds on one machine | One draw said so: accuracy 0.530, ECE 0.1076. Three four-seed sweeps there say otherwise: **12 of 12 certify**, ECE 0.0128–0.0387, lift +0.0707 to +0.2200, on at least two kinds of runner. The failed draw is unexplained and was one seed-run in seventeen (`reports/hardware/README.md`) |
+| The reference configuration fails on GitHub's hardware, so "certified on four seeds" meant four seeds on one machine | One draw said so: accuracy 0.530, ECE 0.1076. Four four-seed sweeps there say otherwise: **16 of 16 certify**, ECE 0.0128–0.0395, lift +0.0707 to +0.2200, on at least three kinds of runner. The failed draw is unexplained and was one seed-run in twenty-one (`reports/hardware/README.md`) |
+| Negation pairs plus a coherence term teach a Noul to answer a question and its complement | Incoherence falls from 0.46 to 0.035 and accuracy on the pairs stays at chance, 0.498 against 0.498. Coherence was bought without correctness; the likeliest reading is 0.5 on both halves, which the reports do not yet store the probabilities to confirm (`reports/paired/README.md`) |
 | Fitting temperature on the training split is the discipline | It is the bug. Raised ECE on half the seeds. |
 | A Score temperature of 0.20 is a degenerate fit | Constructed test: sharpening is correct for an underconfident head. |
 | Burden of proof belongs on *declining* a calibrator | Seven constructed heads say the opposite, on six of them. |
@@ -561,7 +574,13 @@ what order, and how each step is known to be done.
   **Qwen2.5-1.5B answers it partly**: lift +0.024 to +0.029, and Brier 7.9–8.8%
   better than the marginal. On the per-annotator split, `helpfulness` and
   `correctness` move on every seed and `coherence` moves on none. The
-  aggregated labels still fail +0.05. How far anything can reach there is
+  aggregated labels still fail +0.05. **Qwen2.5-7B does not close it
+  either** (2026-09-27, Q32): lift +0.0364 to +0.0400, median +0.0389, ahead
+  of 1.5B on every seed by +0.0095 to +0.0155, Brier 11.1–11.6% better than
+  the marginal, and `helpfulness` and `correctness` above their marginals on
+  all four seeds; `coherence` still does not move. Every ECE gate passes;
+  `accuracy_over_baseline` and `worst_question_over_baseline` fail on all four
+  (`reports/helpsteer2-7b/README.md`). How far anything can reach there is
   bounded only loosely: one half-panel predicts the other at −0.024
   (`reports/helpsteer2/ceiling.md`).
   `reports/helpsteer2/README.md`.
@@ -578,17 +597,24 @@ what order, and how each step is known to be done.
   checkout while the repository was private and organization-owned. It has run
   normally since the repository was made public, which is consistent with
   metered minutes and was never confirmed from billing.
-- **Two of five data streams unbuilt.** Seven corpora load. The
+- **One of five data streams unbuilt.** Seven corpora load. The
   annotator-distribution stream is built and has four: HelpSteer2's
   `disagreements/` split, GoEmotions and measuring_hate_speech, each certified
   on four seeds on the backbone against `brier_over_marginal`, and Circa
-  (evaluation only, CC BY-SA). Two streams are still unbuilt: synthetic
-  workflows with teacher labels, and the adversarial and paired stream.
+  (evaluation only, CC BY-SA). The adversarial and paired stream is built
+  (2026-09-27) and does not yet certify on four seeds. Synthetic workflows
+  with teacher labels is unbuilt.
+- **The paired stream does not certify, and negation does not learn.** With
+  it, one Banking77 seed of four finished at 0.511 accuracy; the other three
+  lost 0–3 points. Believed, not measured: the consistency term slowed it,
+  since a model that ignores its input minimises that term exactly. The
+  ablation at consistency weight 0 settles it. Until it certifies it stays
+  off by default and the served model stays steerable.
 - ~~GoEmotions, measuring_hate_speech and Circa are Parquet-only.~~ **Closed.**
   Only measuring_hate_speech is; it is converted once by
   `scripts/convert_corpus.py`, and the loader stays stdlib.
 - ~~"Certified on four seeds" means four seeds on one machine.~~ **Closed,
-  2026-09-27.** Swept on GitHub's hardware: 12 of 12 seed-runs certify, and
+  2026-09-27.** Swept on GitHub's hardware: 16 of 16 seed-runs certify, and
   the reference-run job blocks on `--require all` again
   (`reports/hardware/README.md`). See *disproved*.
 - ~~CC BY-SA on a derived model.~~ **Closed by the owner, 2026-09-25 (Q17):**

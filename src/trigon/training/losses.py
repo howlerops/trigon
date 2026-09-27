@@ -18,7 +18,13 @@ from __future__ import annotations
 import torch
 from torch import nn
 
-__all__ = ["OrdinalConfig", "question_loss", "rationale_loss", "squared_emd"]
+__all__ = [
+    "OrdinalConfig",
+    "consistency_loss",
+    "question_loss",
+    "rationale_loss",
+    "squared_emd",
+]
 
 
 class OrdinalConfig:
@@ -113,3 +119,40 @@ def rationale_loss(span_logits: torch.Tensor, labels: list[int]) -> torch.Tensor
     """
     target = torch.tensor(labels, dtype=span_logits.dtype, device=span_logits.device)
     return nn.functional.binary_cross_entropy_with_logits(span_logits, target)
+
+
+def _log_distribution(logits: torch.Tensor, kind: str) -> torch.Tensor:
+    """Log-probabilities over a head's labels; a Noul's single logit as (no, yes)."""
+    if kind == "noul":
+        return torch.cat([nn.functional.logsigmoid(-logits), nn.functional.logsigmoid(logits)])
+    return torch.log_softmax(logits, dim=-1)
+
+
+def consistency_loss(
+    variant: torch.Tensor, anchor: torch.Tensor, kind: str, relation: str = "same"
+) -> torch.Tensor:
+    """How far two answers are from what their pairing says they must be.
+
+    The adversarial + paired stream (`trigon.evals.paired`). For a pair whose
+    label is **held fixed** -- an injection, padding, a paraphrase -- the two
+    answers should be one distribution, and the term is their symmetric KL
+    divergence. For a **negation** pair it is ``(P(yes) + P(yes on the
+    complement) - 1) ** 2``: coherence, not agreement.
+
+    Not a scoring rule and not a substitute for one. Two answers can agree
+    perfectly and both be wrong, and a model that ignores its input minimises
+    this exactly; the cross-entropy beside it is what keeps the answers
+    honest, which is why this is an auxiliary term with its weight at 0 by
+    default. Zero for identical answers (or exactly complementary ones),
+    positive otherwise, and gradients flow through both sides.
+    """
+    if relation == "complement":
+        if kind != "noul":
+            raise ValueError(f"a complement pair is two Nouls, not {kind!r}")
+        return (torch.sigmoid(variant) + torch.sigmoid(anchor) - 1.0).pow(2).sum()
+    if relation != "same":
+        raise ValueError(f"relation must be 'same' or 'complement', got {relation!r}")
+    log_p = _log_distribution(variant, kind)
+    log_q = _log_distribution(anchor, kind)
+    p, q = log_p.exp(), log_q.exp()
+    return 0.5 * ((p * (log_p - log_q)).sum() + (q * (log_q - log_p)).sum())

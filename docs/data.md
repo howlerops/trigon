@@ -12,12 +12,25 @@ targets.
 | Annotator distributions | subjective judgements with many human labels per item | label distributions | calibration where no outcome exists |
 | Synthetic workflows | LLM-generated (state, schema) pairs across ~20 domains | teacher soft labels | coverage |
 | Verifiable synthetic | generated structured state with code-checkable predicates | computed ground truth | cheap outcome data at scale |
-| Adversarial + paired | injections, distractor padding, negation pairs, paraphrases | held fixed / derived | robustness and consistency losses |
+| Adversarial + paired | injections, distractor padding, negation pairs, paraphrases — **built** from our own labelled cases (`trigon.evals.paired`) | held fixed / derived, by construction | robustness data, an optional consistency loss (off by default), and paired benchmarks on held-out templates |
 
 The verifiable synthetic stream is **implemented** and runnable today:
 `trigon.evals.synthetic_outcome_cases`. Its limits are stated in the module —
 clean structured state, decidable predicates, nothing subjective. It exercises
 the calibration machinery end to end. It does not stand in for the other four.
+
+The adversarial + paired stream is **implemented** too, and deliberately
+narrow: `trigon.evals.paired` derives variants from cases that already carry
+a label -- Banking77's and the verifiable synthetic generator's -- so every
+variant's label is known by construction rather than by an annotator or a
+teacher. An injection naming a wrong answer and irrelevant padding hold the
+label fixed; a paraphrase of the question holds it fixed; a negation pair asks
+whether a named answer is right and whether it is wrong, and derives both
+labels. Each variant carries its anchor request and a pair id, which the
+optional consistency term (`--consistency-weight`, default 0) reads. Training
+and evaluation draw from template pools that share no wording. What it bought
+on the backbone, and what the lexical floor scores on the same benchmarks, is
+in `reports/paired/README.md`.
 
 Its `noise` parameter is load-bearing. A zero-noise set is perfectly
 predictable, which makes it useless for calibration: a model can be right every

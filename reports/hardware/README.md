@@ -13,7 +13,7 @@ it.
 CI's `reference-run` job now sweeps seeds 0–3 on every push to `main`. Three
 of those sweeps have finished.
 
-## The three sweeps
+## The sweeps
 
 | Commit | Job | Seed | Final loss | Kept epoch | Lift over baseline | ECE | Certified |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | --- |
@@ -26,22 +26,30 @@ of those sweeps have finished.
 | | | 1 | 0.8697 | 1 | +0.2200 | 0.0329 | **yes** |
 | | | 2 | 1.0959 | 1 | +0.1295 | 0.0160 | **yes** |
 | | | 3 | 0.9109 | 1 | +0.2135 | 0.0184 | **yes** |
+| `3b31b0c` | 108516727768 | 0 | 1.0012 | 1 | +0.0914 | 0.0217 | **yes** |
+| | | 1 | 0.9371 | 2 | +0.2042 | 0.0395 | **yes** |
+| | | 2 | 0.9122 | 8 | +0.1699 | 0.0182 | **yes** |
+| | | 3 | 0.8620 | 7 | +0.1864 | 0.0151 | **yes** |
 
 Final loss for `c23cedc`: median 1.0028, range 0.9957–1.1279. For `efa7311`:
-median 1.0034, range 0.8697–1.1028. Blank cells in the `c23cedc` rows were not
+median 1.0034, range 0.8697–1.1028. For `3b31b0c`: median 0.9247, range
+0.8620–1.0012. Blank cells in the `c23cedc` rows were not
 transcribed from that job's summary. Every seed's report, with its noise
 floor, is in that run's `reference-run` artifact. A seed certifies only if
 `gate_is_testable` passes, so every ECE above sits clear of its simulated
 floor.
 
-**Twelve seed-runs of twelve certify.** The configuration now holds on three
-hardware draws: this machine, and at least two distinct kinds of GitHub runner.
+**Sixteen seed-runs of sixteen certify on GitHub.** The configuration now
+holds on four hardware draws: this machine, and at least three distinct kinds
+of GitHub runner. `3b31b0c` was the first sweep gated with `--require all`,
+and it passed.
 
 | Where | Seeds | ECE | Lift over baseline |
 | --- | ---: | --- | --- |
 | Local (`reports/iso/`) | 4 of 4 | 0.0084–0.0247 | +0.1614 to +0.2277 |
 | GitHub, `4e3deae` = `c23cedc` | 8 of 8 | 0.0128–0.0387 | +0.0707 to +0.1603 |
 | GitHub, `efa7311` | 4 of 4 | 0.0160–0.0329 | +0.1295 to +0.2200 |
+| GitHub, `3b31b0c` (gated) | 4 of 4 | 0.0151–0.0395 | +0.0914 to +0.2042 |
 
 ## GitHub's runners are not one machine
 
@@ -55,7 +63,7 @@ the job gets whichever it lands on.
 That has two consequences:
 
 - **One CI sweep is one hardware draw.** It is not "GitHub's number". The
-  12/12 above covers at least two draws. It does not cover every CPU in the
+  16/16 above covers at least three draws. It does not cover every CPU in the
   pool.
 - **Reproducibility across commits is not a regression test** on this job.
   A difference between two pushes can be the runner, not the change. The
@@ -67,8 +75,8 @@ That has two consequences:
 Nothing in the three sweeps explains why the first GitHub draw failed. It ran
 a single seed, on a runner whose kind was not recorded, before the sweep
 existed, so it cannot be compared cell for cell. What the sweeps show is that
-the failure is not typical of GitHub's hardware: sixteen seed-runs certify
-across three machines, and one did not. That is a rate to watch, not a
+the failure is not typical of GitHub's hardware: twenty seed-runs certify
+across four machines, and one did not. That is a rate to watch, not a
 guarantee. The job now blocks on it (below), so the next failure is a red
 build with four seeds attached rather than an anecdote.
 

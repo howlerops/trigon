@@ -38,7 +38,9 @@ container actually reports is written beside every result.
 **The corpus and the backbone are downloaded inside the job**, not shipped
 from here -- someone else's data and weights under licences that govern
 redistribution. Backbone weights are cached on the `trigon-weights` Volume so
-four seeds do not fetch 3 GB four times.
+four seeds do not fetch 3 GB four times -- or 15 GB, for Qwen2.5-7B. The Volume
+is committed only when a seed's training ends, so run one seed first on a new
+backbone: seeds launched together on a cold cache each download it.
 
 **Nothing is certified by this script.** It runs seeds and returns reports;
 whether they certify is what the gates say, and `CLAUDE.md`'s rule about the
@@ -64,8 +66,9 @@ APP_NAME = "trigon-train"
 #: The workspace's plan caps it at ten GPUs at once. Calls beyond that are
 #: queued, not refused -- Modal emails "you have reached your GPU limit" and
 #: the extra seeds start when earlier ones finish -- so a launch that
-#: overshoots is slower, not broken. `launch` says so rather than leaving a
-#: queued seed to look like a hung one.
+#: overshoots is slower, not broken. But the workspace is shared by parallel
+#: sessions, so `launch` refuses an overshoot unless `--allow-queue` asks for
+#: it: one launch that queues stalls everyone else's.
 GPU_LIMIT = 10
 
 # The training extra plus a CUDA torch. The default PyPI wheel carries CUDA on
@@ -239,14 +242,14 @@ def _git(*args: str) -> str:
     ).stdout.strip()
 
 
-def _running_containers() -> int:
+def _running_containers() -> int | None:
     try:
         out = subprocess.run(
             ["modal", "container", "list", "--json"], capture_output=True, text=True, check=True
         ).stdout
         return len(json.loads(out))
     except (OSError, subprocess.CalledProcessError, json.JSONDecodeError):
-        return 0
+        return None
 
 
 def launch(args) -> None:
@@ -288,12 +291,22 @@ def launch(args) -> None:
     seeds = [int(s) for s in args.seeds.split(",") if s.strip()]
 
     busy = _running_containers()
-    if busy + len(seeds) > GPU_LIMIT:
-        print(
-            f"note: {busy} GPU containers already running and the plan allows "
-            f"{GPU_LIMIT}; {busy + len(seeds) - GPU_LIMIT} of these seeds will queue "
-            "until earlier ones finish"
+    if busy is None:
+        print("note: could not count running containers; the GPU cap is unchecked")
+    elif busy + len(seeds) > GPU_LIMIT:
+        # Refused by default. Queued seeds are not lost, but several sessions
+        # share this workspace, and one launch that overshoots stalls
+        # everyone else's -- including the served model's cold starts. An
+        # overshoot has to be asked for.
+        message = (
+            f"{busy} containers are already running and the plan allows {GPU_LIMIT}; "
+            f"{busy + len(seeds) - GPU_LIMIT} of these {len(seeds)} seeds would queue"
         )
+        if not args.allow_queue:
+            raise SystemExit(
+                f"{message}. Launch fewer seeds, wait, or pass --allow-queue to queue them."
+            )
+        print(f"note: {message} (--allow-queue)")
     # One deployed app per commit. Queued inputs go to any warm container of
     # the app they were spawned on, including one left from the previous
     # deploy, and that container runs the previous deploy's code: four seeds
@@ -409,6 +422,11 @@ def main(argv: list[str] | None = None) -> int:
     go.add_argument("--prefix", default="")
     go.add_argument("--max-batch-cells", type=int, default=50_000_000)
     go.add_argument("--allow-dirty", action="store_true")
+    go.add_argument(
+        "--allow-queue",
+        action="store_true",
+        help=f"launch even if it takes the workspace past its {GPU_LIMIT}-GPU cap",
+    )
     for name in ("status", "collect", "cancel"):
         command = sub.add_parser(name)
         command.add_argument("run_id")

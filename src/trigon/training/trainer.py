@@ -24,7 +24,7 @@ import math
 import random
 import sys
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -33,7 +33,7 @@ import torch
 from ..evals.harness import Case
 from ..evidence import token_labels
 from ..schema import SchemaCompiler, render_state
-from .losses import OrdinalConfig, question_loss, rationale_loss
+from .losses import OrdinalConfig, consistency_loss, question_loss, rationale_loss
 
 __all__ = ["TrainingConfig", "TrainingReport", "train"]
 
@@ -101,6 +101,18 @@ class TrainingConfig:
     #: even when rationales are present, and the checkpoint then serves
     #: gradient x input, as one that never saw a rationale does.
     rationale_weight: float = 1.0
+    #: Derives extra training cases from the training split *after* the
+    #: validation slice is taken, so no variant of a held-out case trains and
+    #: epoch selection reads the same data it reads without it. The paired
+    #: stream (`trigon.evals.paired.paired_stream`) is what goes here. None --
+    #: the default -- trains on ``cases`` exactly as before.
+    augment: Callable[[list[Case]], list[Case]] | None = None
+    #: Weight of the consistency term (`losses.consistency_loss`) on cases that
+    #: carry an ``anchor`` request: the anchor is run in the same step and the
+    #: term is added to that case's loss. 0 -- the default -- never runs an
+    #: anchor, so a paired case trains as ordinary augmented data and a run
+    #: without paired cases is bit-identical to one before this existed.
+    consistency_weight: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -190,6 +202,8 @@ def train(
         random.Random(config.seed + 7919).shuffle(shuffled)
         cut = max(1, int(len(shuffled) * config.validation_fraction))
         holdout, cases = shuffled[:cut], shuffled[cut:]
+    if config.augment is not None:
+        cases = [*cases, *config.augment(list(cases))]
 
     order = list(range(len(cases)))
     steps_per_epoch = max(1, math.ceil(len(order) / config.accumulate))
@@ -209,6 +223,7 @@ def train(
     counted_questions = 0
     counted_rationales = 0
     supervise_evidence = config.rationale_weight > 0 and hasattr(backend, "evidence_logits_batch")
+    consistent = config.consistency_weight > 0
     best: tuple[float, int, dict] | None = None
 
     first_epoch = 0
@@ -275,6 +290,8 @@ def train(
                     batched = backend.logits_batch(items)
                     spans_by_case = [None] * len(items)
 
+                anchors = _anchor_logits(backend, compiler, cases, part) if consistent else {}
+
                 case_losses = []
                 for index, (compiled, _), raw, span_logits in zip(
                     part, items, batched, spans_by_case, strict=True
@@ -313,7 +330,26 @@ def train(
                         continue
                     if epoch == 0:
                         counted_questions += len(losses)
-                    case_losses.append(torch.stack(losses).mean())
+                    case_loss = torch.stack(losses).mean()
+                    if index in anchors:
+                        # The pairing's own term, on top of the answer's loss.
+                        # Averaged over the questions the two requests share.
+                        anchor_raw = anchors[index]
+                        terms = [
+                            consistency_loss(
+                                raw[q.question_id],
+                                anchor_raw[q.question_id],
+                                q.kind,
+                                cases[index].relation,
+                            )
+                            for q in compiled.schema.questions
+                            if q.question_id in anchor_raw
+                        ]
+                        if terms:
+                            case_loss = (
+                                case_loss + config.consistency_weight * torch.stack(terms).mean()
+                            )
+                    case_losses.append(case_loss)
 
                 if not case_losses:
                     continue
@@ -488,6 +524,21 @@ def _chunks(order, lengths, config):
         block.sort(key=lengths.__getitem__)
         for inner in range(0, len(block), step):
             yield block[inner : inner + step]
+
+
+def _anchor_logits(backend, compiler, cases, part) -> dict:
+    """Each anchored case's anchor, answered in one batched forward.
+
+    Run in training mode and kept on the graph, so the consistency term's
+    gradient reaches both sides of the pair. Keyed on the case's index.
+    """
+    anchored = [index for index in part if getattr(cases[index], "anchor", None) is not None]
+    if not anchored:
+        return {}
+    items = [
+        (compiler.compile_request(cases[index].anchor), cases[index].anchor) for index in anchored
+    ]
+    return dict(zip(anchored, backend.logits_batch(items), strict=True))
 
 
 def _has_rationale(case: Case) -> bool:

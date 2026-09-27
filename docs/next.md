@@ -19,7 +19,9 @@ next, and what each step would have to show to count.
 | A.2 annotator distributions | ✅ **Certified.** HelpSteer2's per-annotator split. The model is calibrated against a random annotator, and the soft targets are shown to be why. It clears `brier_over_marginal` on four seeds of four, the gate decided for drawn-annotator corpora (Q20) (`reports/helpsteer2-annotators/`) |
 | A.2b three more annotator corpora | ✅ **GoEmotions and measuring_hate_speech certified on four seeds each** (Brier skill medians +0.295 and +0.175); Circa is evaluation-only (CC BY-SA). Evidence spans on the backbone: the supervised head beats the word-list floor on plausibility **and faithfulness**. Neither unsupervised attribution beats *every word*, integrated gradients in float32 included, so unsupervised checkpoints serve no spans |
 | A.3 real backbone | ✅ **Done.** All three synthetic questions certify on four seeds, `size` included (`reports/synthetic/`) |
-| A.4 CI's hardware | ✅ **Done.** 12 of 12 seed-runs certify on GitHub's runners, across at least two kinds of CPU; the reference-run job blocks on `--require all` again (`reports/hardware/README.md`) |
+| A.4 CI's hardware | ✅ **Done.** 16 of 16 seed-runs certify on GitHub's runners, across at least three kinds of CPU; the reference-run job blocks on `--require all` again, and its first gated sweep passed (`reports/hardware/README.md`) |
+| A.6 adversarial + paired stream | 🟡 **Built, does not certify** (Q30). Injection accuracy 0.476 → 0.880 and padding 0.064 → 0.805 on Banking77, but one seed of four stops at 0.511, and negation stays at chance. The consistency-weight-0 ablation is running (`reports/paired/README.md`) |
+| A.7 HelpSteer2 on 7B | ❌ **Measured, fails +0.05** (Q32): median lift +0.0389 (+0.0364 to +0.0400) against 1.5B's +0.0268, every ECE gate green. Scale helps and does not close it (`reports/helpsteer2-7b/README.md`) |
 | A.5 length bucketing | ✅ **Measured.** 1.13× faster (1.09–1.18×) with outcomes unchanged, four seeds per arm; not the 2.82× it was sized by (`reports/helpsteer2/README.md`) |
 | B.1 L4 burn-in | 🟡 **Preliminary, on Modal's L4, two runs.** The certified model, interactive (batch 1, p50 72–103 ms): **$0.041–0.057/MTok**, 4.2–6.4× cheaper than a $0.25/MTok LLM. Batched, now that batches read the schema cache: $0.0119 at batch 8 (p50 171 ms) and $0.0091 at batch 32 (514 ms, offline only), 20–29×. The inherited $0.007 is still out of reach (`reports/burn-in/README.md`). A rented, dedicated L4 still closes it |
 | B.2 / B.3 | Done |
@@ -178,8 +180,9 @@ their marginals *and* per-corpus ECE holds on real data.
 
 **A.4 Sweep the reference configuration on CI's hardware.** ✅ **Done.**
 The `reference-run` job sweeps seeds 0–3 on every push to `main`. Three sweeps
-finished once CI ran again. **Twelve seed-runs of twelve certify**: ECE
-0.0128–0.0387, lift over the marginal +0.0707 to +0.2200, against the local
+finished once CI ran again, and a fourth, the first gated one, passed. **Sixteen
+seed-runs of sixteen certify**: ECE 0.0128–0.0395, lift over the marginal
++0.0707 to +0.2200, against the local
 0.0084–0.0247 and +0.1614 to +0.2277. The spread on GitHub is wider and its
 low end is lower, but every seed clears every blocking gate
 (`reports/hardware/README.md`).
@@ -192,7 +195,7 @@ runner rather than the change.
 
 The job blocks on `--require all` again, which was the done condition. The
 single failed draw that opened this item is not explained. It is also not
-typical: 16 of 17 seed-runs certify across three machines. The next failure
+typical: 20 of 21 seed-runs certify across four machines. The next failure
 will be a red build with four seeds attached.
 
 What stopped CI for a day was not in the repository. Runs 26 and 27 died
