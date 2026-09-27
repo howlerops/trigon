@@ -575,13 +575,12 @@ what order, and how each step is known to be done.
   checkout while the repository was private and organization-owned. It has run
   normally since the repository was made public, which is consistent with
   metered minutes and was never confirmed from billing.
-- **Two of five data streams unbuilt.** Six corpora load. The
-  annotator-distribution stream has four now — HelpSteer2's `disagreements/`
-  split (trained and certified), GoEmotions and measuring_hate_speech
-  (loadable, green, smoke-run on the CPU spike, **never trained at size**) and
-  Circa (evaluation only). Nothing on the new three is a result yet: it needs
-  a backbone sweep on Modal. Synthetic workflows with teacher labels, and the
-  adversarial and paired stream, remain unbuilt.
+- **Two of five data streams unbuilt.** Seven corpora load. The
+  annotator-distribution stream is built and has four: HelpSteer2's
+  `disagreements/` split, GoEmotions and measuring_hate_speech, each certified
+  on four seeds on the backbone against `brier_over_marginal`, and Circa
+  (evaluation only, CC BY-SA). Two streams are still unbuilt: synthetic
+  workflows with teacher labels, and the adversarial and paired stream.
 - ~~GoEmotions, measuring_hate_speech and Circa are Parquet-only.~~ **Closed.**
   Only measuring_hate_speech is; it is converted once by
   `scripts/convert_corpus.py`, and the loader stays stdlib.
