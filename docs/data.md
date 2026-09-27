@@ -96,6 +96,7 @@ Rows marked *unchecked* keep the plan's assumption and are still blockers.
 | WDC Products; Magellan | Noul | "public research", terms unstated | **amber** | unchecked |
 | LMSYS Arena preferences | Choice (A/B/tie) | **custom LMSYS-Chat-1M Dataset License Agreement, gated access** | **dropped** | not pursued; see sign-off Q18 |
 | Home Credit; IEEE-CIS fraud | Noul on structured state | Kaggle competition terms | **dropped** | not pursued; see sign-off Q18 |
+| teacher-workflows | Choice / Noul / Score, a schema per case, teacher distributions | **Apache-2.0** — output of Qwen2.5-7B-Instruct at `a09a354`, a licence that places no restriction on output; the 3B and 72B instruct models are under the Qwen licence instead | **green** ✓ — trains for coverage; never calibration evidence | HF `Qwen/Qwen2.5-7B-Instruct` metadata and the repository's LICENSE at `a09a35458c70`, checked 2026-09-27 |
 | Autocast | Noul/Choice | **code MIT; dataset hosted "with permission from Metaculus for research purposes only"** | **red** | `andyzoujm/autocast` |
 
 ### Green is a licence, not a format

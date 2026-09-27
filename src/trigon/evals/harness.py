@@ -38,6 +38,8 @@ __all__ = [
     "QuestionAccuracy",
     "QuestionOutcome",
     "SuiteResult",
+    "TeacherLabelsAreNotCalibration",
+    "refuse_teacher_labels",
     "run_cases",
     "summarize",
 ]
@@ -63,6 +65,13 @@ class Expectation:
     #: Trains the evidence head (`trigon.training`) and scores plausibility
     #: (`trigon.evals.rationale`). Never a label on its own.
     rationale: tuple[tuple[int, int], ...] | None = None
+    #: The label and distribution are a teacher model's opinion, not an
+    #: outcome and not people (`trigon.evals.teacher`). Trainable as a soft
+    #: target; refused by :func:`summarize` and by the calibrator fit, because
+    #: `docs/data.md` is explicit that a teacher's probabilities buy coverage
+    #: and never calibration -- teachers are overconfident, and a model
+    #: "calibrated" against one inherits exactly that.
+    from_teacher: bool = False
 
     def __post_init__(self) -> None:
         if self.label is None and self.probability is None and self.distribution is None:
@@ -320,6 +329,7 @@ def summarize(
     """
     if not outcomes:
         raise ValueError(f"suite {suite!r} produced no outcomes")
+    refuse_teacher_labels((o.case for o in outcomes), f"summarize suite {suite!r}")
 
     scored: list[tuple[str, tuple[float, ...], int]] = []
     labels_by_question: dict[str, list[int]] = {}
@@ -376,6 +386,30 @@ def summarize(
         extra=dict(extra or {}),
         per_primitive=per_primitive,
     )
+
+
+class TeacherLabelsAreNotCalibration(ValueError):
+    """A teacher's labels reached code that would report them as calibration."""
+
+
+def refuse_teacher_labels(cases: Iterable[Case], doing: str) -> None:
+    """Raise if any case carries a teacher's label.
+
+    Called by everything a calibration claim is computed from -- the suite
+    summary the gates and reports read, and the calibrator fit -- so that a
+    teacher-labelled case cannot become a published ECE or a shipped
+    temperature by being passed to the ordinary path. Agreement with a teacher
+    has its own function, `trigon.evals.teacher.teacher_agreement`, whose
+    output says what it is.
+    """
+    for case in cases:
+        if any(e.from_teacher for e in case.expected.values()):
+            raise TeacherLabelsAreNotCalibration(
+                f"cannot {doing}: {case.case_id} is labelled by a teacher model, and a "
+                "teacher's probabilities are not calibration targets (docs/data.md). "
+                "Use trigon.evals.teacher.teacher_agreement, which reports agreement "
+                "with the teacher as agreement."
+            )
 
 
 def _per_question(

@@ -684,6 +684,141 @@ def render_completeness(result: dict | None, backend) -> list[str]:
     ]
 
 
+def teacher_main(spec, args, backend, compiler, device: str, hardware: str) -> int:
+    """Train on a teacher-labelled stream and report agreement -- never calibration.
+
+    The calibration path above is not reused, and not by oversight: no
+    calibrator is fitted (one fitted to a teacher calibrates the model to the
+    teacher, and `_fit_calibration` refuses it), no release gate is read (the
+    suite summary refuses teacher labels), and the report's only ECE is
+    labelled as agreement and carries its floor. What it prints is argmax
+    agreement and KL on held-out generated cases, beside a predictor that
+    ignores its input and the lexical floor.
+
+    Exits non-zero when the student does not beat the input-ignoring predictor
+    on both, which is the one test here that is not about the teacher's
+    opinion being right.
+    """
+    import torch
+
+    from trigon.backends.lexical import LexicalBackend
+    from trigon.evals import run_cases
+    from trigon.evals.teacher import teacher_agreement
+    from trigon.training import TrainingConfig
+    from trigon.training import train as run_training
+
+    train = load(spec.name, "train", purpose="train")
+    evaluation = load(spec.name, "test", purpose="eval")
+    rng = random.Random(f"corpus:{spec.name}:{args.seed}")
+    rng.shuffle(train)
+    rng.shuffle(evaluation)
+    if args.n:
+        train = train[: args.n]
+    if args.eval_n:
+        evaluation = evaluation[: args.eval_n]
+    questions = sum(len(c.request.questions) for c in evaluation)
+    print(
+        f"{spec.name}: {len(train)} train, {len(evaluation)} eval ({questions} questions); "
+        "teacher labels -- agreement only, no calibrator, no gates",
+        file=sys.stderr,
+    )
+    report = None
+    if not args.weights:
+        report = run_training(
+            backend,
+            train,
+            TrainingConfig(
+                epochs=args.epochs,
+                learning_rate=args.lr,
+                accumulate=args.accumulate,
+                seed=args.seed,
+                log_every=args.log_every,
+                validation_fraction=args.validation_fraction,
+                max_batch_cells=args.max_batch_cells or None,
+                resume_path=args.resume_path,
+                bucket_window=args.bucket_window,
+                rationale_weight=0.0,
+            ),
+            compiler=compiler,
+        )
+    if device.startswith("cuda"):
+        peak = torch.cuda.max_memory_allocated() / 2**30
+        print(f"{args.corpus}: peak GPU memory in training {peak:.1f} GiB", file=sys.stderr)
+    backend.cache_prefixes = True
+    student = teacher_agreement(
+        run_cases(Engine(backend, compiler=compiler), evaluation),
+        train,
+        floor_trials=args.floor_trials,
+    )
+    lexical = teacher_agreement(
+        run_cases(Engine(LexicalBackend()), evaluation), train, floor_trials=args.floor_trials
+    )
+    model = (
+        f"{args.backbone}, LoRA rank {args.lora_rank}"
+        if args.backbone
+        else f"reference spike, d_model {args.d_model}, {args.layers} layers"
+    )
+    markdown = "\n".join(
+        [
+            f"# {spec.name}",
+            "",
+            f"**{spec.attribution}**",
+            "",
+            "Generated (state, schema) pairs labelled by a teacher model. **This report",
+            "measures imitation of the teacher, not calibration**: the labels are the",
+            "teacher's distributions, no calibrator was fitted to them, and no release",
+            "gate reads them (`docs/data.md`, *Teacher labels*).",
+            "",
+            "| | |",
+            "| --- | ---: |",
+            f"| Training cases | {len(train):,} |",
+            f"| Held-out cases | {len(evaluation):,} |",
+            f"| Held-out questions | {questions:,} |",
+            f"| Epochs | {args.epochs} |",
+            f"| Seed | {args.seed} |",
+            f"| Device | {hardware} |",
+            f"| Model | {model} |",
+            "",
+            "| Held out | Argmax agreement | Mean KL(teacher ‖ ·) |",
+            "| --- | ---: | ---: |",
+            f"| student | {student.argmax_agreement:.4f} | {student.mean_kl:.4f} |",
+            f"| lexical floor | {lexical.argmax_agreement:.4f} | {lexical.mean_kl:.4f} |",
+            f"| ignores its input | {student.baseline_agreement:.4f} | {student.baseline_kl:.4f} |",
+            "",
+            "**One seed is one sample from a distribution nobody measured.**",
+            "",
+            student.render_markdown(),
+        ]
+    )
+    print(markdown)
+    if args.out:
+        out = pathlib.Path(args.out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(markdown)
+        payload = {
+            "corpus": spec.name,
+            "is_calibration": False,
+            "teacher": spec.teacher,
+            "n_train": len(train),
+            "seed": args.seed,
+            "model": model,
+            "student": student.to_dict(),
+            "lexical_floor": lexical.to_dict(),
+        }
+        out.with_suffix(".json").write_text(json.dumps(payload, indent=2))
+        stem = out.with_suffix("")
+        if report is not None:
+            pathlib.Path(f"{stem}-training.json").write_text(json.dumps(report.to_dict(), indent=2))
+        if args.save_model:
+            backend.save(pathlib.Path(args.save_model))
+        print(f"\nwrote {out}", file=sys.stderr)
+    beats = (
+        student.argmax_agreement > student.baseline_agreement
+        and student.mean_kl < student.baseline_kl
+    )
+    return 0 if beats else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     # Set here rather than inherited from the trainer, which is where it used
@@ -737,6 +872,8 @@ def main(argv: list[str] | None = None) -> int:
     hardware = f"{device} ({hardware})"
     print(f"{args.corpus}: training on {hardware}", file=sys.stderr)
     compiler = backend.make_compiler(option_scoring=OptionScoring(args.option_scoring))
+    if not spec.calibration_evidence:
+        return teacher_main(spec, args, backend, compiler, device, hardware)
     train, calibration, evaluation, topped_up = splits(spec, args)
     marginal = baseline_accuracy(train, evaluation)
     summary = " ".join(f"{qid}={value:.4f}" for qid, value in sorted(marginal.items()))

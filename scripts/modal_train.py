@@ -60,6 +60,7 @@ import modal
 REPO = pathlib.Path(__file__).resolve().parent.parent
 RUNS = "/runs"
 WEIGHTS = "/weights"
+TEACHER = "/teacher"
 APP_NAME = "trigon-train"
 #: The workspace's plan caps it at ten GPUs at once. Calls beyond that are
 #: queued, not refused -- Modal emails "you have reached your GPU limit" and
@@ -105,13 +106,15 @@ image = (
 app = modal.App(APP_NAME)
 runs = modal.Volume.from_name("trigon-runs", create_if_missing=True)
 weights = modal.Volume.from_name("trigon-weights", create_if_missing=True)
+# The teacher-labelled stream (`scripts/modal_teacher.py`), read-only here.
+teacher_data = modal.Volume.from_name("trigon-teacher", create_if_missing=True)
 
 
 @app.function(
     image=image,
     gpu="A10G",
     timeout=60 * 60 * 20,
-    volumes={RUNS: runs, WEIGHTS: weights},
+    volumes={RUNS: runs, WEIGHTS: weights, TEACHER: teacher_data},
     # A container that dies -- a host failure, an OOM kill, `modal container
     # stop` -- reruns the seed, which picks up its resume file below. A failed
     # gate is a returned payload, not an exception, so it is never retried.
@@ -158,6 +161,15 @@ def train_one(corpus: str, seed: int, flags: list[str], run: dict) -> dict:
                 env={**os.environ, "PYTHONPATH": str(root / "src")},
                 check=True,
             )
+        # A generated stream lives on its own Volume, not at a URL: the
+        # pinned build is copied into this container's corpus cache, and the
+        # loader checks it against its SHA-256 there.
+        if spec_of(corpus).teacher:
+            import shutil
+
+            cached = root / "corpora" / corpus / "cases.jsonl.gz"
+            cached.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(pathlib.Path(TEACHER) / spec_of(corpus).files["all"], cached)
 
     # Each container that runs this seed writes one "training on" line to the
     # shared, appended log, so the count so far says which life this is.
