@@ -533,14 +533,28 @@ def _score_same(pairs: dict[str, dict[str, CaseOutcome]], role: str) -> dict[str
 
 
 def _score_complement(pairs: dict[str, dict[str, CaseOutcome]]) -> dict[str, float]:
-    """|P(yes) + P(yes on the complement) - 1|, as NegationCoherenceBenchmark scores it."""
+    """|P(yes) + P(yes on the complement) - 1|, as NegationCoherenceBenchmark scores it.
+
+    And the probabilities themselves, because incoherence alone cannot tell a
+    head that reads the claim from one that answers 0.5 to everything: mean
+    P(yes) on each half, split by whether the named option is the true one,
+    their standard deviation, and ``separation`` -- mean P(yes) on affirms
+    that are true minus on affirms that are false, 0 for a head that does not
+    discriminate and 1 for one that is certain and right.
+    """
     errors, right, judged = [], 0, 0
+    yes: dict[str, list[float]] = {}
     for members in pairs.values():
         if "anchor" not in members or "variant" not in members:
             continue
         a = members["anchor"].questions[CLAIM]
         d = members["variant"].questions[CLAIM]
         errors.append(abs(a.probabilities[1] + d.probabilities[1] - 1.0))
+        truth = "true" if a.expected is not None and a.expected.hard_label == 1 else "false"
+        yes.setdefault("affirm", []).append(a.probabilities[1])
+        yes.setdefault("deny", []).append(d.probabilities[1])
+        yes.setdefault(f"affirm_when_{truth}", []).append(a.probabilities[1])
+        yes.setdefault(f"deny_when_{truth}", []).append(d.probabilities[1])
         for q in (a, d):
             if q.correct is not None:
                 judged += 1
@@ -552,6 +566,14 @@ def _score_complement(pairs: dict[str, dict[str, CaseOutcome]]) -> dict[str, flo
         "max_incoherence": max(errors),
         "coherent_rate": sum(e <= 0.05 for e in errors) / len(errors),
         "accuracy": right / judged if judged else float("nan"),
+        **{f"mean_p_yes_{half}": statistics.fmean(values) for half, values in yes.items()},
+        "stdev_p_yes_affirm": statistics.pstdev(yes["affirm"]),
+        "stdev_p_yes_deny": statistics.pstdev(yes["deny"]),
+        "separation": (
+            statistics.fmean(yes["affirm_when_true"]) - statistics.fmean(yes["affirm_when_false"])
+            if "affirm_when_true" in yes and "affirm_when_false" in yes
+            else float("nan")
+        ),
     }
 
 
