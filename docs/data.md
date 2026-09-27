@@ -263,6 +263,16 @@ withheld below `MIN_CALIBRATION_SAMPLES`.
 same teacher answers cases whose truth is computed: the verifiable stream and
 the first step of the two committed workflows. Its accuracy and ECE against
 that truth are the one place a teacher's probabilities are scored as
-calibration, because there the labels are not its own. What that measured is
-in `reports/teacher/README.md`. It is the reason this stream is tier green
-for training and still never calibration evidence.
+calibration, because there the labels are not its own. On the verifiable
+stream it scored **75.0% accuracy at 0.918 mean confidence: ECE 0.168 at
+n = 5,100, against a noise-floor p95 of 0.011**. It was right where the answer
+is written into the state and confidently wrong where it had to infer: 0.76
+confidence on a tier it got right 29% of the time. That is the measured
+reason this stream is green for training and still never calibration
+evidence.
+
+The first build, `tw0-n6000`, kept 5,558 of 6,000 planned cases (18,740
+questions) for **$0.62 per 1,000 labelled cases** on Modal A10Gs, $3.47 in
+all. Whether a 7B teacher's labels are good enough to buy coverage is not yet
+measured, and it is the open question.
+`reports/teacher/README.md` has the build, the cost and the first student.
