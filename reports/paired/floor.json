@@ -1,0 +1,72 @@
+{
+  "synthetic": {
+    "jaggedness/paired_injection": {
+      "flip_rate": 0.14066666666666666,
+      "mean_drift": 0.0285513679982989,
+      "accuracy_anchor": 0.49833333333333335,
+      "accuracy_variant": 0.418,
+      "accuracy_drop": 0.08033333333333334
+    },
+    "jaggedness/paired_padding": {
+      "flip_rate@pad16": 0.341,
+      "mean_drift@pad16": 0.18376786952408472,
+      "accuracy_anchor@pad16": 0.49833333333333335,
+      "accuracy_variant@pad16": 0.216,
+      "accuracy_drop@pad16": 0.2823333333333333,
+      "flip_rate@pad4": 0.25866666666666666,
+      "mean_drift@pad4": 0.08952866728316328,
+      "accuracy_anchor@pad4": 0.49833333333333335,
+      "accuracy_variant@pad4": 0.29,
+      "accuracy_drop@pad4": 0.20833333333333334,
+      "rot": 0.2823333333333333
+    },
+    "jaggedness/paired_paraphrase": {
+      "flip_rate": 0.0,
+      "mean_drift": 0.009035669117068879,
+      "accuracy_anchor": 0.49833333333333335,
+      "accuracy_variant": 0.49833333333333335,
+      "accuracy_drop": 0.0
+    },
+    "jaggedness/paired_negation": {
+      "mean_incoherence": 0.2567011820924337,
+      "max_incoherence": 0.5504692551754986,
+      "coherent_rate": 0.179,
+      "accuracy": 0.501
+    }
+  },
+  "banking77": {
+    "jaggedness/paired_injection": {
+      "flip_rate": 0.9,
+      "mean_drift": 0.0734581176967492,
+      "accuracy_anchor": 0.452,
+      "accuracy_variant": 0.077,
+      "accuracy_drop": 0.375
+    },
+    "jaggedness/paired_padding": {
+      "flip_rate@pad16": 0.965,
+      "mean_drift@pad16": 0.20915641348980415,
+      "accuracy_anchor@pad16": 0.452,
+      "accuracy_variant@pad16": 0.017,
+      "accuracy_drop@pad16": 0.435,
+      "flip_rate@pad4": 0.896,
+      "mean_drift@pad4": 0.10989441382978232,
+      "accuracy_anchor@pad4": 0.452,
+      "accuracy_variant@pad4": 0.061,
+      "accuracy_drop@pad4": 0.391,
+      "rot": 0.435
+    },
+    "jaggedness/paired_paraphrase": {
+      "flip_rate": 0.0,
+      "mean_drift": 0.0,
+      "accuracy_anchor": 0.452,
+      "accuracy_variant": 0.452,
+      "accuracy_drop": 0.0
+    },
+    "jaggedness/paired_negation": {
+      "mean_incoherence": 0.1374627977182686,
+      "max_incoherence": 0.7058856734105969,
+      "coherent_rate": 0.221,
+      "accuracy": 0.505
+    }
+  }
+}
