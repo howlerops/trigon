@@ -47,13 +47,17 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from ..types import ChoiceQuestion, DecisionRequest, NoulQuestion, ScoreQuestion
+from . import teacher as _teacher
 from .harness import Case, Expectation
 
 __all__ = [
     "CORPORA",
     "CorpusLicenceError",
     "CorpusNotConverted",
+    "CorpusNotFetched",
     "CorpusSpec",
+    "GENERATED",
+    "TEACHER_WORKFLOWS",
     "cache_root",
     "corpus",
     "is_share_alike",
@@ -175,6 +179,12 @@ class CorpusSpec:
     # share a prompt, and a row-level split would test on prompts it trained on.
     holdout_fraction: float = 0.0
     holdout_key: str = "prompt"
+    # -- Teacher-labelled streams ------------------------------------------
+    # The model whose distributions are the labels, pinned to a revision.
+    # Non-empty means every expectation is a teacher's opinion: trainable as a
+    # soft target for coverage, and never calibration evidence (docs/data.md,
+    # *Teacher labels*) -- see `calibration_evidence`.
+    teacher: str = ""
 
     def __post_init__(self) -> None:
         if self.share_alike and self.tier == "green":
@@ -186,6 +196,15 @@ class CorpusSpec:
     @property
     def share_alike(self) -> bool:
         return is_share_alike(self.licence)
+
+    @property
+    def calibration_evidence(self) -> bool:
+        """Whether a calibration number measured on these labels means calibration.
+
+        False for a teacher-labelled stream: its labels are a model's opinion,
+        and the harness refuses them wherever a calibration claim is computed.
+        """
+        return not self.teacher
 
     def permits(self, purpose: Purpose) -> bool:
         if self.share_alike and purpose not in _SHARE_ALIKE_PERMITS:
@@ -522,11 +541,17 @@ CORPORA: dict[str, CorpusSpec] = {
 }
 
 
+#: Streams we generate rather than fetch. Kept apart from `CORPORA`, which is
+#: the count of *real* corpora the ledger publishes: a teacher's output is
+#: licensed and loaded the same way, and it is not somebody's real traffic.
+GENERATED: dict[str, CorpusSpec] = {}
+
+
 def corpus(name: str) -> CorpusSpec:
     try:
-        return CORPORA[name]
+        return CORPORA[name] if name in CORPORA else GENERATED[name]
     except KeyError:
-        known = ", ".join(sorted(CORPORA))
+        known = ", ".join(sorted({*CORPORA, *GENERATED}))
         raise KeyError(f"unknown corpus {name!r}; known corpora are {known}") from None
 
 
@@ -1079,3 +1104,90 @@ def _load_hatexplain(
 
 CORPORA[HATEXPLAIN.name] = HATEXPLAIN
 _LOADERS[HATEXPLAIN.name] = _load_hatexplain
+
+
+# -- The teacher-labelled synthetic-workflow stream ----------------------------
+#
+# (state, schema) pairs written across twenty domains by Qwen2.5-7B-Instruct and
+# labelled by it, one question per call, with its full distribution over the
+# declared options (`trigon.evals.teacher`, `scripts/modal_teacher.py`).
+#
+# **Green, because of what the teacher's licence says about its output.** The
+# model is Apache-2.0 at the pinned revision -- on its card's metadata and in
+# the LICENSE file of the repository at that revision -- and Apache-2.0 places
+# no restriction on what the model's output may be used for. Its 3B and 72B
+# siblings are under the Qwen licence instead, which is why the revision and
+# the size are pinned rather than "a Qwen2.5 model".
+#
+# **Green is the licence; the labels are still not calibration.** The spec's
+# `teacher` field marks every expectation `from_teacher`, which the harness
+# refuses wherever an ECE would be published or a calibrator fitted.
+#
+# **Not committed, and not fetched over HTTP.** The build lives on the
+# `trigon-teacher` Modal Volume; `python scripts/modal_teacher.py fetch <build>`
+# copies it into the ignored corpus cache, and the file is pinned by SHA-256
+# the way a bucket URL is, because a volume path carries no revision either.
+
+#: The build the published numbers were measured on: a directory on the
+#: `trigon-teacher` volume, and the SHA-256 of its merged file.
+TEACHER_BUILD = "tw0-n6000"
+TEACHER_BUILD_SHA256 = "3a7032e19866d7b25ad647bf1df04bf3c721a3678317ffe8b782f8050beec5f7"
+
+TEACHER_WORKFLOWS = CorpusSpec(
+    name="teacher-workflows",
+    primitive="mixed",
+    tier="green",
+    licence="Apache-2.0",
+    attribution=(
+        "Generated and labelled by Qwen2.5-7B-Instruct (Qwen Team, Alibaba Cloud), "
+        f"Apache-2.0, huggingface.co/{_teacher.TEACHER_MODEL} at "
+        f"{_teacher.TEACHER_REVISION[:12]}. Teacher labels buy coverage, not calibration."
+    ),
+    files={"all": f"{TEACHER_BUILD}/cases.jsonl.gz"},
+    sha256={"all": TEACHER_BUILD_SHA256} if TEACHER_BUILD_SHA256 else {},
+    instructions="(each case carries its own schema)",
+    # By case id: a case's questions share one state, so they share a side.
+    holdout_key="case_id",
+    holdout_fraction=0.3,
+    teacher=f"{_teacher.TEACHER_MODEL}@{_teacher.TEACHER_REVISION}",
+)
+
+
+class CorpusNotFetched(FileNotFoundError):
+    """A generated stream that lives on a Modal Volume and is not in the cache yet."""
+
+
+def teacher_file(spec: CorpusSpec, root: pathlib.Path | None = None) -> pathlib.Path:
+    """The cached build, checked against its pinned SHA-256 when read from the default cache."""
+    path = (root or cache_root()) / spec.name / "cases.jsonl.gz"
+    if not path.exists():
+        build = spec.files["all"].split("/", 1)[0]
+        raise CorpusNotFetched(
+            f"{path} is missing; {spec.name} lives on the trigon-teacher Modal Volume. "
+            f"Run `python scripts/modal_teacher.py fetch {build}`."
+        )
+    expected = spec.sha256.get("all")
+    if root is None and expected and hashlib.sha256(path.read_bytes()).hexdigest() != expected:
+        raise ValueError(f"{path} is not the pinned build {spec.files['all']}; refetch it")
+    return path
+
+
+def _load_teacher(
+    spec: CorpusSpec, split: str, *, limit: int | None, root: pathlib.Path | None
+) -> list[Case]:
+    if split not in ("train", "test"):
+        raise KeyError(f"{spec.name} has splits 'train' and 'test'; got {split!r}")
+    cases: list[Case] = []
+    for record in _records(teacher_file(spec, root)):
+        if limit is not None and len(cases) >= limit:
+            break
+        if _held_out(spec, record) != (split == "test"):
+            continue
+        case = _teacher.case_from_record(record, name=spec.name, split=split)
+        if case is not None:
+            cases.append(case)
+    return cases
+
+
+GENERATED[TEACHER_WORKFLOWS.name] = TEACHER_WORKFLOWS
+_LOADERS[TEACHER_WORKFLOWS.name] = _load_teacher
