@@ -1,0 +1,34 @@
+[
+  {
+    "seed": 0,
+    "returncode": 1,
+    "elapsed_s": 1382.3,
+    "lives": 1,
+    "corpus": "helpsteer2",
+    "run_id": "helpsteer2-qwen7b-smoke-n1000-e1-0f6fb07994d8-20260927T001830",
+    "prefix": "qwen7b-smoke-n1000-e1",
+    "commit": "0f6fb07994d8962b19deae1fa5a2021f99caec08",
+    "dirty": false,
+    "flags": [
+      "-n",
+      "1000",
+      "--epochs",
+      "1",
+      "--calibration-n",
+      "1000",
+      "--log-every",
+      "200",
+      "--max-batch-cells",
+      "50000000",
+      "--backbone",
+      "qwen2.5-7b",
+      "--lr",
+      "0.0001",
+      "--save-model",
+      "model.pt"
+    ],
+    "gpu_requested": "A100-80GB",
+    "gpu_actual": "NVIDIA A100 80GB PCIe",
+    "torch": "2.14.0+cu130"
+  }
+]

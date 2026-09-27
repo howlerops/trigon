@@ -36,7 +36,7 @@ import copy
 import hashlib
 import json
 import math
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from pathlib import Path
 
 import torch
@@ -54,10 +54,24 @@ from .torch_readout import (
     _to_int8_and_back,
 )
 
-__all__ = ["QwenPrefillModel", "QwenReadoutBackend", "QwenShape"]
+__all__ = ["QwenPrefillModel", "QwenReadoutBackend", "QwenShape", "backbone_shards"]
 
 ADAPTER_FORMAT = "trigon-backbone-adapter-1"
 _PROJECTIONS = ("q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj")
+
+
+def backbone_shards(backbone, device: str | torch.device) -> Iterator[dict[str, torch.Tensor]]:
+    """A pinned backbone's tensors, one safetensors file at a time, on ``device``.
+
+    Lazy on purpose: each shard is read when the loader asks for the next one,
+    so the previous one can be freed first.
+    """
+    from safetensors.torch import load_file
+
+    from .hub import weight_files
+
+    for path in weight_files(backbone):
+        yield load_file(str(path), device=str(device))
 
 
 class QwenShape:
@@ -425,21 +439,38 @@ class QwenPrefillModel(nn.Module):
 
     def load_backbone(self, tensors: dict[str, torch.Tensor]) -> None:
         """Copy a Qwen2 safetensors state into the frozen half of this model."""
-        mapped: dict[str, torch.Tensor] = {}
-        for name, tensor in tensors.items():
-            if name == "lm_head.weight":
-                continue  # tied to the embedding in these checkpoints; unused here
-            key = name.removeprefix("model.")
-            key = key.replace("embed_tokens.", "embed.")
-            for proj in _PROJECTIONS:
-                key = key.replace(f"{proj}.weight", f"{proj}.base.weight")
-                key = key.replace(f"{proj}.bias", f"{proj}.base.bias")
-            mapped[key] = tensor
-        missing, unexpected = self.load_state_dict(mapped, strict=False)
-        if unexpected:
-            raise ValueError(f"backbone tensors this model has no place for: {unexpected[:5]}")
+        self.load_backbone_shards([tensors])
+
+    def load_backbone_shards(self, shards: Iterable[dict[str, torch.Tensor]]) -> None:
+        """The same, one shard at a time, checked for completeness across all of them.
+
+        A 7B checkpoint is four files. Merging them into one dict before
+        copying would hold the whole backbone twice on the device; copying
+        each as it is read holds one shard's worth extra. Completeness is
+        judged on the union, because every shard alone is missing most of
+        the model.
+        """
+        loaded: set[str] = set()
+        for tensors in shards:
+            mapped: dict[str, torch.Tensor] = {}
+            for name, tensor in tensors.items():
+                if name == "lm_head.weight":
+                    # Tied to the embedding on the small models, its own tensor
+                    # on 7B; unused here either way -- the heads are ours.
+                    continue
+                key = name.removeprefix("model.")
+                key = key.replace("embed_tokens.", "embed.")
+                for proj in _PROJECTIONS:
+                    key = key.replace(f"{proj}.weight", f"{proj}.base.weight")
+                    key = key.replace(f"{proj}.bias", f"{proj}.base.bias")
+                mapped[key] = tensor
+            _, unexpected = self.load_state_dict(mapped, strict=False)
+            if unexpected:
+                raise ValueError(f"backbone tensors this model has no place for: {unexpected[:5]}")
+            loaded.update(mapped)
+            del mapped, tensors
         frozen = {name for name, p in self.named_parameters() if not p.requires_grad}
-        absent = sorted(frozen & set(missing))
+        absent = sorted(frozen - loaded)
         if absent:
             raise ValueError(f"backbone is missing frozen weights: {absent[:5]}")
 
@@ -498,8 +529,6 @@ class QwenReadoutBackend(TorchReadoutBackend):
         1.5B model never exists twice -- once initialised at random, once
         loaded -- in a container's memory.
         """
-        from safetensors.torch import load_file
-
         from .hub import BACKBONES, fetch
 
         backbone = BACKBONES[name]
@@ -525,8 +554,7 @@ class QwenReadoutBackend(TorchReadoutBackend):
                     ** (torch.arange(0, head_dim, 2, dtype=torch.float32, device=device) / head_dim)
                 )
             )
-        weights = fetch(backbone, "model.safetensors")
-        model.load_backbone(load_file(str(weights), device=str(device)))
+        model.load_backbone_shards(backbone_shards(backbone, device))
         torch.manual_seed(seed)
         model.reset_trainable()
         return cls(model, ByteLevelBPE.for_backbone(name), backbone=name, config=config)

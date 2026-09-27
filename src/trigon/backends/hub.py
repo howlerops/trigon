@@ -13,22 +13,30 @@ has no business there.
 
 from __future__ import annotations
 
+import json
 import os
 import pathlib
 import shutil
 import urllib.request
 
-__all__ = ["BACKBONES", "Backbone", "cache_root", "fetch"]
+__all__ = ["BACKBONES", "Backbone", "cache_root", "fetch", "weight_files"]
 
 
 class Backbone:
     """A pretrained base, pinned to one revision."""
 
-    def __init__(self, name: str, repo: str, revision: str, licence: str) -> None:
+    def __init__(
+        self, name: str, repo: str, revision: str, licence: str, *, sharded: bool = False
+    ) -> None:
         self.name = name
         self.repo = repo
         self.revision = revision
         self.licence = licence
+        #: Weights split across ``model-0000k-of-0000n.safetensors`` files named
+        #: by ``model.safetensors.index.json``, as every Qwen2.5 from 7B up is,
+        #: rather than one ``model.safetensors``. Declared rather than probed,
+        #: so a single-file backbone never spends a request on a 404.
+        self.sharded = sharded
 
     def __repr__(self) -> str:  # pragma: no cover - debugging aid
         return f"Backbone({self.name!r}, {self.repo}@{self.revision[:8]})"
@@ -46,6 +54,15 @@ BACKBONES: dict[str, Backbone] = {
         "Qwen/Qwen2.5-0.5B",
         "060db6499f32faf8b98477b0a26969ef7d8b9987",
         "Apache-2.0",
+    ),
+    # Four bf16 shards, 15.2 GB. Untied embeddings: `lm_head.weight` is its
+    # own tensor here, and unused, as the tied one is on the smaller models.
+    "qwen2.5-7b": Backbone(
+        "qwen2.5-7b",
+        "Qwen/Qwen2.5-7B",
+        "d149729398750b98c0af14eb82c78cfe92750796",
+        "Apache-2.0",
+        sharded=True,
     ),
 }
 
@@ -71,3 +88,23 @@ def fetch(backbone: Backbone, filename: str) -> pathlib.Path:
         shutil.copyfileobj(response, out, length=1 << 20)
     partial.rename(target)
     return target
+
+
+INDEX = "model.safetensors.index.json"
+
+
+def weight_files(backbone: Backbone) -> list[pathlib.Path]:
+    """Every safetensors file of the pinned revision, fetched, in shard order.
+
+    A sharded checkpoint names its shards in the index's ``weight_map``; each
+    is fetched once and cached like any other file. A name that is not a
+    plain file name is refused rather than joined onto the cache path.
+    """
+    if not backbone.sharded:
+        return [fetch(backbone, "model.safetensors")]
+    index = json.loads(fetch(backbone, INDEX).read_text())
+    shards = sorted(set(index["weight_map"].values()))
+    for shard in shards:
+        if pathlib.PurePosixPath(shard).name != shard or not shard.endswith(".safetensors"):
+            raise ValueError(f"{backbone.name}: the index names an unexpected shard {shard!r}")
+    return [fetch(backbone, shard) for shard in shards]

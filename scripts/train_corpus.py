@@ -66,6 +66,7 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "src"))
 
+from trigon.backends.hub import BACKBONES  # noqa: E402
 from trigon.cli import _fit_calibration  # noqa: E402
 from trigon.engine import Engine  # noqa: E402
 from trigon.evals import (  # noqa: E402
@@ -130,6 +131,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--backbone",
         default=None,
+        choices=sorted(BACKBONES),
         help=(
             "a pinned pretrained backbone from trigon.backends.hub (e.g. qwen2.5-1.5b) "
             "instead of the spike; --d-model and --layers are then the backbone's"
