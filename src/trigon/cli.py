@@ -806,6 +806,12 @@ def _fit_calibration(engine, cases):
     from .calibration.isotonic import IsotonicCalibrator
     from .calibration.temperature import CalibrationWarning, TemperatureScaler
     from .evals import run_cases
+    from .evals.harness import refuse_teacher_labels
+
+    # A temperature fitted to a teacher's labels calibrates the model to the
+    # teacher, and ships with the weights as if it were calibration.
+    cases = list(cases)
+    refuse_teacher_labels(cases, "fit a calibrator")
 
     scaler = TemperatureScaler()
     isotonic = IsotonicCalibrator()
@@ -856,6 +862,12 @@ def _fit_domain_temperatures(engine, cases, domain: str):
     from .calibration.isotonic import IsotonicCalibrator
     from .calibration.temperature import TemperatureScaler
     from .evals import run_cases
+    from .evals.harness import refuse_teacher_labels
+
+    # A temperature fitted to a teacher's labels calibrates the model to the
+    # teacher, and ships with the weights as if it were calibration.
+    cases = list(cases)
+    refuse_teacher_labels(cases, "fit a calibrator")
 
     scaler = TemperatureScaler()
     rows: dict[str, list[tuple[list[float], int]]] = {}

@@ -10,7 +10,7 @@ targets.
 | --- | --- | --- | --- |
 | Public labelled corpora | classification, NLI, sentiment, ordinal rating, span selection, reformatted into the three primitives | ground truth | outcome calibration |
 | Annotator distributions | subjective judgements with many human labels per item | label distributions | calibration where no outcome exists |
-| Synthetic workflows | LLM-generated (state, schema) pairs across ~20 domains | teacher soft labels | coverage |
+| Synthetic workflows | LLM-generated (state, schema) pairs across 20 domains — **built**: `teacher-workflows` | teacher soft labels (Qwen2.5-7B-Instruct, full distribution) | coverage — **never calibration** |
 | Verifiable synthetic | generated structured state with code-checkable predicates | computed ground truth | cheap outcome data at scale |
 | Adversarial + paired | injections, distractor padding, negation pairs, paraphrases — **built** from our own labelled cases (`trigon.evals.paired`) | held fixed / derived, by construction | robustness data, an optional consistency loss (off by default), and paired benchmarks on held-out templates |
 
@@ -109,6 +109,7 @@ Rows marked *unchecked* keep the plan's assumption and are still blockers.
 | WDC Products; Magellan | Noul | "public research", terms unstated | **amber** | unchecked |
 | LMSYS Arena preferences | Choice (A/B/tie) | **custom LMSYS-Chat-1M Dataset License Agreement, gated access** | **dropped** | not pursued; see sign-off Q18 |
 | Home Credit; IEEE-CIS fraud | Noul on structured state | Kaggle competition terms | **dropped** | not pursued; see sign-off Q18 |
+| teacher-workflows | Choice / Noul / Score, a schema per case, teacher distributions | **Apache-2.0** — output of Qwen2.5-7B-Instruct at `a09a354`, a licence that places no restriction on output; the 3B and 72B instruct models are under the Qwen licence instead | **green** ✓ — trains for coverage; never calibration evidence | HF `Qwen/Qwen2.5-7B-Instruct` metadata and the repository's LICENSE at `a09a35458c70`, checked 2026-09-27 |
 | Autocast | Noul/Choice | **code MIT; dataset hosted "with permission from Metaculus for research purposes only"** | **red** | `andyzoujm/autocast` |
 
 ### Green is a licence, not a format
@@ -127,6 +128,7 @@ the drift tests, neither of which has a GPU stack — a Parquet reader here puts
 | GoEmotions | raw per-rater CSV on the authors' bucket | ✅ built — seven Nouls, one row per rater grouped per comment |
 | measuring_hate_speech | Parquet only | ✅ built — `scripts/convert_corpus.py` writes gzipped JSONL once |
 | Circa | TSV in its repository | ✅ built — **evaluation only**, CC BY-SA |
+| teacher-workflows | gzipped JSONL on the `trigon-teacher` Modal Volume, pinned by SHA-256 | ✅ built — generated, not fetched; `scripts/modal_teacher.py fetch` |
 
 **The three were not all Parquet-only.** The Hugging Face mirrors are, which
 is what the rows above used to say. GoEmotions' authors publish the raw
@@ -243,3 +245,50 @@ thrown away most of what it cost, and re-running it later costs the same again.
 
 Budget from the plan: $20–50k of teacher-label compute, a few thousand for
 generation.
+
+### The first teacher stream: `teacher-workflows`
+
+**Built, 2026-09-27.** An open teacher on Modal, Qwen2.5-7B-Instruct at
+revision `a09a35458c70` under vLLM on one A10G per shard. It writes a (state,
+schema) case to a seeded plan in one of twenty domains, then answers each
+question of the case **alone**. For every declared label it records the
+log-likelihood of the whole reply: the label's tokens followed by the end of
+the turn, read off `prompt_logprobs`. The stored distribution is the softmax
+over those, with the raw per-option log-probabilities, the token counts and
+the probability mass that landed on the declared strings. Nothing is an
+argmax. An option that is a prefix of another is not credited with the longer
+one's mass, which a first-token readout would do.
+`trigon.evals.teacher` holds the domains, the plan, both prompt templates
+and their SHA-256. `scripts/modal_teacher.py` runs them, and
+`reports/teacher/README.md` has the numbers.
+
+**The rule above is enforced in code.** Every expectation the loader builds
+carries `from_teacher=True`. `summarize()`, which every published ECE and
+every release gate is computed from, refuses such an expectation, and so does
+the calibrator fit. A temperature fitted to a teacher calibrates the model to
+the teacher. What a teacher-labelled run reports instead is
+`teacher_agreement`: argmax agreement, KL from the teacher, and an ECE against
+a label drawn from the teacher, all under the heading *agreement with the
+teacher — NOT calibration*, with the ECE carrying its noise floor and
+withheld below `MIN_CALIBRATION_SAMPLES`.
+
+**The teacher's own calibration is measured once, where it can be.** The
+same teacher answers cases whose truth is computed: the verifiable stream and
+the first step of the two committed workflows. Its accuracy and ECE against
+that truth are the one place a teacher's probabilities are scored as
+calibration, because there the labels are not its own. On the verifiable
+stream it scored **75.0% accuracy at 0.918 mean confidence: ECE 0.168 at
+n = 5,100, against a noise-floor p95 of 0.011**. It was right where the answer
+is written into the state and confidently wrong where it had to infer: 0.76
+confidence on a tier it got right 29% of the time. That is the measured
+reason this stream is green for training and still never calibration
+evidence.
+
+The first build, `tw0-n6000`, kept 5,558 of 6,000 planned cases (18,740
+questions) for **$0.62 per 1,000 labelled cases** on Modal A10Gs, $3.47 in
+all. A Qwen2.5-1.5B student trained on its 3,860 training cases, four seeds,
+reached median argmax agreement 0.530 with the teacher on held-out cases,
+against 0.527 for a predictor that ignores the state. It learned the
+teacher's position prior and little else. So whether a 7B teacher's labels
+buy coverage is still not measured, and it is the open question.
+`reports/teacher/README.md` has the build, the cost and the first student.

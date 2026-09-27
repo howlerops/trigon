@@ -19,6 +19,7 @@ import pytest
 
 from trigon.evals.corpora import (
     CORPORA,
+    GENERATED,
     CorpusLicenceError,
     CorpusSpec,
     corpus,
@@ -109,7 +110,8 @@ def test_the_committed_tiers_match_the_licence_audit():
     when they do, the same way test_docs_drift.py pins the budgets.
     """
     audit = (pathlib.Path(__file__).resolve().parent.parent / "docs" / "data.md").read_text()
-    for name, spec in CORPORA.items():
+    # Generated streams are licensed the same way and held to the same table.
+    for name, spec in {**CORPORA, **GENERATED}.items():
         row = [line for line in audit.splitlines() if line.lower().startswith(f"| {name}")]
         assert row, f"{name} is loadable but absent from the licence audit in docs/data.md"
         assert f"**{spec.tier}**" in row[0], (
