@@ -500,7 +500,10 @@ what order, and how each step is known to be done.
   2026-09-26: it does not beat every word either** (token F1 0.193–0.385
   against 0.434–0.437, eight checkpoints). Unsupervised checkpoints now serve
   no spans by default (`none`, reported as `unavailable`).
-- **Integrated gradients is not complete on the backbone.** The summed
+- ~~Integrated gradients is not complete on the backbone.~~ **Closed as
+  won't-pursue by the owner, 2026-09-27.** The supervised span head is the
+  product path; checkpoints without rationales serve no spans, and the IG code
+  and its numbers stay. The record: the summed
   attributions miss the log-probability difference by a median of 78–895%
   across the eight checkpoints, against under 1% in float32 on CPU. The
   backbone runs under bf16 autocast, so the measurement above is of this

@@ -52,6 +52,15 @@ cannot tell those two apart, the baseline has to become conditional.
 | Q28 | Faithfulness of evidence | **Build comprehensiveness and sufficiency** and score the saved checkpoints against random and lexicon controls |
 | Q29 | The old default branch | **Delete it** once `main` is the default |
 
+## Sign-off, 2026-09-27
+
+| | Question | Resolution |
+| --- | --- | --- |
+| Q30 | The adversarial and paired stream | **Build it now from our own corpora**: minimal pairs from Banking77 and the verifiable synthetic generator, where every variant's label is known by construction. Lexical floor first, then four seeds on the backbone |
+| Q31 | The teacher for the synthetic-workflow stream | **An open model on Modal**: Qwen2.5-7B-Instruct, Apache-2.0. No new keys, and its output is green for training. Teacher distributions are training targets and are never reported as calibration |
+| Q32 | HelpSteer2's aggregated labels miss +0.05 | **Try Qwen2.5-7B on an A100**, four seeds, the 1.5B recipe with only the backbone changed |
+| Q33 | Integrated gradients' completeness | **Closed as won't-pursue.** The supervised span head is the product path; the IG code and its measurements stay |
+
 ---
 
 ## 1. Per-request option/token budget before the retrieval stage
