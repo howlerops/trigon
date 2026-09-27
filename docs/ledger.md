@@ -14,10 +14,10 @@ narrative sections are a discipline, not a test.
 
 | | |
 | --- | ---: |
-| Commits | 240 |
-| Tests | 692 |
-| Python files (`src`, `tests`, `scripts`) | 128 |
-| Lines in `src/` | 15,584 |
+| Commits | 256 |
+| Tests | 726 |
+| Python files (`src`, `tests`, `scripts`) | 132 |
+| Lines in `src/` | 16,779 |
 | Release gates | 9 |
 | Green-tier corpora in the licence audit | 9 |
 | Committed use cases | 3 |
@@ -208,6 +208,16 @@ twenty-two runs** — the investigation is closed and the evidence is in
   for negation pairs) is off by default, and off is bit-identical to before.
   `PairedBenchmark` scores the four kinds on held-out cases (`reports/paired/`).
 
+- **The teacher-labelled synthetic-workflow stream** (2026-09-27, Q31).
+  `trigon.evals.teacher` plans cases across 20 domains; Qwen2.5-7B-Instruct
+  (Apache-2.0, pinned) writes each (state, schema) and answers each question
+  alone, and every declared label's full reply is scored from its log-probs,
+  so a record keeps the whole distribution. `teacher-workflows` is a green
+  generated corpus, kept apart from the real ones. **Teacher labels are
+  refused as calibration evidence in code**: `summarize()` and the calibrator
+  fit raise `TeacherLabelsAreNotCalibration`, and `train_corpus.py`'s teacher
+  path fits no calibrator and reads no gate (`reports/teacher/`).
+
 ### Reference model
 - Prefill-only transformer, byte-level BPE trained on the project's own data,
   batched training with best-epoch selection, int8 quantized twin for the
@@ -239,6 +249,8 @@ twenty-two runs** — the investigation is closed and the evidence is in
 | The reference configuration across hardware | 20 of 21 seed-runs certify: 4/4 locally, 16/16 on GitHub, the last sweep gated with `--require all`. GitHub's runners are heterogeneous: identical code gave bit-identical sweeps on two commits and different ones on a third |
 | Robustness of the certified Banking77 model, and what the paired stream buys | An injected wrong answer flips it half the time (accuracy on the variant 0.476), and 16 lines of padding take it to 0.064 -- no gate saw either, because every gate reads clean state. Trained with the paired stream: 0.880 and 0.805, flip rate 0.054. It does **not** certify: one seed of four stopped at 0.511 accuracy (`reports/paired/README.md`) |
 | HelpSteer2 aggregated, Qwen2.5-7B against 1.5B, same seeds and splits | Lift +0.0389 median against +0.0268; 7B ahead on every seed by more than twice 1.5B's whole spread. Still 0.011 short of +0.05. $23.73 on A100-80GB, 4.3–4.6 cases/s, 29 GiB peak (`reports/helpsteer2-7b/README.md`) |
+| The teacher's own calibration, against computed truth | Qwen2.5-7B-Instruct answers the verifiable stream 75.0% right at 0.918 mean confidence: ECE 0.168 against a floor p95 of 0.011 (n = 5,100). The doc's premise that teachers are overconfident, measured rather than cited (`reports/teacher/README.md`) |
+| Teacher-labelled stream, cost and first student | $0.62 per 1,000 kept cases on A10Gs (5,558 of 6,000 kept). A 1.5B student agrees with the teacher 0.5298 (median of four seeds) against 0.5270 for a predictor that ignores its input: within one standard error. KL falls on every seed, all of it on Score |
 | GPU on this machine | **Checked, absent.** `nvidia-smi` missing, `torch.cuda.is_available()` False |
 | GPU through Modal | **Works.** Asked for an A10G, got a device reporting `NVIDIA A10`; 30.9 cases/s against ~1.1 on this VM's CPU |
 | Qwen2.5 tokenizer, Python port against Rust | **Exact**: 0 of 34,520 texts differ over 10.3M tokens. Speed a wash against the forward pass: Rust 1.8× in bulk, Python 2× per warm call, 2.4× slower on unseen text |
@@ -597,13 +609,17 @@ what order, and how each step is known to be done.
   checkout while the repository was private and organization-owned. It has run
   normally since the repository was made public, which is consistent with
   metered minutes and was never confirmed from billing.
-- **One of five data streams unbuilt.** Seven corpora load. The
-  annotator-distribution stream is built and has four: HelpSteer2's
-  `disagreements/` split, GoEmotions and measuring_hate_speech, each certified
-  on four seeds on the backbone against `brier_over_marginal`, and Circa
-  (evaluation only, CC BY-SA). The adversarial and paired stream is built
-  (2026-09-27) and does not yet certify on four seeds. Synthetic workflows
-  with teacher labels is unbuilt.
+- ~~Two of five data streams unbuilt.~~ **Closed, 2026-09-27: all five are
+  built.** Seven real corpora load; the annotator-distribution stream is
+  certified on three of them; the paired stream and the teacher stream are
+  built and measured, and neither is yet a result a release could stand on
+  (below).
+- **The teacher stream teaches only a prior.** A 1.5B student trained on
+  3,860 teacher-labelled cases learns the teacher's position prior on Score
+  and nothing measurable on Choice or Noul. Candidates, none measured: every
+  case brings a new schema; the labels are noisy (about 3 of 64 fixture
+  answers look wrong at high confidence); the teacher has a position bias.
+  Whether training on it moves Banking77 or the synthetic suite is unrun.
 - **The paired stream does not certify, and negation does not learn.** With
   it, one Banking77 seed of four finished at 0.511 accuracy; the other three
   lost 0–3 points. Believed, not measured: the consistency term slowed it,
