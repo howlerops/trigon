@@ -38,7 +38,9 @@ container actually reports is written beside every result.
 **The corpus and the backbone are downloaded inside the job**, not shipped
 from here -- someone else's data and weights under licences that govern
 redistribution. Backbone weights are cached on the `trigon-weights` Volume so
-four seeds do not fetch 3 GB four times.
+four seeds do not fetch 3 GB four times -- or 15 GB, for Qwen2.5-7B. The Volume
+is committed only when a seed's training ends, so run one seed first on a new
+backbone: seeds launched together on a cold cache each download it.
 
 **Nothing is certified by this script.** It runs seeds and returns reports;
 whether they certify is what the gates say, and `CLAUDE.md`'s rule about the

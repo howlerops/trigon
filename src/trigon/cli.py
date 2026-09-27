@@ -14,6 +14,7 @@ import sys
 from collections.abc import Sequence
 
 from . import __version__
+from .backends.hub import BACKBONES
 
 __all__ = ["main"]
 
@@ -1180,6 +1181,7 @@ def build_parser() -> argparse.ArgumentParser:
     tr.add_argument(
         "--backbone",
         default=None,
+        choices=sorted(BACKBONES),
         help="a pinned pretrained backbone (e.g. qwen2.5-1.5b) instead of the spike",
     )
     tr.add_argument("--lora-rank", type=int, default=16)
