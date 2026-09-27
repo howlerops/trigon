@@ -232,3 +232,37 @@ thrown away most of what it cost, and re-running it later costs the same again.
 
 Budget from the plan: $20–50k of teacher-label compute, a few thousand for
 generation.
+
+### The first teacher stream: `teacher-workflows`
+
+**Built, 2026-09-27.** An open teacher on Modal, Qwen2.5-7B-Instruct at
+revision `a09a35458c70` under vLLM on one A10G per shard. It writes a (state,
+schema) case to a seeded plan in one of twenty domains, then answers each
+question of the case **alone**. For every declared label it records the
+log-likelihood of the whole reply: the label's tokens followed by the end of
+the turn, read off `prompt_logprobs`. The stored distribution is the softmax
+over those, with the raw per-option log-probabilities, the token counts and
+the probability mass that landed on the declared strings. Nothing is an
+argmax. An option that is a prefix of another is not credited with the longer
+one's mass, which a first-token readout would do.
+`trigon.evals.teacher` holds the domains, the plan, both prompt templates
+and their SHA-256. `scripts/modal_teacher.py` runs them, and
+`reports/teacher/README.md` has the numbers.
+
+**The rule above is enforced in code.** Every expectation the loader builds
+carries `from_teacher=True`. `summarize()`, which every published ECE and
+every release gate is computed from, refuses such an expectation, and so does
+the calibrator fit. A temperature fitted to a teacher calibrates the model to
+the teacher. What a teacher-labelled run reports instead is
+`teacher_agreement`: argmax agreement, KL from the teacher, and an ECE against
+a label drawn from the teacher, all under the heading *agreement with the
+teacher — NOT calibration*, with the ECE carrying its noise floor and
+withheld below `MIN_CALIBRATION_SAMPLES`.
+
+**The teacher's own calibration is measured once, where it can be.** The
+same teacher answers cases whose truth is computed: the verifiable stream and
+the first step of the two committed workflows. Its accuracy and ECE against
+that truth are the one place a teacher's probabilities are scored as
+calibration, because there the labels are not its own. What that measured is
+in `reports/teacher/README.md`. It is the reason this stream is tier green
+for training and still never calibration evidence.
