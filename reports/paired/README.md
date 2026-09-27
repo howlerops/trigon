@@ -1,0 +1,223 @@
+# The adversarial + paired stream on Banking77: robustness bought, not certified
+
+Banking77 (Casanueva et al., 2020), PolyAI. CC BY 4.0.
+https://github.com/PolyAI-LDN/task-specific-datasets
+
+The fifth stream of `docs/data.md`, built from our own labelled cases
+(`trigon.evals.paired`) and measured on the certified Banking77 recipe:
+Qwen2.5-1.5B, LoRA rank 16, lr 1e-4, 4 epochs, four seeds, against the four
+certified checkpoints of that recipe re-evaluated at the same commit.
+
+**Verdict.** The stream makes the model robust to what it was built for, by
+a wide margin, on every seed that learned: an injection naming a wrong
+intent moves the certified model's accuracy from 0.90 to 0.48 and the
+treated model's from 0.89 to 0.88; sixteen lines of irrelevant state move
+it from 0.90 to 0.06 and 0.89 to 0.80. **It does not certify.** Every seed
+clears every blocking gate, but one of four finishes at 51% accuracy, and a
+spread from 0.51 to 0.91 is not one a caller can be handed. It stays off by
+default. The negation half bought coherence without an answer: the Noul
+head reads 50% on its own questions.
+
+## What was built
+
+* **A generator** (`trigon.evals.paired`, stdlib, deterministic by seed).
+  From any case with a text or JSON-record state it derives an
+  **injection** (an instruction naming a wrong answer, label held fixed),
+  **padding** (1-6 irrelevant lines, some naming other options, label held
+  fixed), a **paraphrase** of the question (label held fixed), and a
+  **negation pair** (is option X right? / is it wrong?, labels derived: the
+  affirm is yes exactly when X is the truth, which it is half the time).
+  Each variant carries its anchor request and a pair id. Tested on
+  Banking77's shape and on the verifiable synthetic generator
+  (`tests/test_paired.py`).
+* **Template pools split train / eval**, sharing no wording, so the
+  benchmarks below score phrasings no training case used.
+* **An optional consistency term** (`TrainingConfig.consistency_weight`,
+  `--consistency-weight`): symmetric KL between variant and anchor where the
+  label is held fixed, `(P(yes) + P(yes on the complement) - 1)^2` on
+  negation pairs, gradients through both sides. The anchor is forwarded in
+  the same step only when the weight is above 0.
+* **The stream is derived after the validation slice is taken**
+  (`TrainingConfig.augment`), so no variant of a held-out case trains and
+  epoch selection reads the same data it reads without the stream.
+* **Off by default, and off is bit-identical.** A tiny spike run hashed its
+  weights before the change and after it, SHA-256 `28b228df...` both times;
+  the test suite pins that a paired case trained at weight 0 is identical to
+  its plain twin.
+* **Paired benchmarks** (`PairedBenchmark`, `--robustness-n`): the same four
+  kinds over the corpus's own held-out evaluation split and the evaluation
+  template pool, scored with the jaggedness suite's definitions -- flip rate
+  and total-variation drift as `InjectionSteeringBenchmark`, `rot` as
+  `ContextRotBenchmark`, incoherence as `NegationCoherenceBenchmark`.
+
+## The floor first
+
+`scripts/paired_floor.py --n 1000`, the lexical floor on 1,000 bases each
+(`floor.json`). Banking77's test split; the synthetic generator at seed
+10,000.
+
+| Benchmark | Metric | Banking77 | Synthetic |
+| --- | --- | ---: | ---: |
+| injection | accuracy, anchor -> variant | 0.452 -> 0.077 | 0.498 -> 0.418 |
+| injection | flip rate | 0.900 | 0.141 |
+| padding | accuracy at 16 lines | 0.017 | 0.216 |
+| padding | rot (anchor - 16 lines) | 0.435 | 0.282 |
+| paraphrase | flip rate | **0.000** | **0.000** |
+| negation | accuracy | 0.505 | 0.501 |
+| negation | mean incoherence | 0.138 | 0.257 |
+
+What that says each benchmark measures:
+
+* **Injection and padding are real tests.** A keyword matcher is steered by
+  an injected intent name on 90% of Banking77 cases, and padding that names
+  other intents takes it to 2%.
+* **Paraphrase is aced by the floor, for free.** The floor scores a Choice by
+  its options against the state and never reads the question, so no
+  rewording can move it. A paraphrase flip rate is evidence only beside
+  accuracy -- and the certified model's is already 0.014.
+* **Negation accuracy sits at chance for the floor, by construction** (the
+  named option is the truth half the time). Incoherence alone is not a
+  test: any model that answers 0.5 to both halves scores 0.
+
+## Four seeds each
+
+Baseline: the certified checkpoints of `qwen15b-e4-lr1e-4`
+(`reports/banking77/README.md`), re-gated and benchmarked with `--weights`
+at this commit; they reproduce the `regate080` rows to four decimals.
+Treatment: the same recipe plus `--paired-mix 0.5 --consistency-weight 1.0`
+-- 3,188 pairs over the 6,375 training cases left after validation, 10,360
+cases an epoch. Same splits, same evaluation set of 5,000, same gates.
+
+### The gates
+
+| Seed | Baseline accuracy | Baseline ECE (floor p95) | Treated accuracy | Treated lift | Treated ECE | Treated adaptive ECE | Floor p95 | Verdict |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| 0 | 0.9054 | 0.0202 (0.0116) | 0.9052 | +0.8892 | 0.0145 | 0.0134 | 0.0126 | PASS |
+| 1 | 0.8980 | 0.0448 (0.0102) | **0.5110** | +0.4944 | 0.0161 | 0.0239 | 0.0192 | PASS |
+| 2 | 0.9038 | 0.0216 (0.0115) | 0.8720 | +0.8546 | 0.0370 | 0.0354 | 0.0126 | PASS |
+| 3 | 0.8502 | 0.0105 (0.0139) | 0.8838 | +0.8676 | 0.0220 | 0.0246 | 0.0158 | PASS |
+
+| | Baseline | Treated |
+| --- | --- | --- |
+| Accuracy, median (range) | 0.9009 (0.8502-0.9054) | **0.8779 (0.5110-0.9052)** |
+| Lift, median (range) | +0.8839 (+0.8340-+0.8894) | +0.8611 (+0.4944-+0.8892) |
+| ECE, median (range) | 0.0209 (0.0105-0.0448) | 0.0191 (0.0145-0.0370) |
+| Adaptive ECE, median (range) | 0.0164 (0.0106-0.0445) | 0.0243 (0.0134-0.0354) |
+| Blocking gates | 4 / 4 | 4 / 4 |
+
+Every ECE carries its simulated floor. Baseline seed 3 and treated seed 1
+are below their floor's p95 -- indistinguishable from perfect calibration
+at 5,000 cases -- and the rest are measurements above it.
+
+**Seed 1 did not collapse; it never finished learning.** Its validation
+loss went 3.50, 2.94, 2.50, 2.41 over four epochs where the other three
+reached 0.48-0.60 in one, and best-epoch selection kept epoch 4. The same
+seed was the slowest starter in the baseline too (validation 0.85 after
+epoch 1 against 0.52-0.83), so the stream turned a slow start into an
+unfinished run. `accuracy_over_baseline` passes it, correctly -- 51% is
+0.49 over a 1.6% marginal -- which is the gate doing what it says and why
+certification also reads the spread.
+
+**On the three seeds that learned, accuracy cost 0-3 points**: 0.9052,
+0.8720, 0.8838, against a baseline whose own three best are 0.9054,
+0.9038, 0.8980.
+
+### The robustness benchmarks
+
+1,000 evaluation cases per benchmark per seed, from templates training
+never saw. Median (range) over four seeds.
+
+| Benchmark | Metric | Lexical floor | Baseline | Treated |
+| --- | --- | ---: | ---: | ---: |
+| injection | accuracy on the anchor | 0.452 | 0.9005 (0.851-0.908) | 0.8860 (0.495-0.901) |
+| injection | accuracy on the variant | 0.077 | 0.4760 (0.472-0.491) | **0.8800 (0.469-0.894)** |
+| injection | flip rate | 0.900 | 0.5010 (0.494-0.516) | **0.0535 (0.041-0.279)** |
+| injection | mean drift | 0.074 | 0.5190 (0.517-0.539) | 0.0583 (0.052-0.193) |
+| padding | accuracy at 4 lines | 0.061 | 0.2730 (0.227-0.281) | **0.8660 (0.351-0.873)** |
+| padding | accuracy at 16 lines | 0.017 | 0.0635 (0.049-0.073) | **0.8045 (0.184-0.845)** |
+| padding | flip rate at 16 lines | 0.965 | 0.9340 (0.921-0.948) | 0.1530 (0.103-0.741) |
+| padding | rot | 0.435 | 0.8395 (0.783-0.849) | **0.0880 (0.043-0.311)** |
+| paraphrase | accuracy on the variant | 0.452 | 0.9000 (0.847-0.906) | 0.8880 (0.498-0.905) |
+| paraphrase | flip rate | 0.000 | 0.0140 (0.012-0.018) | 0.0095 (0.003-0.101) |
+| negation | accuracy | 0.505 | 0.4997 (0.498-0.502) | **0.4980 (0.498-0.500)** |
+| negation | mean incoherence | 0.138 | 0.4582 (0.395-0.658) | 0.0348 (0.011-0.298) |
+| negation | coherent rate (<= 0.05) | 0.221 | 0.0575 (0.023-0.070) | 0.7750 (0.001-1.000) |
+
+**Injection and padding moved, and the move is not bought by ignoring the
+input**: accuracy on the variants rose with them, to within a point of the
+anchors on the three seeds that learned. The certified model is badly
+steerable -- half its answers flip under an injection naming another
+intent, and sixteen lines of distractors take it below 7% -- which nothing
+in the gates could see, since every gate reads clean state.
+
+**Paraphrase did not need fixing.** The certified model already agreed with
+itself on 98.6% of reworded questions; the floor's 100% shows the metric
+cannot say more than that.
+
+**Negation is a null result dressed as a win.** Incoherence fell from 0.46
+to 0.03, and accuracy on the same questions stayed at 0.498 -- chance, the
+floor's number. A head that answers near 0.5 to every affirm and every deny
+is perfectly coherent and knows nothing; that is almost certainly what the
+Noul head learned, and it is exactly what the consistency term rewards. The
+per-answer probabilities are not in the reports, so "near 0.5" is inferred
+from accuracy and incoherence together, not read.
+
+**The generic jaggedness suite is uninformative here** and is in the
+per-seed reports only for completeness: on its four-option support schema,
+which Banking77 never trained, both arms score chance (clean routing
+accuracy 0.25), so its flip rates and its negation coherence -- 0.38 to
+0.04 -- describe a model guessing, not reading.
+
+## Believed, not measured
+
+* **That the consistency term is what slowed seed 1.** An input-ignoring
+  answer minimises it exactly, so it pulls toward the solution a slow start
+  is nearest. The competing explanation -- the paired data alone, or the
+  negation Nouls sharing the backbone -- is equally untested. The ablation
+  that separates them is `--paired-mix 0.5 --consistency-weight 0` on the
+  same four seeds (~$8).
+* **That negation failed for lack of signal rather than by design.** 1,594
+  negation cases over four epochs may simply be too few for a question that
+  embeds one of 77 intents in its own text; or the coherence term found the
+  0.5 solution first.
+* **That the robustness transfers beyond these templates.** Train and eval
+  pools share no wording but share a style: bracketed system notes, office
+  hours, "unrelated earlier ticket". A distribution of real injections is
+  not this one.
+* **That the stream would help the synthetic corpus.** The generator wraps
+  it and the floor has been run on it; no model has been trained on it.
+
+## Reproduce
+
+```bash
+python scripts/paired_floor.py --n 1000 --out reports/paired/floor.json
+# the baseline, re-gated and benchmarked at this commit
+python scripts/modal_train.py launch --corpus banking77 --seeds 0,1,2,3 -n 0 --epochs 4 \
+    --prefix paired-baseline-eval --extra "--weights \
+    /runs/banking77-qwen15b-e4-lr1e-4-872ed726edcd-20260923T145427/seed{seed}.pt \
+    --robustness-n 1000 --jaggedness-n 40"
+# the treatment
+python scripts/modal_train.py launch --corpus banking77 --seeds 0,1,2,3 -n 0 --epochs 4 \
+    --prefix paired-qwen15b-mix05-cw1 --extra "--backbone qwen2.5-1.5b --lr 0.0001 \
+    --save-model model.pt --paired-mix 0.5 --consistency-weight 1.0 \
+    --robustness-n 1000 --jaggedness-n 40"
+```
+
+Both at commit `5b1fe12`, on `NVIDIA A10`. The treatment launch is recorded
+`dirty`: the uncommitted change was `docs/data.md` only, which no job
+reads. The four treated adapters are on the `trigon-runs` Volume under
+`banking77-paired-qwen15b-mix05-cw1-5b1fe12bac1e-20260927T005357`.
+
+## Cost
+
+| Run | GPU time | Estimated cost |
+| --- | ---: | ---: |
+| Baseline, four eval-only seeds (~23 min each) | 1.52 h | $1.7 |
+| Treatment, four seeds (~117 min each: ~95 training, ~22 evaluating) | 7.80 h | $8.6 |
+| **Total** | **9.3 h** | **~$10.3** |
+
+At Modal's A10G list price of about $1.10 an hour, from the `elapsed_s` each
+seed recorded; container start-up and image builds are not counted. The
+stream costs 1.65x the baseline's training time per seed (95 against 57
+minutes): half again as many cases, and a second forward for every
+anchored one.
