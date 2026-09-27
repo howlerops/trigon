@@ -1,0 +1,292 @@
+{
+  "corpus": "teacher-workflows",
+  "is_calibration": false,
+  "teacher": "Qwen/Qwen2.5-7B-Instruct@a09a35458c702b33eeacc393d103063234e8bc28",
+  "n_train": 3860,
+  "seed": 3,
+  "model": "qwen2.5-1.5b, LoRA rank 16",
+  "student": {
+    "label": "agreement with the teacher (Qwen2.5-7B-Instruct) -- NOT calibration",
+    "is_calibration": false,
+    "n_cases": 1698,
+    "n_questions": 5714,
+    "argmax_agreement": 0.5299264963248163,
+    "baseline_agreement": 0.5269513475673784,
+    "mean_kl_teacher_to_model": 0.9108826704932668,
+    "baseline_kl": 0.9204382737653095,
+    "ece_vs_teacher_draw": 0.019024558816422423,
+    "adaptive_ece_vs_teacher_draw": 0.01952735252196237,
+    "ece_quotable": true,
+    "floor": {
+      "mean": 0.014682476893293345,
+      "p95": 0.02088394222167398,
+      "trials": 200
+    },
+    "model_mean_confidence": 0.5100753568846772,
+    "teacher_mean_confidence": 0.936192573863201,
+    "per_primitive": {
+      "score": {
+        "n": 1460,
+        "agreement": 0.43356164383561646,
+        "baseline": 0.4191780821917808,
+        "kl": 1.0092898038512674
+      },
+      "choice": {
+        "n": 2327,
+        "agreement": 0.47743876235496346,
+        "baseline": 0.4791577137945853,
+        "kl": 1.1529251618716139
+      },
+      "noul": {
+        "n": 1927,
+        "agreement": 0.666320705760249,
+        "baseline": 0.666320705760249,
+        "kl": 0.5440392391803017
+      }
+    },
+    "per_domain": {
+      "contract_review": {
+        "n": 321,
+        "agreement": 0.5887850467289719,
+        "baseline": 0.5919003115264797
+      },
+      "payments_risk": {
+        "n": 262,
+        "agreement": 0.5114503816793893,
+        "baseline": 0.5190839694656488
+      },
+      "access_requests": {
+        "n": 238,
+        "agreement": 0.5588235294117647,
+        "baseline": 0.5378151260504201
+      },
+      "education": {
+        "n": 311,
+        "agreement": 0.5401929260450161,
+        "baseline": 0.5627009646302251
+      },
+      "code_review": {
+        "n": 290,
+        "agreement": 0.4689655172413793,
+        "baseline": 0.46206896551724136
+      },
+      "ecommerce_returns": {
+        "n": 264,
+        "agreement": 0.4962121212121212,
+        "baseline": 0.4810606060606061
+      },
+      "insurance_claims": {
+        "n": 267,
+        "agreement": 0.550561797752809,
+        "baseline": 0.5393258426966292
+      },
+      "logistics": {
+        "n": 364,
+        "agreement": 0.5467032967032966,
+        "baseline": 0.5576923076923077
+      },
+      "real_estate": {
+        "n": 295,
+        "agreement": 0.5559322033898305,
+        "baseline": 0.5457627118644067
+      },
+      "content_moderation": {
+        "n": 248,
+        "agreement": 0.5524193548387096,
+        "baseline": 0.5201612903225806
+      },
+      "accounts_payable": {
+        "n": 266,
+        "agreement": 0.4924812030075188,
+        "baseline": 0.5112781954887218
+      },
+      "travel_bookings": {
+        "n": 307,
+        "agreement": 0.5700325732899023,
+        "baseline": 0.5830618892508144
+      },
+      "sales_leads": {
+        "n": 326,
+        "agreement": 0.5306748466257669,
+        "baseline": 0.5368098159509203
+      },
+      "recruiting": {
+        "n": 272,
+        "agreement": 0.5183823529411765,
+        "baseline": 0.5110294117647058
+      },
+      "support_triage": {
+        "n": 255,
+        "agreement": 0.48627450980392156,
+        "baseline": 0.4627450980392157
+      },
+      "public_services": {
+        "n": 230,
+        "agreement": 0.5434782608695652,
+        "baseline": 0.5
+      },
+      "ad_compliance": {
+        "n": 338,
+        "agreement": 0.5769230769230769,
+        "baseline": 0.5591715976331361
+      },
+      "clinical_intake": {
+        "n": 312,
+        "agreement": 0.49038461538461536,
+        "baseline": 0.5096153846153846
+      },
+      "product_reviews": {
+        "n": 227,
+        "agreement": 0.44052863436123346,
+        "baseline": 0.43612334801762115
+      },
+      "it_incidents": {
+        "n": 321,
+        "agreement": 0.5389408099688473,
+        "baseline": 0.5451713395638629
+      }
+    }
+  },
+  "lexical_floor": {
+    "label": "agreement with the teacher (Qwen2.5-7B-Instruct) -- NOT calibration",
+    "is_calibration": false,
+    "n_cases": 1698,
+    "n_questions": 5714,
+    "argmax_agreement": 0.4697234861743087,
+    "baseline_agreement": 0.5269513475673784,
+    "mean_kl_teacher_to_model": 1.050513566745837,
+    "baseline_kl": 0.9204382737653095,
+    "ece_vs_teacher_draw": 0.10098030139983108,
+    "adaptive_ece_vs_teacher_draw": 0.09900042464335228,
+    "ece_quotable": true,
+    "floor": {
+      "mean": 0.015383270258214659,
+      "p95": 0.022035406221211213,
+      "trials": 200
+    },
+    "model_mean_confidence": 0.4839541964124767,
+    "teacher_mean_confidence": 0.936192573863201,
+    "per_primitive": {
+      "score": {
+        "n": 1460,
+        "agreement": 0.3287671232876712,
+        "baseline": 0.4191780821917808,
+        "kl": 1.1369394369299866
+      },
+      "choice": {
+        "n": 2327,
+        "agreement": 0.41383755908895575,
+        "baseline": 0.4791577137945853,
+        "kl": 1.2631063372768319
+      },
+      "noul": {
+        "n": 1927,
+        "agreement": 0.6440062272963155,
+        "baseline": 0.666320705760249,
+        "kl": 0.728310584133226
+      }
+    },
+    "per_domain": {
+      "contract_review": {
+        "n": 321,
+        "agreement": 0.5482866043613707,
+        "baseline": 0.5919003115264797
+      },
+      "payments_risk": {
+        "n": 262,
+        "agreement": 0.4122137404580153,
+        "baseline": 0.5190839694656488
+      },
+      "access_requests": {
+        "n": 238,
+        "agreement": 0.5294117647058824,
+        "baseline": 0.5378151260504201
+      },
+      "education": {
+        "n": 311,
+        "agreement": 0.4565916398713826,
+        "baseline": 0.5627009646302251
+      },
+      "code_review": {
+        "n": 290,
+        "agreement": 0.4689655172413793,
+        "baseline": 0.46206896551724136
+      },
+      "ecommerce_returns": {
+        "n": 264,
+        "agreement": 0.5,
+        "baseline": 0.4810606060606061
+      },
+      "insurance_claims": {
+        "n": 267,
+        "agreement": 0.4606741573033708,
+        "baseline": 0.5393258426966292
+      },
+      "logistics": {
+        "n": 364,
+        "agreement": 0.4423076923076923,
+        "baseline": 0.5576923076923077
+      },
+      "real_estate": {
+        "n": 295,
+        "agreement": 0.47796610169491527,
+        "baseline": 0.5457627118644067
+      },
+      "content_moderation": {
+        "n": 248,
+        "agreement": 0.4838709677419355,
+        "baseline": 0.5201612903225806
+      },
+      "accounts_payable": {
+        "n": 266,
+        "agreement": 0.40225563909774437,
+        "baseline": 0.5112781954887218
+      },
+      "travel_bookings": {
+        "n": 307,
+        "agreement": 0.48534201954397393,
+        "baseline": 0.5830618892508144
+      },
+      "sales_leads": {
+        "n": 326,
+        "agreement": 0.5153374233128835,
+        "baseline": 0.5368098159509203
+      },
+      "recruiting": {
+        "n": 272,
+        "agreement": 0.46691176470588236,
+        "baseline": 0.5110294117647058
+      },
+      "support_triage": {
+        "n": 255,
+        "agreement": 0.43529411764705883,
+        "baseline": 0.4627450980392157
+      },
+      "public_services": {
+        "n": 230,
+        "agreement": 0.5521739130434783,
+        "baseline": 0.5
+      },
+      "ad_compliance": {
+        "n": 338,
+        "agreement": 0.47041420118343197,
+        "baseline": 0.5591715976331361
+      },
+      "clinical_intake": {
+        "n": 312,
+        "agreement": 0.46153846153846156,
+        "baseline": 0.5096153846153846
+      },
+      "product_reviews": {
+        "n": 227,
+        "agreement": 0.3920704845814978,
+        "baseline": 0.43612334801762115
+      },
+      "it_incidents": {
+        "n": 321,
+        "agreement": 0.42990654205607476,
+        "baseline": 0.5451713395638629
+      }
+    }
+  }
+}

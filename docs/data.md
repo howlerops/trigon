@@ -273,6 +273,9 @@ evidence.
 
 The first build, `tw0-n6000`, kept 5,558 of 6,000 planned cases (18,740
 questions) for **$0.62 per 1,000 labelled cases** on Modal A10Gs, $3.47 in
-all. Whether a 7B teacher's labels are good enough to buy coverage is not yet
-measured, and it is the open question.
+all. A Qwen2.5-1.5B student trained on its 3,860 training cases, four seeds,
+reached median argmax agreement 0.530 with the teacher on held-out cases,
+against 0.527 for a predictor that ignores the state. It learned the
+teacher's position prior and little else. So whether a 7B teacher's labels
+buy coverage is still not measured, and it is the open question.
 `reports/teacher/README.md` has the build, the cost and the first student.
