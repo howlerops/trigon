@@ -226,6 +226,7 @@ twenty-two runs** — the investigation is closed and the evidence is in
 | Vectorized attention mask | 208 ms → 8.2 ms per request; the whole pass 399 ms → 82.8 ms |
 | Padding waste in a training chunk, HelpSteer2 | 2.82× at chunk 8 in random order; 1.04× length-sorted |
 | Length bucketing, end to end | **1.63×** — 2.7× on the attention term, diluted by everything linear |
+| The reference configuration across hardware | 16 of 17 seed-runs certify: 4/4 locally, 12/12 on GitHub. GitHub's runners are heterogeneous: identical code gave bit-identical sweeps on two commits and different ones on a third |
 | GPU on this machine | **Checked, absent.** `nvidia-smi` missing, `torch.cuda.is_available()` False |
 | GPU through Modal | **Works.** Asked for an A10G, got a device reporting `NVIDIA A10`; 30.9 cases/s against ~1.1 on this VM's CPU |
 | Qwen2.5 tokenizer, Python port against Rust | **Exact**: 0 of 34,520 texts differ over 10.3M tokens. Speed a wash against the forward pass: Rust 1.8× in bulk, Python 2× per warm call, 2.4× slower on unseen text |
@@ -277,6 +278,7 @@ The most useful section. Each of these was argued for before it was measured.
 | Latency and throughput depend on a model's shape, not its weights, so a random encoder at 1.5B's shape stands in for the real one (`burn_in.py`) | The certified adapter is **1.45× slower** than its stand-in at batch 1 (102.9 against 71.2 ms): GQA, SwiGLU, a bf16 backbone and LoRA are different kernels from `nn.TransformerEncoderLayer`. The shape rows now sit beside a row of the real model |
 | Integrated gradients would rescue unsupervised attribution where gradient × input could not | On Qwen2.5-1.5B it improves on gradient × input on seven of eight checkpoints and still misses *every word* on token F1 on all eight (0.193–0.385 against 0.434–0.437). It is also far from complete under bf16 (median error 78–895%). The unsupervised default is now `none` (`reports/hatexplain/README.md`) |
 | Sortish batching would cut training time by ~2.82× on HelpSteer2 | **1.13×** (1.09–1.18×, four seeds each arm). 2.82× was the padded *attention work*, and on the spike attention is a small share of a step. Outcomes unchanged (`reports/helpsteer2/README.md`, A.5) |
+| The reference configuration fails on GitHub's hardware, so "certified on four seeds" meant four seeds on one machine | One draw said so: accuracy 0.530, ECE 0.1076. Three four-seed sweeps there say otherwise: **12 of 12 certify**, ECE 0.0128–0.0387, lift +0.0707 to +0.2200, on at least two kinds of runner. The failed draw is unexplained and was one seed-run in seventeen (`reports/hardware/README.md`) |
 | Fitting temperature on the training split is the discipline | It is the bug. Raised ECE on half the seeds. |
 | A Score temperature of 0.20 is a degenerate fit | Constructed test: sharpening is correct for an underconfident head. |
 | Burden of proof belongs on *declining* a calibrator | Seven constructed heads say the opposite, on six of them. |
@@ -569,12 +571,10 @@ what order, and how each step is known to be done.
   because this container outlived it. **Reopened by the first real reclamation**: the next sweep lost all
   four seeds to it (see *disproved*). Closes again when a spawned run is
   collected after the launching container has gone.
-- **CI has stopped executing.** Runs 26 and 27 failed with every job ending in
-  three to five seconds, no steps recorded and logs 404 — the runner never
-  reached checkout. Run 12 was green on substantially this workflow, and run
-  26 predates the only workflow change since. Metered Actions minutes on a
-  private organization repository is the likeliest explanation and cannot be
-  confirmed without billing access. A.4 is blocked on it.
+- ~~CI has stopped executing.~~ **Closed.** Runs 26 and 27 died before
+  checkout while the repository was private and organization-owned. It has run
+  normally since the repository was made public, which is consistent with
+  metered minutes and was never confirmed from billing.
 - **Two of five data streams unbuilt.** Six corpora load. The
   annotator-distribution stream has four now — HelpSteer2's `disagreements/`
   split (trained and certified), GoEmotions and measuring_hate_speech
@@ -585,16 +585,9 @@ what order, and how each step is known to be done.
 - ~~GoEmotions, measuring_hate_speech and Circa are Parquet-only.~~ **Closed.**
   Only measuring_hate_speech is; it is converted once by
   `scripts/convert_corpus.py`, and the loader stays stdlib.
-- **"Certified on four seeds" means four seeds on one machine.** The
-  configuration failed its gates on GitHub's hardware: choice accuracy 0.530
-  against 0.648–0.849 across the certified four, and choice ECE 0.1076 against
-  0.0064–0.0240. The mechanism is the one `scripts/seed_sweep.py` already
-  documents — "a perturbation far smaller than a seed change, the summation
-  order of a batched matmul, is enough to move a given seed from one outcome
-  to the other" — and the prefix-cache finding above shows that hardware *is*
-  such a perturbation. Hardware is a second axis of the seed problem and it
-  was never swept. The CI job publishes rather than blocks, because a single
-  draw on unswept hardware is not evidence either way; sweeping four seeds
-  there is `docs/next.md` A.4.
+- ~~"Certified on four seeds" means four seeds on one machine.~~ **Closed,
+  2026-09-27.** Swept on GitHub's hardware: 12 of 12 seed-runs certify, and
+  the reference-run job blocks on `--require all` again
+  (`reports/hardware/README.md`). See *disproved*.
 - ~~CC BY-SA on a derived model.~~ **Closed by the owner, 2026-09-25 (Q17):**
   evaluation only, never training, enforced in `trigon.evals.corpora`.
