@@ -10,7 +10,7 @@ targets.
 | --- | --- | --- | --- |
 | Public labelled corpora | classification, NLI, sentiment, ordinal rating, span selection, reformatted into the three primitives | ground truth | outcome calibration |
 | Annotator distributions | subjective judgements with many human labels per item | label distributions | calibration where no outcome exists |
-| Synthetic workflows | LLM-generated (state, schema) pairs across ~20 domains | teacher soft labels | coverage |
+| Synthetic workflows | LLM-generated (state, schema) pairs across 20 domains — **built**: `teacher-workflows` | teacher soft labels (Qwen2.5-7B-Instruct, full distribution) | coverage — **never calibration** |
 | Verifiable synthetic | generated structured state with code-checkable predicates | computed ground truth | cheap outcome data at scale |
 | Adversarial + paired | injections, distractor padding, negation pairs, paraphrases | held fixed / derived | robustness and consistency losses |
 
@@ -115,6 +115,7 @@ the drift tests, neither of which has a GPU stack — a Parquet reader here puts
 | GoEmotions | raw per-rater CSV on the authors' bucket | ✅ built — seven Nouls, one row per rater grouped per comment |
 | measuring_hate_speech | Parquet only | ✅ built — `scripts/convert_corpus.py` writes gzipped JSONL once |
 | Circa | TSV in its repository | ✅ built — **evaluation only**, CC BY-SA |
+| teacher-workflows | gzipped JSONL on the `trigon-teacher` Modal Volume, pinned by SHA-256 | ✅ built — generated, not fetched; `scripts/modal_teacher.py fetch` |
 
 **The three were not all Parquet-only.** The Hugging Face mirrors are, which
 is what the rows above used to say. GoEmotions' authors publish the raw

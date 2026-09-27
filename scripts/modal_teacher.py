@@ -408,15 +408,25 @@ def launch(args) -> None:
     with modal.enable_output():
         app.deploy(name=deployed)
     shard = modal.Function.from_name(deployed, "build_shard").with_options(gpu=args.gpu)
-    size = -(-args.n // args.shards)
+    # Every call is one GPU, and the workspace's cap is shared: --verifiable
+    # with shards is shards + 1 GPUs, so it can also be launched alone with
+    # --n 0 once the shards finish.
+    size = max(1, -(-args.n // max(args.shards, 1)))
     calls = {}
+    only = {int(x) for x in args.only.split(",") if x.strip()}
     for start in range(0, args.n, size):
+        if only and start not in only:
+            continue
         calls[f"shard-{start:06d}"] = shard.spawn(
             build, args.seed, start, min(size, args.n - start), run
         ).object_id
     if args.verifiable:
         verify = modal.Function.from_name(deployed, "label_verifiable").with_options(gpu=args.gpu)
         calls["verifiable"] = verify.spawn(build, args.verifiable, run).object_id
+    try:  # a later launch into the same build adds its calls to the record
+        calls = {**json.loads(_read(f"{build}/calls.json")), **calls}
+    except Exception:  # noqa: BLE001 - no record yet
+        pass
     with data.batch_upload(force=True) as batch:
         batch.put_file(io.BytesIO(json.dumps(calls).encode()), f"{build}/calls.json")
     print(f"build {build}: {len(calls)} calls on {args.gpu}, app {deployed}")
@@ -544,7 +554,14 @@ def main(argv: list[str] | None = None) -> int:
     go = sub.add_parser("launch")
     go.add_argument("--n", type=int, default=6000)
     go.add_argument("--seed", type=int, default=0)
-    go.add_argument("--shards", type=int, default=4, help="GPUs at once; the cap is shared")
+    go.add_argument(
+        "--shards", type=int, default=4, help="how the build is cut; one GPU per shard launched"
+    )
+    go.add_argument(
+        "--only",
+        default="",
+        help="launch only these shard starts (e.g. 3000,4500), to stay under a GPU cap",
+    )
     go.add_argument("--gpu", default="A10G")
     go.add_argument("--build", default="")
     go.add_argument(
