@@ -1131,7 +1131,7 @@ _LOADERS[HATEXPLAIN.name] = _load_hatexplain
 #: The build the published numbers were measured on: a directory on the
 #: `trigon-teacher` volume, and the SHA-256 of its merged file.
 TEACHER_BUILD = "tw0-n6000"
-TEACHER_BUILD_SHA256 = ""
+TEACHER_BUILD_SHA256 = "3a7032e19866d7b25ad647bf1df04bf3c721a3678317ffe8b782f8050beec5f7"
 
 TEACHER_WORKFLOWS = CorpusSpec(
     name="teacher-workflows",
