@@ -18,6 +18,16 @@ spread from 0.51 to 0.91 is not one a caller can be handed. It stays off by
 default. The negation half bought coherence without an answer: the Noul
 head reads 50% on its own questions.
 
+**The ablation (consistency weight 0) moves the failure, it does not remove
+it.** Without the term the slow seed learns (0.862 against 0.511), which
+puts the stall on the consistency term, and robustness holds at about the
+same level. But seed 2 then fails `workhorse_ece` at 0.0516, overconfident by
+0.052, so that arm certifies on three seeds of four as well. **Negation is
+now read, not inferred:** on all eight treated checkpoints P(yes) is about
+0.50 whether the named intent is true or false (separation between −0.0012
+and +0.0024). The head never learned the question; the term only made its
+two halves agree.
+
 ## What was built
 
 * **A generator** (`trigon.evals.paired`, stdlib, deterministic by seed).
@@ -168,18 +178,55 @@ which Banking77 never trained, both arms score chance (clean routing
 accuracy 0.25), so its flip rates and its negation coherence -- 0.38 to
 0.04 -- describe a model guessing, not reading.
 
+## The ablation: consistency weight 0
+
+Same recipe, same seeds, same splits; `--paired-mix 0.5
+--consistency-weight 0`, so paired cases train as plain augmented data. At
+commit `3d48197`, which also makes the negation benchmark record P(yes) on
+each half, split by whether the named intent is true. The weight-1
+checkpoints were re-evaluated at that commit (`cw1-reread`) to get the same
+readings; their accuracies reproduce the table above.
+
+| Seed | Weight 1: accuracy | Weight 0: accuracy | Weight 0: ECE | Weight 0: verdict |
+| ---: | ---: | ---: | ---: | --- |
+| 0 | 0.9052 | 0.9058 | 0.0195 | PASS |
+| 1 | **0.5110** | **0.8618** | 0.0170 | PASS |
+| 2 | 0.8720 | 0.9074 | **0.0516** | **FAIL** `workhorse_ece`, adaptive, worst primitive |
+| 3 | 0.8838 | 0.8876 | 0.0400 | PASS |
+
+| Median (range) | Weight 1 | Weight 0 |
+| --- | ---: | ---: |
+| Accuracy | 0.8779 (0.5110–0.9052) | 0.8967 (0.8618–0.9074) |
+| Injection: accuracy on the variant | 0.8800 (0.469–0.894) | 0.8870 (0.819–0.906) |
+| Injection: flip rate | 0.0535 (0.041–0.279) | 0.0655 (0.046–0.102) |
+| Padding: accuracy at 16 lines | 0.8045 (0.184–0.845) | 0.8520 (0.515–0.893) |
+| Negation: separation | −0.0003 (−0.0004–+0.0010) | +0.0010 (−0.0012–+0.0024) |
+| Blocking gates passed | 4 / 4 | 3 / 4 |
+
+**The term is what stalled seed 1.** Removed, the same seed on the same
+split reaches 0.862. One seed is the whole of that evidence, but it is the
+seed the term was suspected of, and the other three barely move.
+
+**Removing it does not certify the stream.** Seed 2 lands 0.0016 over the
+0.05 ECE gate, overconfident, and no calibrator rescued it; seed 1's padding
+accuracy at 16 lines is 0.515, so its robustness is partial too. Four seeds
+passing needs something else: a smaller mix, or a weight between 0 and 1.
+
+**Negation, read directly.** Mean P(yes) on the affirm is 0.489–0.511 and on
+the deny 0.485–0.513, with a standard deviation of 0.006–0.036 across cases,
+and it does not depend on whether the claim is true. That holds at weight 0,
+so the term did not cause it: the Noul head was never trained well enough to
+read a claim that embeds one of 77 intents. Coherence at weight 1 is the
+term making two uninformed answers agree.
+
 ## Believed, not measured
 
-* **That the consistency term is what slowed seed 1.** An input-ignoring
-  answer minimises it exactly, so it pulls toward the solution a slow start
-  is nearest. The competing explanation -- the paired data alone, or the
-  negation Nouls sharing the backbone -- is equally untested. The ablation
-  that separates them is `--paired-mix 0.5 --consistency-weight 0` on the
-  same four seeds (~$8).
-* **That negation failed for lack of signal rather than by design.** 1,594
-  negation cases over four epochs may simply be too few for a question that
-  embeds one of 77 intents in its own text; or the coherence term found the
-  0.5 solution first.
+* ~~That the consistency term is what slowed seed 1.~~ **Measured**: at
+  weight 0 the same seed reaches 0.862 (above).
+* **That negation failed for lack of signal.** 1,594 negation cases over four
+  epochs may be too few for a question that embeds one of 77 intents in its
+  own text. The coherence term is ruled out: weight 0 reads 0.5 too.
+* **That a smaller mix or weight certifies on four seeds.** Untried.
 * **That the robustness transfers beyond these templates.** Train and eval
   pools share no wording but share a style: bracketed system notes, office
   hours, "unrelated earlier ticket". A distribution of real injections is
@@ -201,9 +248,15 @@ python scripts/modal_train.py launch --corpus banking77 --seeds 0,1,2,3 -n 0 --e
     --prefix paired-qwen15b-mix05-cw1 --extra "--backbone qwen2.5-1.5b --lr 0.0001 \
     --save-model model.pt --paired-mix 0.5 --consistency-weight 1.0 \
     --robustness-n 1000 --jaggedness-n 40"
+# the ablation (at 3d48197); the re-read is the --weights form above on the cw1 adapters
+python scripts/modal_train.py launch --corpus banking77 --seeds 0,1,2,3 -n 0 --epochs 4 \
+    --prefix paired-qwen15b-mix05-cw0 --extra "--backbone qwen2.5-1.5b --lr 0.0001 \
+    --save-model model.pt --paired-mix 0.5 --consistency-weight 0 \
+    --robustness-n 1000 --jaggedness-n 40"
 ```
 
-Both at commit `5b1fe12`, on `NVIDIA A10`. The treatment launch is recorded
+The first two at commit `5b1fe12`, the ablation and the re-read at `3d48197`,
+all on `NVIDIA A10`. The treatment launch is recorded
 `dirty`: the uncommitted change was `docs/data.md` only, which no job
 reads. The four treated adapters are on the `trigon-runs` Volume under
 `banking77-paired-qwen15b-mix05-cw1-5b1fe12bac1e-20260927T005357`.
@@ -214,7 +267,9 @@ reads. The four treated adapters are on the `trigon-runs` Volume under
 | --- | ---: | ---: |
 | Baseline, four eval-only seeds (~23 min each) | 1.52 h | $1.7 |
 | Treatment, four seeds (~117 min each: ~95 training, ~22 evaluating) | 7.80 h | $8.6 |
-| **Total** | **9.3 h** | **~$10.3** |
+| Ablation, four seeds at weight 0 (~93 min each) | 6.2 h | $6.8 |
+| Weight-1 checkpoints re-read (~22 min each) | 1.5 h | $1.6 |
+| **Total** | **17.0 h** | **~$18.7** |
 
 At Modal's A10G list price of about $1.10 an hour, from the `elapsed_s` each
 seed recorded; container start-up and image builds are not counted. The

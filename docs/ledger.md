@@ -303,7 +303,7 @@ The most useful section. Each of these was argued for before it was measured.
 | Integrated gradients would rescue unsupervised attribution where gradient × input could not | On Qwen2.5-1.5B it improves on gradient × input on seven of eight checkpoints and still misses *every word* on token F1 on all eight (0.193–0.385 against 0.434–0.437). It is also far from complete under bf16 (median error 78–895%). The unsupervised default is now `none` (`reports/hatexplain/README.md`) |
 | Sortish batching would cut training time by ~2.82× on HelpSteer2 | **1.13×** (1.09–1.18×, four seeds each arm). 2.82× was the padded *attention work*, and on the spike attention is a small share of a step. Outcomes unchanged (`reports/helpsteer2/README.md`, A.5) |
 | The reference configuration fails on GitHub's hardware, so "certified on four seeds" meant four seeds on one machine | One draw said so: accuracy 0.530, ECE 0.1076. Four four-seed sweeps there say otherwise: **16 of 16 certify**, ECE 0.0128–0.0395, lift +0.0707 to +0.2200, on at least three kinds of runner. The failed draw is unexplained and was one seed-run in twenty-one (`reports/hardware/README.md`) |
-| Negation pairs plus a coherence term teach a Noul to answer a question and its complement | Incoherence falls from 0.46 to 0.035 and accuracy on the pairs stays at chance, 0.498 against 0.498. Coherence was bought without correctness; the likeliest reading is 0.5 on both halves, which the reports do not yet store the probabilities to confirm (`reports/paired/README.md`) |
+| Negation pairs plus a coherence term teach a Noul to answer a question and its complement | Incoherence falls from 0.46 to 0.035 and accuracy on the pairs stays at chance, 0.498 against 0.498. **Read directly** on all eight treated checkpoints: P(yes) is about 0.50 whether the named intent is true or false (separation −0.0012 to +0.0024), with or without the coherence term. The head never learned the question; the term only made two uninformed answers agree (`reports/paired/README.md`) |
 | Fitting temperature on the training split is the discipline | It is the bug. Raised ECE on half the seeds. |
 | A Score temperature of 0.20 is a degenerate fit | Constructed test: sharpening is correct for an underconfident head. |
 | Burden of proof belongs on *declining* a calibrator | Seven constructed heads say the opposite, on six of them. |
@@ -614,6 +614,21 @@ what order, and how each step is known to be done.
   certified on three of them; the paired stream and the teacher stream are
   built and measured, and neither is yet a result a release could stand on
   (below).
+- **The teacher stream teaches only a prior.** A 1.5B student trained on
+  3,860 teacher-labelled cases learns the teacher's position prior on Score
+  and nothing measurable on Choice or Noul. Candidates, none measured: every
+  case brings a new schema; the labels are noisy (about 3 of 64 fixture
+  answers look wrong at high confidence); the teacher has a position bias.
+  Whether training on it moves Banking77 or the synthetic suite is unrun.
+- **The paired stream does not certify, at either consistency weight.** At
+  weight 1 one Banking77 seed of four stalls at 0.511; **measured**: the
+  term is the cause, since at weight 0 the same seed reaches 0.862. At
+  weight 0 a different seed fails `workhorse_ece` at 0.0516, overconfident,
+  so that arm passes three of four as well. Robustness holds at both
+  (injection accuracy 0.880 and 0.887, padding at 16 lines 0.805 and 0.852,
+  medians). A smaller mix or an intermediate weight is untried. Until one
+  certifies, the stream stays off by default and the served model stays
+  steerable.
 - **The teacher stream teaches only a prior.** A 1.5B student trained on
   3,860 teacher-labelled cases learns the teacher's position prior on Score
   and nothing measurable on Choice or Noul. Candidates, none measured: every
