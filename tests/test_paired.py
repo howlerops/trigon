@@ -341,6 +341,10 @@ def test_benchmarks_pair_every_variant_with_its_anchor(engine):
     assert by_name["jaggedness/paired_injection"]["flip_rate"] > 0.0
     assert "rot" in by_name["jaggedness/paired_padding"]
     assert 0.0 <= by_name["jaggedness/paired_negation"]["mean_incoherence"] <= 1.0
+    negation = by_name["jaggedness/paired_negation"]
+    for key in ("mean_p_yes_affirm", "mean_p_yes_deny", "stdev_p_yes_affirm", "separation"):
+        assert key in negation
+    assert 0.0 <= negation["mean_p_yes_affirm"] <= 1.0
     anchors = {v for k, v in by_name["jaggedness/paired_padding"].items() if "anchor" in k}
     assert anchors == {by_name["jaggedness/paired_injection"]["accuracy_anchor"]}
 
