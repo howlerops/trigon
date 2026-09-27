@@ -238,6 +238,7 @@ twenty-two runs** — the investigation is closed and the evidence is in
 | Length bucketing, end to end | **1.63×** — 2.7× on the attention term, diluted by everything linear |
 | The reference configuration across hardware | 20 of 21 seed-runs certify: 4/4 locally, 16/16 on GitHub, the last sweep gated with `--require all`. GitHub's runners are heterogeneous: identical code gave bit-identical sweeps on two commits and different ones on a third |
 | Robustness of the certified Banking77 model, and what the paired stream buys | An injected wrong answer flips it half the time (accuracy on the variant 0.476), and 16 lines of padding take it to 0.064 -- no gate saw either, because every gate reads clean state. Trained with the paired stream: 0.880 and 0.805, flip rate 0.054. It does **not** certify: one seed of four stopped at 0.511 accuracy (`reports/paired/README.md`) |
+| HelpSteer2 aggregated, Qwen2.5-7B against 1.5B, same seeds and splits | Lift +0.0389 median against +0.0268; 7B ahead on every seed by more than twice 1.5B's whole spread. Still 0.011 short of +0.05. $23.73 on A100-80GB, 4.3–4.6 cases/s, 29 GiB peak (`reports/helpsteer2-7b/README.md`) |
 | GPU on this machine | **Checked, absent.** `nvidia-smi` missing, `torch.cuda.is_available()` False |
 | GPU through Modal | **Works.** Asked for an A10G, got a device reporting `NVIDIA A10`; 30.9 cases/s against ~1.1 on this VM's CPU |
 | Qwen2.5 tokenizer, Python port against Rust | **Exact**: 0 of 34,520 texts differ over 10.3M tokens. Speed a wash against the forward pass: Rust 1.8× in bulk, Python 2× per warm call, 2.4× slower on unseen text |
@@ -573,7 +574,13 @@ what order, and how each step is known to be done.
   **Qwen2.5-1.5B answers it partly**: lift +0.024 to +0.029, and Brier 7.9–8.8%
   better than the marginal. On the per-annotator split, `helpfulness` and
   `correctness` move on every seed and `coherence` moves on none. The
-  aggregated labels still fail +0.05. How far anything can reach there is
+  aggregated labels still fail +0.05. **Qwen2.5-7B does not close it
+  either** (2026-09-27, Q32): lift +0.0364 to +0.0400, median +0.0389, ahead
+  of 1.5B on every seed by +0.0095 to +0.0155, Brier 11.1–11.6% better than
+  the marginal, and `helpfulness` and `correctness` above their marginals on
+  all four seeds; `coherence` still does not move. Every ECE gate passes;
+  `accuracy_over_baseline` and `worst_question_over_baseline` fail on all four
+  (`reports/helpsteer2-7b/README.md`). How far anything can reach there is
   bounded only loosely: one half-panel predicts the other at −0.024
   (`reports/helpsteer2/ceiling.md`).
   `reports/helpsteer2/README.md`.
