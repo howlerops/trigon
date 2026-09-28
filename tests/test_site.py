@@ -263,3 +263,22 @@ def test_no_page_names_the_incumbent(site):
         for match in NAMES.finditer(page.read_text())
     ]
     assert not found, "\n".join(found)
+
+
+def test_the_site_builds_without_the_server_extra(tmp_path):
+    """The Pages job installs only the `site` extra, so FastAPI is absent there.
+
+    The first deploy died on `No module named 'fastapi'` while this module's
+    other tests passed, because a developer checkout has the server extra.
+    """
+    import subprocess
+    import sys
+
+    script = (
+        "import sys; sys.modules['fastapi'] = None; "
+        f"sys.path.insert(0, {str(ROOT / 'scripts')!r}); "
+        "import build_site; "
+        f"build_site.build(__import__('pathlib').Path({str(tmp_path / 'out')!r}))"
+    )
+    run = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True)
+    assert run.returncode == 0, run.stderr[-2000:]

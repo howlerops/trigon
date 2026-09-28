@@ -61,7 +61,7 @@ twenty-two runs** — the investigation is closed and the evidence is in
   `/v1/decide` with `DecisionRequest` / `DecisionResponse` and
   `client.decide()`; nothing in the project names the incumbent it is a drop-in
   for. The compat route keeps their path, written once as
-  `trigon.server.compat.COMPAT_PATH`, and `tests/test_no_incumbent_names.py`
+  `trigon.server.compat_path.COMPAT_PATH`, and `tests/test_no_incumbent_names.py`
   and the site test fail the build on their name anywhere else.
 - Generated Python and TypeScript SDKs, both dependency-free, both exercised
   against a live gateway in CI.

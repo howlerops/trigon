@@ -1319,7 +1319,7 @@ def build_api(out: Path) -> str:
     ]
     parts.append('<h2 id="endpoints">Endpoints</h2>')
     subs = [("endpoints", "Endpoints")]
-    from trigon.server.compat import COMPAT_PATH
+    from trigon.server.compat_path import COMPAT_PATH
 
     for route, methods in spec["paths"].items():
         # The compatibility route's path is the incumbent's, and this project

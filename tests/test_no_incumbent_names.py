@@ -7,7 +7,7 @@ after it. Nothing here should read as that product, its company or its model
 
 The one exception is functional. A migration changes a base URL and nothing
 else only if the compatibility route's path is exactly theirs, so that path
-is written once, as `trigon.server.compat.COMPAT_PATH`, and appears in the
+is written once, as `trigon.server.compat_path.COMPAT_PATH`, and appears in the
 generated spec that documents it. Every other tracked file is scanned.
 """
 
@@ -28,7 +28,7 @@ _MODEL = r"\bj" + r"ev\b"
 NAMES = re.compile(f"{_PRODUCT}|{_COMPANY}|{_MODEL}", re.IGNORECASE)
 
 # Where the compatibility route's path may appear, and only as that path.
-PATH_ALLOWED = {"src/trigon/server/compat.py", "spec/openapi.json"}
+PATH_ALLOWED = {"src/trigon/server/compat_path.py", "spec/openapi.json"}
 PATH_FORMS = re.compile(r"/v1/" + "system" + "one")
 
 
