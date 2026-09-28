@@ -38,6 +38,7 @@ that made `worst_question_over_baseline` advisory rather than absent.
 | `sample_size` | ≥ 5,000 | the run is large enough for ECE to mean anything |
 | `gate_is_testable` | floor p95 ≤ ½ × limit | a calibrated model would clear the gate with room |
 | `accuracy_over_baseline` | ≥ +0.05 | the model uses its input at all; advisory on a drawn-annotator corpus, where no predictor can pass it |
+| `accuracy_over_chance` | ≥ 0.25 | the same floor as a share of the distance to perfect, (accuracy − marginal) / (1 − marginal), so +0.05 cannot pass a 77-way question at 13%; blocking on a backbone run, advisory on the spike |
 | `brier_over_marginal` | ≥ +0.02 | the same, on a drawn-annotator corpus: 1 − Brier / the training marginal's Brier |
 | Workhorse ECE (and adaptive ECE) | ≤ 0.05 | the model |
 | Premium ECE | ≤ 0.03 | the model |

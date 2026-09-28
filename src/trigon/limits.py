@@ -236,6 +236,24 @@ MAX_FLOOR_FRACTION_OF_GATE = 0.5
 MIN_ACCURACY_OVER_BASELINE = 0.05
 
 
+# The same floor measured against how far there was to go. `+0.05` is a real
+# distance from chance on a question with a handful of options and almost none
+# on a 77-way one: a teacher-initialised Banking77 seed passed every blocking
+# gate at 13% accuracy, +0.113 over a 1.6% marginal (`reports/teacher/
+# transfer.md`). This reads (accuracy - marginal) / (1 - marginal) -- the share
+# of the gap from the marginal predictor to perfect that the model closed.
+# Decided 2026-09-28 by the owner (Q35); it joins `accuracy_over_baseline`
+# rather than replacing it, so no run passes that failed before.
+#
+# 0.25 against every committed report: no certified backbone run falls below
+# it (Banking77 ~0.88, the backbone synthetic suite ~0.9); the 13% seed reads
+# 0.115 and a 12% resilience smoke run 0.106. The CPU spike cannot be held to
+# it -- its weakest honest CI seeds read 0.116, indistinguishable from that
+# 13% seed -- so like the per-question gates it blocks on a backbone run and
+# is advisory on the spike, flipped by the same switch.
+MIN_ACCURACY_OVER_CHANCE = 0.25
+
+
 # The same floor for a corpus whose outcome is ONE ANNOTATOR drawn per case,
 # where argmax accuracy is the wrong instrument: the label is noisy by design
 # and an oracle that knows the other annotators' ratings of the same response

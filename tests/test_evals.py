@@ -734,3 +734,39 @@ def test_no_injection_gate_without_the_measurement():
     assert "injection_robustness" not in {
         g.name for g in check_gates(result, robustness=padding_only)
     }
+
+
+# -- Q35: lift as a share of the distance to perfect ---------------------------
+
+
+def test_thirteen_percent_on_seventy_seven_classes_no_longer_certifies_a_backbone_run():
+    """The teacher-initialised seed that passed every blocking gate at 13%."""
+    from trigon.limits import MIN_ACCURACY_OVER_CHANCE
+
+    result = replace(_any_result(), accuracy=0.1302, baseline_accuracy=0.0174)
+    gates = {g.name: g for g in check_gates(result, require_per_question=True)}
+    assert gates["accuracy_over_baseline"].passed  # +0.113 clears the absolute floor
+    chance = gates["accuracy_over_chance"]
+    assert not chance.passed and not chance.advisory
+    assert chance.value == pytest.approx((0.1302 - 0.0174) / (1 - 0.0174))
+    assert chance.limit == MIN_ACCURACY_OVER_CHANCE
+
+
+def test_the_chance_gate_passes_the_certified_model_and_is_advisory_on_the_spike():
+    certified = replace(_any_result(), accuracy=0.8859, baseline_accuracy=0.0160)
+    assert {g.name: g for g in check_gates(certified, require_per_question=True)}[
+        "accuracy_over_chance"
+    ].passed
+    # The spike's weakest honest CI seed reads 0.116: reported, not blocking.
+    spike = replace(_any_result(), accuracy=0.4629, baseline_accuracy=0.3922)
+    gate = {g.name: g for g in check_gates(spike)}["accuracy_over_chance"]
+    assert gate.advisory and not gate.passed
+
+
+def test_the_chance_gate_never_passes_what_the_absolute_floor_fails():
+    """It joins `accuracy_over_baseline`; it does not replace it."""
+    weak = replace(_any_result(), accuracy=0.93, baseline_accuracy=0.90)
+    gates = {g.name: g for g in check_gates(weak, require_per_question=True)}
+    assert gates["accuracy_over_chance"].passed  # closes 30% of a small gap
+    assert not gates["accuracy_over_baseline"].passed
+    assert not all(g.passed for g in blocking(check_gates(weak, require_per_question=True)))
