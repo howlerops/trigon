@@ -1,0 +1,62 @@
+[
+  {
+    "seed": 0,
+    "returncode": 0,
+    "elapsed_s": 1120.8,
+    "lives": 1,
+    "corpus": "banking77",
+    "run_id": "banking77-transfer-base-n1000-3b6046d5cc90-20260928T175812",
+    "prefix": "transfer-base-n1000",
+    "commit": "3b6046d5cc90be14379ea017b1a8ffef3c07071f",
+    "dirty": false,
+    "flags": [
+      "-n",
+      "1000",
+      "--epochs",
+      "4",
+      "--calibration-n",
+      "1000",
+      "--log-every",
+      "200",
+      "--max-batch-cells",
+      "50000000",
+      "--backbone",
+      "qwen2.5-1.5b",
+      "--lr",
+      "0.0001"
+    ],
+    "gpu_requested": "A10G",
+    "gpu_actual": "NVIDIA A10",
+    "torch": "2.14.0+cu130"
+  },
+  {
+    "seed": 1,
+    "returncode": 1,
+    "elapsed_s": 1154.1,
+    "lives": 1,
+    "corpus": "banking77",
+    "run_id": "banking77-transfer-base-n1000-3b6046d5cc90-20260928T175812",
+    "prefix": "transfer-base-n1000",
+    "commit": "3b6046d5cc90be14379ea017b1a8ffef3c07071f",
+    "dirty": false,
+    "flags": [
+      "-n",
+      "1000",
+      "--epochs",
+      "4",
+      "--calibration-n",
+      "1000",
+      "--log-every",
+      "200",
+      "--max-batch-cells",
+      "50000000",
+      "--backbone",
+      "qwen2.5-1.5b",
+      "--lr",
+      "0.0001"
+    ],
+    "gpu_requested": "A10G",
+    "gpu_actual": "NVIDIA A10",
+    "torch": "2.14.0+cu130"
+  }
+]

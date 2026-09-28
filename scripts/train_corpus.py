@@ -103,6 +103,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "data the training run held out"
         ),
     )
+    parser.add_argument(
+        "--init-weights",
+        default=None,
+        help=(
+            "continue training from this checkpoint instead of a fresh draw. It must "
+            "have been built the way this run's flags would build it -- same backbone "
+            "and LoRA rank, or same spike shape, and the same tokenizer -- and the "
+            "trained build is named after both its weights and this init"
+        ),
+    )
     parser.add_argument("-n", type=int, default=4000, help="training cases (0 = all)")
     parser.add_argument("--calibration-n", type=int, default=1000)
     parser.add_argument(
@@ -296,6 +306,64 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def _gated_on_injection(args: argparse.Namespace) -> bool:
     return args.corpus in PAIRED_CORPORA and bool(args.backbone or args.weights)
+
+
+def initialise_from(args):
+    """The checkpoint ``--init-weights`` names, refused unless this run could have built it.
+
+    Loading adapters over the wrong backbone, or a spike under another
+    vocabulary, raises nothing when the shapes agree: every id means a
+    different word and training quietly starts from noise that looks like a
+    head start. So the checkpoint's recorded backbone, LoRA rank, shape and
+    tokenizer ``{kind, vocab_size}`` are compared with what the flags ask for.
+
+    The loaded build's name is cleared back to its unstamped base, so training
+    stamps the new weights; ``init_suffix`` then names the init in it.
+    """
+    from trigon.backends.tokenizer import describe
+    from trigon.backends.torch_readout import ReadoutConfig, TorchReadoutBackend
+
+    backend = TorchReadoutBackend.load(args.init_weights)
+    found = getattr(backend, "backbone", None) or (
+        "a custom Qwen2 shape" if hasattr(backend, "backbone") else "spike"
+    )
+    wanted = args.backbone or "spike"
+    if found != wanted:
+        raise SystemExit(
+            f"--init-weights {args.init_weights} has backbone {found}, and this run trains {wanted}"
+        )
+    problems = []
+    if args.backbone:
+        from trigon.backends.hf_bpe import ByteLevelBPE
+
+        if backend.model.lora_rank != args.lora_rank:
+            problems.append(f"LoRA rank {backend.model.lora_rank}, not {args.lora_rank}")
+        expected = describe(ByteLevelBPE.for_backbone(args.backbone))
+    else:
+        fresh = TorchReadoutBackend(
+            config=ReadoutConfig(d_model=args.d_model, n_layers=args.layers), seed=args.seed
+        )
+        expected = describe(fresh.tokenizer)
+        shape = (backend.config.d_model, backend.config.n_layers)
+        if shape != (args.d_model, args.layers):
+            problems.append(
+                f"d_model {shape[0]} x {shape[1]} layers, not {args.d_model} x {args.layers}"
+            )
+    recorded = describe(backend.tokenizer)
+    if {k: recorded.get(k) for k in expected} != expected:
+        problems.append(f"tokenizer {recorded}, and this run's is {expected}")
+    if problems:
+        raise SystemExit(f"--init-weights {args.init_weights} has " + "; ".join(problems))
+    init_version = backend.model_version
+    backend._version = init_version.split("+", 1)[0]
+    backend.model.train()
+    return backend, init_version
+
+
+def init_suffix(init_version: str) -> str:
+    """``.init.<digest>``: the init's fingerprint, as semver build metadata."""
+    digest = init_version.split("+", 1)[1] if "+" in init_version else init_version
+    return ".init." + "".join(c if c.isalnum() or c == "-" else "-" for c in digest)
 
 
 def resolve_device(requested: str) -> tuple[str, str]:
@@ -515,6 +583,7 @@ def header(
                 if args.backbone
                 else f"| Model | reference spike, d_model {args.d_model}, {args.layers} layers |"
             ),
+            *([f"| Initialised from | `{args.init_weights}` |"] if args.init_weights else []),
             "",
             "```",
             f"python scripts/train_corpus.py {spec.name} -n {args.n} "
@@ -525,6 +594,7 @@ def header(
             + (f" --backbone {args.backbone} --lora-rank {args.lora_rank}" if args.backbone else "")
             + (f" --max-batch-cells {args.max_batch_cells}" if args.max_batch_cells else "")
             + (" --hard-labels" if args.hard_labels else "")
+            + (f" --init-weights {args.init_weights}" if args.init_weights else "")
             + (
                 f" --paired-mix {args.paired_mix} --paired-kinds {args.paired_kinds}"
                 f" --consistency-weight {args.consistency_weight}"
@@ -985,8 +1055,15 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 2
+    if args.weights and args.init_weights:
+        raise SystemExit("--weights re-gates without training; --init-weights trains. Pick one")
+    init_version = None
     if args.weights:
         backend = TorchReadoutBackend.load(args.weights)
+    elif args.init_weights:
+        backend, init_version = initialise_from(args)
+        if args.backbone:
+            backend.model.checkpointing = True
     elif args.backbone:
         from trigon.backends.qwen_readout import QwenReadoutBackend
 
@@ -1038,6 +1115,12 @@ def main(argv: list[str] | None = None) -> int:
             ),
             compiler=compiler,
         )
+        if init_version is not None:
+            # Trained from someone else's weights, so named after both: the
+            # fingerprint alone says which weights answered, not what they
+            # started from, and a teacher-initialised model that answers under
+            # a from-scratch name is a comparison nobody can undo.
+            backend._version = backend.stamp_version() + init_suffix(init_version)
     if device.startswith("cuda"):
         # Sizing the GPU for the next run needs this, and nothing else records it.
         peak = torch.cuda.max_memory_allocated() / 2**30

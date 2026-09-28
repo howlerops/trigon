@@ -14,10 +14,10 @@ narrative sections are a discipline, not a test.
 
 | | |
 | --- | ---: |
-| Commits | 256 |
-| Tests | 726 |
-| Python files (`src`, `tests`, `scripts`) | 132 |
-| Lines in `src/` | 16,779 |
+| Commits | 275 |
+| Tests | 740 |
+| Python files (`src`, `tests`, `scripts`) | 135 |
+| Lines in `src/` | 16,859 |
 | Release gates | 10 |
 | Green-tier corpora in the licence audit | 9 |
 | Committed use cases | 3 |
@@ -259,6 +259,7 @@ twenty-two runs** — the investigation is closed and the evidence is in
 | The teacher's own calibration, against computed truth | Qwen2.5-7B-Instruct answers the verifiable stream 75.0% right at 0.918 mean confidence: ECE 0.168 against a floor p95 of 0.011 (n = 5,100). The doc's premise that teachers are overconfident, measured rather than cited (`reports/teacher/README.md`) |
 | Teacher-labelled stream, cost and first student | $0.62 per 1,000 kept cases on A10Gs (5,558 of 6,000 kept). A 1.5B student agrees with the teacher 0.5298 (median of four seeds) against 0.5270 for a predictor that ignores its input: within one standard error. KL falls on every seed, all of it on Score |
 | The paired stream without negation, Banking77, four seeds | **Certifies** under every gate including `injection_robustness`: accuracy 0.8859 (0.8692–0.9196), ECE 0.0200 median, injection drop at most 0.035, padding at 16 lines 0.783 against 0.064. Costs 1.5 points of accuracy against the undefended model. Now the served model |
+| Teacher-stream students as an init for Banking77 | **Worse**: median accuracy 0.0895 against 0.6549 at 1,000 cases (three seeds of four stuck at the ln 77 plateau), and 3 of 4 seeds certify at the full budget against 4 of 4 from the base. $15 (`reports/teacher/transfer.md`) |
 | GPU on this machine | **Checked, absent.** `nvidia-smi` missing, `torch.cuda.is_available()` False |
 | GPU through Modal | **Works.** Asked for an A10G, got a device reporting `NVIDIA A10`; 30.9 cases/s against ~1.1 on this VM's CPU |
 | Qwen2.5 tokenizer, Python port against Rust | **Exact**: 0 of 34,520 texts differ over 10.3M tokens. Speed a wash against the forward pass: Rust 1.8× in bulk, Python 2× per warm call, 2.4× slower on unseen text |
@@ -313,6 +314,7 @@ The most useful section. Each of these was argued for before it was measured.
 | The reference configuration fails on GitHub's hardware, so "certified on four seeds" meant four seeds on one machine | One draw said so: accuracy 0.530, ECE 0.1076. Four four-seed sweeps there say otherwise: **16 of 16 certify**, ECE 0.0128–0.0395, lift +0.0707 to +0.2200, on at least three kinds of runner. The failed draw is unexplained and was one seed-run in twenty-one (`reports/hardware/README.md`) |
 | Negation pairs plus a coherence term teach a Noul to answer a question and its complement | Incoherence falls from 0.46 to 0.035 and accuracy on the pairs stays at chance, 0.498 against 0.498. **Read directly** on all eight treated checkpoints: P(yes) is about 0.50 whether the named intent is true or false (separation −0.0012 to +0.0024), with or without the coherence term. The head never learned the question; the term only made two uninformed answers agree (`reports/paired/README.md`) |
 | The negation Nouls are what cost the paired Choice head its calibration | Dropping them left raw Choice ECE where it was (0.0517 against 0.0519). What certified the run was the calibrator being accepted on every seed, which is a margin, not a mechanism (`reports/paired/README.md`) |
+| Teacher distillation buys coverage that a real corpus can build on (`docs/data.md`) | Used as an init, the teacher-trained students start Banking77 worse than the base model and one seed of four never leaves chance at the full budget. The only gain, one seed at 1,000 cases, fails calibration (`reports/teacher/transfer.md`) |
 | Fitting temperature on the training split is the discipline | It is the bug. Raised ECE on half the seeds. |
 | A Score temperature of 0.20 is a degenerate fit | Constructed test: sharpening is correct for an underconfident head. |
 | Burden of proof belongs on *declining* a calibrator | Seven constructed heads say the opposite, on six of them. |
@@ -623,12 +625,27 @@ what order, and how each step is known to be done.
   certified on three of them; the paired stream and the teacher stream are
   built and measured, and neither is yet a result a release could stand on
   (below).
-- **The teacher stream teaches only a prior.** A 1.5B student trained on
-  3,860 teacher-labelled cases learns the teacher's position prior on Score
-  and nothing measurable on Choice or Noul. Candidates, none measured: every
-  case brings a new schema; the labels are noisy (about 3 of 64 fixture
-  answers look wrong at high confidence); the teacher has a position bias.
-  Whether training on it moves Banking77 or the synthetic suite is unrun.
+- **The teacher stream teaches only a prior, and it does not transfer to
+  Banking77.** A 1.5B student trained on it learns the teacher's position
+  prior on Score and nothing measurable on Choice or Noul. **Measured
+  2026-09-28**: starting the certified Banking77 recipe from those students
+  hurts. At 1,000 cases three teacher-initialised seeds of four are still near
+  chance after four epochs (median 0.0895 against 0.6549 from the base); at
+  the full budget one seed stays at 0.0476 and the configuration does not
+  certify, where the base at the same commit reproduces the certified range
+  (`reports/teacher/transfer.md`). Believed, not measured: the student's
+  trained heads start Banking77 near the uniform solution. Transfer to the
+  synthetic suite, and the stream mixed into training rather than used as an
+  init, are unrun.
+- **`accuracy_over_baseline` is an absolute margin, and on 77 classes it is a
+  low bar.** A teacher-initialised seed at 13% accuracy passed every blocking
+  gate at 1,000 cases: +0.113 over a 1.6% marginal clears +0.05. The gate was
+  sized on questions with a handful of options, where +0.05 is a real
+  distance from chance; on a 77-way question it admits a model that is wrong
+  seven times in eight. Found, not yet decided: a relative margin, or one
+  scaled by the marginal, would change what the gate enforces and is the
+  owner's call.
+
 - ~~The served Banking77 model no longer certifies.~~ **Closed, 2026-09-28:
   replaced.** The gateway on Modal now serves seed 1 of the paired
   configuration without negation, which certifies on four seeds under
