@@ -258,6 +258,7 @@ twenty-two runs** — the investigation is closed and the evidence is in
 | HelpSteer2 aggregated, Qwen2.5-7B against 1.5B, same seeds and splits | Lift +0.0389 median against +0.0268; 7B ahead on every seed by more than twice 1.5B's whole spread. Still 0.011 short of +0.05. $23.73 on A100-80GB, 4.3–4.6 cases/s, 29 GiB peak (`reports/helpsteer2-7b/README.md`) |
 | The teacher's own calibration, against computed truth | Qwen2.5-7B-Instruct answers the verifiable stream 75.0% right at 0.918 mean confidence: ECE 0.168 against a floor p95 of 0.011 (n = 5,100). The doc's premise that teachers are overconfident, measured rather than cited (`reports/teacher/README.md`) |
 | Teacher-labelled stream, cost and first student | $0.62 per 1,000 kept cases on A10Gs (5,558 of 6,000 kept). A 1.5B student agrees with the teacher 0.5298 (median of four seeds) against 0.5270 for a predictor that ignores its input: within one standard error. KL falls on every seed, all of it on Score |
+| The paired stream without negation, Banking77, four seeds | **Certifies** under every gate including `injection_robustness`: accuracy 0.8859 (0.8692–0.9196), ECE 0.0200 median, injection drop at most 0.035, padding at 16 lines 0.783 against 0.064. Costs 1.5 points of accuracy against the undefended model. Now the served model |
 | GPU on this machine | **Checked, absent.** `nvidia-smi` missing, `torch.cuda.is_available()` False |
 | GPU through Modal | **Works.** Asked for an A10G, got a device reporting `NVIDIA A10`; 30.9 cases/s against ~1.1 on this VM's CPU |
 | Qwen2.5 tokenizer, Python port against Rust | **Exact**: 0 of 34,520 texts differ over 10.3M tokens. Speed a wash against the forward pass: Rust 1.8× in bulk, Python 2× per warm call, 2.4× slower on unseen text |
@@ -311,6 +312,7 @@ The most useful section. Each of these was argued for before it was measured.
 | Sortish batching would cut training time by ~2.82× on HelpSteer2 | **1.13×** (1.09–1.18×, four seeds each arm). 2.82× was the padded *attention work*, and on the spike attention is a small share of a step. Outcomes unchanged (`reports/helpsteer2/README.md`, A.5) |
 | The reference configuration fails on GitHub's hardware, so "certified on four seeds" meant four seeds on one machine | One draw said so: accuracy 0.530, ECE 0.1076. Four four-seed sweeps there say otherwise: **16 of 16 certify**, ECE 0.0128–0.0395, lift +0.0707 to +0.2200, on at least three kinds of runner. The failed draw is unexplained and was one seed-run in twenty-one (`reports/hardware/README.md`) |
 | Negation pairs plus a coherence term teach a Noul to answer a question and its complement | Incoherence falls from 0.46 to 0.035 and accuracy on the pairs stays at chance, 0.498 against 0.498. **Read directly** on all eight treated checkpoints: P(yes) is about 0.50 whether the named intent is true or false (separation −0.0012 to +0.0024), with or without the coherence term. The head never learned the question; the term only made two uninformed answers agree (`reports/paired/README.md`) |
+| The negation Nouls are what cost the paired Choice head its calibration | Dropping them left raw Choice ECE where it was (0.0517 against 0.0519). What certified the run was the calibrator being accepted on every seed, which is a margin, not a mechanism (`reports/paired/README.md`) |
 | Fitting temperature on the training split is the discipline | It is the bug. Raised ECE on half the seeds. |
 | A Score temperature of 0.20 is a degenerate fit | Constructed test: sharpening is correct for an underconfident head. |
 | Burden of proof belongs on *declining* a calibrator | Seven constructed heads say the opposite, on six of them. |
@@ -627,11 +629,35 @@ what order, and how each step is known to be done.
   case brings a new schema; the labels are noisy (about 3 of 64 fixture
   answers look wrong at high confidence); the teacher has a position bias.
   Whether training on it moves Banking77 or the synthetic suite is unrun.
-- **The served Banking77 model no longer certifies.** It fails
-  `injection_robustness` (Q34), which it was trained before; its adapters and
-  release bundle are unchanged, and `/healthz` still serves it. It stays
-  served until a paired-stream configuration certifies on four seeds under
-  the new gate set, and is then replaced by one.
+- ~~The served Banking77 model no longer certifies.~~ **Closed, 2026-09-28:
+  replaced.** The gateway on Modal now serves seed 1 of the paired
+  configuration without negation, which certifies on four seeds under
+  `injection_robustness`. Chosen as the median-accuracy seed, tie broken on
+  calibration, never the best draw. Checked end to end through the gateway on
+  CPU before deploying; the edge still refuses anonymous calls. The release
+  bundle (`releases/banking77-qwen15b-v1/`) is still the old model.
+- ~~The paired stream does not certify.~~ **Closed, 2026-09-28: without
+  negation it does**, four seeds of four: accuracy 0.8859 median
+  (0.8692–0.9196) against the baseline's 0.9009, ECE 0.0156–0.0318 above its
+  floor, injection drop −0.008 to 0.035, accuracy on the injected variant 0.861
+  against 0.476 (`reports/paired/README.md`). **Its margin is the calibrator's**:
+  raw Choice ECE is unchanged by dropping negation (0.0517 against 0.0519), and
+  what moved is that the held-out slice accepted a calibrator on every seed.
+  Believed, not measured: that a fifth seed certifies. Negation remains
+  unlearned and is simply not trained.
+- **The teacher stream teaches only a prior.** A 1.5B student trained on
+  3,860 teacher-labelled cases learns the teacher's position prior on Score
+  and nothing measurable on Choice or Noul. Candidates, none measured: every
+  case brings a new schema; the labels are noisy (about 3 of 64 fixture
+  answers look wrong at high confidence); the teacher has a position bias.
+  Whether training on it moves Banking77 or the synthetic suite is unrun.
+- ~~The served Banking77 model no longer certifies.~~ **Closed, 2026-09-28:
+  replaced.** The gateway on Modal now serves seed 1 of the paired
+  configuration without negation, which certifies on four seeds under
+  `injection_robustness`. Chosen as the median-accuracy seed, tie broken on
+  calibration, never the best draw. Checked end to end through the gateway on
+  CPU before deploying; the edge still refuses anonymous calls. The release
+  bundle (`releases/banking77-qwen15b-v1/`) is still the old model.
 - **The paired stream does not certify, at either consistency weight.** At
   weight 1 one Banking77 seed of four stalls at 0.511; **measured**: the
   term is the cause, since at weight 0 the same seed reaches 0.862. At
