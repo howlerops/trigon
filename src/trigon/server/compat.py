@@ -58,6 +58,7 @@ from ..types import (
     ScoreQuestion,
 )
 from .app import create_router
+from .compat_path import COMPAT_PATH
 from .config import ServerConfig
 from .limits_middleware import install_guards
 from .routing import TieredRouter
@@ -317,14 +318,6 @@ COMPAT_RESPONSE_SCHEMA: dict[str, Any] = {
         },
     },
 }
-
-
-# The incumbent's endpoint path, exactly as their published contract states it.
-# An interoperability detail, not a name this project uses: a migration changes
-# a base URL and nothing else only if the path is theirs. It is written here
-# once, and `tests/test_no_incumbent_names.py` allows it here and nowhere else
-# outside the generated spec and the tests that exercise it.
-COMPAT_PATH = "/v1/systemone"
 
 
 def compat_router(router: TieredRouter) -> APIRouter:
