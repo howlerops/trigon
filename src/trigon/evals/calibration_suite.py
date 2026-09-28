@@ -10,7 +10,7 @@ gate that a run either passes or fails.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 from ..calibration.metrics import CalibrationReport, report
@@ -18,6 +18,7 @@ from ..engine import Engine
 from ..limits import (
     CALIBRATION_GATES,
     MAX_FLOOR_FRACTION_OF_GATE,
+    MAX_INJECTION_ACCURACY_DROP,
     MIN_ACCURACY_OVER_BASELINE,
     MIN_BRIER_SKILL_OVER_MARGINAL,
     MIN_CALIBRATION_SAMPLES,
@@ -132,6 +133,7 @@ def check_gates(
     require_per_question: bool = False,
     slices: dict[str, CalibrationReport] | None = None,
     marginal_brier: float | None = None,
+    robustness: Mapping[str, Mapping[str, float]] | None = None,
 ) -> list[GateResult]:
     """Apply the release gates from the build plan.
 
@@ -146,6 +148,12 @@ def check_gates(
     any predictor, so they are reported as advisory and ``brier_over_marginal``
     is the blocking term that rejects a model ignoring its input
     (``limits.MIN_BRIER_SKILL_OVER_MARGINAL``).
+
+    ``robustness`` is the paired benchmarks' output (`trigon.evals.paired`),
+    keyed by suite. When it holds the injection benchmark, the drop from
+    anchor to injected variant is gated (``limits.MAX_INJECTION_ACCURACY_DROP``):
+    blocking on a backbone run, advisory on the spike, flipped by the same
+    ``require_per_question`` switch as the other per-part gates.
     """
     gates: list[GateResult] = []
     drawn_annotator = marginal_brier is not None
@@ -297,6 +305,24 @@ def check_gates(
             )
         )
 
+    injection = _paired(robustness, "injection")
+    if injection is not None:
+        drop = injection["accuracy_anchor"] - injection["accuracy_variant"]
+        gates.append(
+            GateResult(
+                "injection_robustness",
+                drop,
+                MAX_INJECTION_ACCURACY_DROP,
+                drop <= MAX_INJECTION_ACCURACY_DROP,
+                advisory=not require_per_question,
+                note=(
+                    f"accuracy {injection['accuracy_anchor']:.4f} on the case, "
+                    f"{injection['accuracy_variant']:.4f} with an instruction naming a "
+                    "wrong answer; every other gate reads clean state"
+                ),
+            )
+        )
+
     if quantized is not None:
         if quantized.calibration is None:
             raise ValueError("quantized run produced no scored questions")
@@ -304,3 +330,11 @@ def check_gates(
         delta_limit = CALIBRATION_GATES["max_quantization_ece_delta"]
         gates.append(GateResult("quantization_ece_delta", delta, delta_limit, delta <= delta_limit))
     return gates
+
+
+def _paired(robustness, kind: str) -> Mapping[str, float] | None:
+    """One paired benchmark's metrics, whatever prefix its suite name carries."""
+    for suite, metrics in (robustness or {}).items():
+        if suite.rsplit("/", 1)[-1] == f"paired_{kind}":
+            return metrics
+    return None

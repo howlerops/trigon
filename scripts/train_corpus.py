@@ -80,6 +80,13 @@ from trigon.evals.corpora import corpus, load  # noqa: E402
 from trigon.limits import MIN_CALIBRATION_SAMPLES  # noqa: E402
 from trigon.schema import OptionScoring  # noqa: E402
 
+#: Corpora the paired stream is built and tested against (`trigon.evals.paired`),
+#: and where a backbone run therefore measures -- and is gated on -- injection.
+PAIRED_CORPORA = frozenset({"banking77"})
+#: Pairs per paired benchmark by default: the drop's standard error is about
+#: 0.015 at this n, against a 0.10 limit.
+ROBUSTNESS_N = 1000
+
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -249,10 +256,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--robustness-n",
         type=int,
-        default=0,
+        default=None,
         help=(
             "run the paired robustness benchmarks -- injection, padding, paraphrase, "
-            "negation -- on this many evaluation cases each (0 = skip)"
+            "negation -- on this many evaluation cases each (0 = skip). Defaults to "
+            f"{ROBUSTNESS_N} on a backbone run over a corpus the paired stream is built "
+            "for, where the injection gate blocks, and to 0 otherwise"
         ),
     )
     parser.add_argument(
@@ -271,7 +280,22 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "never used"
         ),
     )
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    if args.robustness_n is None:
+        # Q34: where the injection gate can block, it is measured by default
+        # and cannot be turned off. A gate that only runs when asked for is
+        # one a run can skip by not asking: an advisory gate with extra steps.
+        args.robustness_n = ROBUSTNESS_N if _gated_on_injection(args) else 0
+    elif args.robustness_n == 0 and _gated_on_injection(args):
+        parser.error(
+            f"{args.corpus} on a backbone is gated on injection (Q34); "
+            "--robustness-n 0 would skip a blocking gate"
+        )
+    return args
+
+
+def _gated_on_injection(args: argparse.Namespace) -> bool:
+    return args.corpus in PAIRED_CORPORA and bool(args.backbone or args.weights)
 
 
 def resolve_device(requested: str) -> tuple[str, str]:
@@ -1039,17 +1063,20 @@ def main(argv: list[str] | None = None) -> int:
     # Scored against one annotator drawn per case: argmax accuracy is capped
     # below its gate for every predictor, so the proper score carries the
     # "uses its input" term instead (limits.MIN_BRIER_SKILL_OVER_MARGINAL).
+    # Measured before the gates, because one of them reads it (Q34): the
+    # injection drop blocks a backbone run the way the per-question gates do.
+    robustness = robustness_section(calibrated, evaluation, args) if args.robustness_n else None
     gates = check_gates(
         after,
         slices=slices,
         marginal_brier=marginal_scores(train, evaluation)[0] if spec.annotator_lists else None,
         # Q16: blocking once a real backbone lands, which a backbone run is.
         require_per_question=bool(args.backbone),
+        robustness=robustness[1] if robustness is not None else None,
     )
     markdown = header(
         spec, args, train, calibration, evaluation, marginal, topped_up, hardware
     ) + render_markdown([before, after], gates, slices, gated=after)
-    robustness = robustness_section(calibrated, evaluation, args) if args.robustness_n else None
     if robustness is not None:
         markdown += robustness[0]
     plausibility = evidence_section(backend, calibrated, train, evaluation, args)
