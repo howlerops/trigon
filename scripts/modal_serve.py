@@ -2,9 +2,16 @@
 
     modal deploy scripts/modal_serve.py
 
-The model is `reports/banking77/`'s certified configuration -- Qwen2.5-1.5B
-with LoRA, lr 1e-4 -- seed 2, the median-accuracy seed and one whose
-calibrator was applied. Its adapter is read from the `trigon-runs` Volume
+The model is the certified Banking77 recipe -- Qwen2.5-1.5B with LoRA, lr
+1e-4 -- trained with the adversarial + paired stream (`reports/paired/`,
+*Without negation*), the first configuration to certify on four seeds under
+`injection_robustness` (Q34). The previous model, `reports/banking77/`'s seed
+2, loses 0.42 accuracy to one injected sentence and no longer certifies.
+
+Which seed: the median-accuracy one, never the best draw -- the sweep rule
+applied to what is served. With four seeds the median sits exactly between
+two (seeds 1 and 2, 0.8762 and 0.8956); the tie goes to calibration, which is
+the product: seed 1, ECE 0.0175 against 0.0318. Its adapter is read from the `trigon-runs` Volume
 where training wrote it, and its temperatures and isotonic map ship from the
 repository beside the report they were fitted for.
 
@@ -51,12 +58,12 @@ import pathlib
 import modal
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
-RUN = "banking77-qwen15b-e4-lr1e-4-872ed726edcd-20260923T145427"
-SEED = 2
+RUN = "banking77-paired-qwen15b-mix05-nonneg-cw0-019425daee66-20260928T172328"
+SEED = 1
 # The spend ceiling: the most A10Gs this deployment can hold at once, whatever
 # arrives. Two is one warm container plus headroom for a burst.
 MAX_CONTAINERS = 2
-REPORT = f"/root/trigon/reports/banking77/qwen15b-e4-lr1e-4-seed{SEED}"
+REPORT = f"/root/trigon/reports/paired/paired-qwen15b-mix05-nonneg-cw0-seed{SEED}"
 
 image = (
     modal.Image.debian_slim(python_version="3.11")
