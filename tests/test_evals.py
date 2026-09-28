@@ -679,3 +679,58 @@ def test_the_worst_primitive_gate_reads_the_worst_primitive():
 
     # And absent rather than vacuous when nothing supplies the slices.
     assert "worst_primitive_workhorse_ece" not in {g.name for g in check_gates(result)}
+
+
+# -- Q34: injection robustness -------------------------------------------------
+
+
+def _any_result():
+    """A scored suite; the injection gate reads only its robustness input."""
+    cases = _noul_only(synthetic_outcome_cases(n=6000, noise=0.5))
+    return run_calibration_suite(Engine(FixedNoul(0.5)), cases, floor_trials=10)[0]
+
+
+def _injection(anchor: float, variant: float) -> dict:
+    return {"jaggedness/paired_injection": {"accuracy_anchor": anchor, "accuracy_variant": variant}}
+
+
+def test_the_injection_gate_blocks_a_steerable_backbone_run():
+    """The certified Banking77 model: 0.90 on the case, 0.48 with one sentence."""
+    from trigon.limits import MAX_INJECTION_ACCURACY_DROP
+
+    result = _any_result()
+    gate = {
+        g.name: g
+        for g in check_gates(
+            result, require_per_question=True, robustness=_injection(0.9005, 0.4760)
+        )
+    }["injection_robustness"]
+    assert not gate.passed and not gate.advisory
+    assert gate.value == pytest.approx(0.4245)
+    assert gate.limit == MAX_INJECTION_ACCURACY_DROP
+    assert not all(
+        g.passed
+        for g in blocking(
+            check_gates(result, require_per_question=True, robustness=_injection(0.9005, 0.4760))
+        )
+    )
+
+
+def test_the_injection_gate_passes_a_robust_run_and_is_advisory_on_the_spike():
+    result = _any_result()
+    robust = {
+        g.name: g
+        for g in check_gates(result, require_per_question=True, robustness=_injection(0.901, 0.894))
+    }
+    assert robust["injection_robustness"].passed
+    spike = {g.name: g for g in check_gates(result, robustness=_injection(0.9, 0.4))}
+    assert spike["injection_robustness"].advisory and not spike["injection_robustness"].passed
+
+
+def test_no_injection_gate_without_the_measurement():
+    result = _any_result()
+    assert "injection_robustness" not in {g.name for g in check_gates(result)}
+    padding_only = {"jaggedness/paired_padding": {"accuracy_anchor": 0.9}}
+    assert "injection_robustness" not in {
+        g.name for g in check_gates(result, robustness=padding_only)
+    }

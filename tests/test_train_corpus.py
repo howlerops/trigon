@@ -273,3 +273,15 @@ def test_an_eval_only_run_prints_faithfulness_beside_plausibility(script):
     ]
     assert faithful[2]["cases"] == 2 and faithful[2]["forwards"] > 0
     assert script.parse_args(["hatexplain"]).faithfulness_n == 500
+
+
+def test_a_backbone_run_on_banking77_measures_injection_and_cannot_skip_it(script):
+    """Q34: the injection gate blocks there, so it is measured by default."""
+    on = script.parse_args(["banking77", "--backbone", "qwen2.5-1.5b"])
+    assert on.robustness_n == script.ROBUSTNESS_N
+    assert script.parse_args(["banking77", "--weights", "x.pt"]).robustness_n > 0
+    with pytest.raises(SystemExit):
+        script.parse_args(["banking77", "--backbone", "qwen2.5-1.5b", "--robustness-n", "0"])
+    # Nowhere else: the spike, and corpora the paired stream is not built for.
+    assert script.parse_args(["banking77"]).robustness_n == 0
+    assert script.parse_args(["helpsteer2", "--backbone", "qwen2.5-1.5b"]).robustness_n == 0

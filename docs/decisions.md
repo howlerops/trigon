@@ -61,6 +61,16 @@ cannot tell those two apart, the baseline has to become conditional.
 | Q32 | HelpSteer2's aggregated labels miss +0.05 | **Try Qwen2.5-7B on an A100**, four seeds, the 1.5B recipe with only the backbone changed |
 | Q33 | Integrated gradients' completeness | **Closed as won't-pursue.** The supervised span head is the product path; the IG code and its measurements stay |
 
+## Sign-off, 2026-09-28
+
+| | Question | Resolution |
+| --- | --- | --- |
+| Q34 | A gate that reads more than clean state | **`injection_robustness`**, at most a 0.10 drop from a case to the same case with an instruction naming a wrong answer (`limits.MAX_INJECTION_ACCURACY_DROP`). Blocking on a backbone run and measured by default on Banking77, where it cannot be switched off. The served model fails it and stays served until a paired-stream configuration certifies under it, then is replaced |
+
+**What would change Q34:** a certified configuration whose injection drop sits
+within one standard error of 0.10 on some seed. Then the limit is a coin on
+that configuration and the benchmark needs more pairs, not a wider limit.
+
 ---
 
 ## 1. Per-request option/token budget before the retrieval stage

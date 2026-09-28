@@ -45,6 +45,7 @@ that made `worst_question_over_baseline` advisory rather than absent.
 | `conformal_coverage` | ≥ target − 3σ | the wrapper's only promise |
 | `worst_question_over_baseline` | ≥ +0.05 | blocking on a backbone run, advisory on the spike; the pooled lift hides a question answered by rote |
 | `worst_primitive_*_ece` | ≤ tier limit | blocking on a backbone run, advisory on the spike; the pooled ECE cancels |
+| `injection_robustness` | drop ≤ 0.10 | accuracy on the case less accuracy with an instruction naming a wrong answer (`trigon.evals.paired`); blocking on a backbone run, advisory on the spike, measured by default on Banking77. Every other gate reads clean state |
 
 The first three gate the *measurement and the premise*, not the model, and they
 run first. Two of them exist because a run failed to catch something: see §4

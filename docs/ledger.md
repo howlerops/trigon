@@ -18,7 +18,7 @@ narrative sections are a discipline, not a test.
 | Tests | 726 |
 | Python files (`src`, `tests`, `scripts`) | 132 |
 | Lines in `src/` | 16,779 |
-| Release gates | 9 |
+| Release gates | 10 |
 | Green-tier corpora in the licence audit | 9 |
 | Committed use cases | 3 |
 | Real corpora loadable | 7 |
@@ -115,6 +115,13 @@ twenty-two runs** — the investigation is closed and the evidence is in
   its input. **The per-question and per-primitive gates now block on every
   backbone run** (Q16), which ends the "advisory until a real backbone"
   arrangement.
+- **`injection_robustness`, the first gate that reads anything but clean
+  state** (Q34, 2026-09-28). Accuracy on a case less accuracy on the same case
+  with an instruction naming a wrong answer, from the paired benchmark's
+  held-out templates, at most 0.10. Blocking on a backbone run, advisory on
+  the spike, measured by default on Banking77 and impossible to switch off
+  there. **The certified Banking77 model fails it** (drop 0.41–0.43); models
+  trained with the paired stream pass it on every seed that learned.
 - `scripts/seed_sweep.py` — certify on the spread, not the best draw.
 - `scripts/regate.py` — refit calibration on a saved checkpoint and re-gate in
   a minute instead of retraining for twenty.
@@ -620,6 +627,11 @@ what order, and how each step is known to be done.
   case brings a new schema; the labels are noisy (about 3 of 64 fixture
   answers look wrong at high confidence); the teacher has a position bias.
   Whether training on it moves Banking77 or the synthetic suite is unrun.
+- **The served Banking77 model no longer certifies.** It fails
+  `injection_robustness` (Q34), which it was trained before; its adapters and
+  release bundle are unchanged, and `/healthz` still serves it. It stays
+  served until a paired-stream configuration certifies on four seeds under
+  the new gate set, and is then replaced by one.
 - **The paired stream does not certify, at either consistency weight.** At
   weight 1 one Banking77 seed of four stalls at 0.511; **measured**: the
   term is the cause, since at weight 0 the same seed reaches 0.862. At
