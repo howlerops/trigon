@@ -26,7 +26,15 @@ SOURCES = {
         # Weights are not committed (`*.pt` is ignored); the adapter's
         # checksum is checked only where a local copy exists.
         "adapter.pt": "reports/banking77/qwen15b-e4-lr1e-4-seed2.pt",
-    }
+    },
+    "banking77-qwen15b-v2": {
+        "temperatures.json": "reports/paired/paired-qwen15b-mix05-nonneg-cw0-seed1-temperatures.json",
+        "isotonic.json": "reports/paired/paired-qwen15b-mix05-nonneg-cw0-seed1-isotonic.json",
+        "report.md": "reports/paired/paired-qwen15b-mix05-nonneg-cw0-seed1.md",
+        "report.json": "reports/paired/paired-qwen15b-mix05-nonneg-cw0-seed1.json",
+        "modal-run.json": "reports/paired/paired-qwen15b-mix05-nonneg-cw0-modal-run.json",
+        "adapter.pt": "reports/paired/paired-qwen15b-mix05-nonneg-cw0-seed1.pt",
+    },
 }
 
 

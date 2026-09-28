@@ -655,8 +655,9 @@ what order, and how each step is known to be done.
   configuration without negation, which certifies on four seeds under
   `injection_robustness`. Chosen as the median-accuracy seed, tie broken on
   calibration, never the best draw. Checked end to end through the gateway on
-  CPU before deploying; the edge still refuses anonymous calls. The release
-  bundle (`releases/banking77-qwen15b-v1/`) is still the old model.
+  CPU before deploying; the edge still refuses anonymous calls. Its release
+  bundle is `releases/banking77-qwen15b-v2/` (Q36), on the Modal Volume and
+  checksummed; v1 stays as the record of the undefended model.
 - ~~The paired stream does not certify.~~ **Closed, 2026-09-28: without
   negation it does**, four seeds of four: accuracy 0.8859 median
   (0.8692–0.9196) against the baseline's 0.9009, ECE 0.0156–0.0318 above its
