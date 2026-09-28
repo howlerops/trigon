@@ -20,6 +20,7 @@ from ..limits import (
     MAX_FLOOR_FRACTION_OF_GATE,
     MAX_INJECTION_ACCURACY_DROP,
     MIN_ACCURACY_OVER_BASELINE,
+    MIN_ACCURACY_OVER_CHANCE,
     MIN_BRIER_SKILL_OVER_MARGINAL,
     MIN_CALIBRATION_SAMPLES,
 )
@@ -213,6 +214,23 @@ def check_gates(
                 advisory=drawn_annotator,
             )
         )
+        # Q35: the same floor as a share of the distance to perfect, which is
+        # what +0.05 fails to be on a question with many options.
+        if result.baseline_accuracy < 1.0:
+            closed = lift / (1.0 - result.baseline_accuracy)
+            gates.append(
+                GateResult(
+                    "accuracy_over_chance",
+                    closed,
+                    MIN_ACCURACY_OVER_CHANCE,
+                    closed >= MIN_ACCURACY_OVER_CHANCE,
+                    note=(
+                        f"closes {closed:.1%} of the gap from the marginal predictor "
+                        f"({result.baseline_accuracy:.4f}) to perfect"
+                    ),
+                    advisory=drawn_annotator or not require_per_question,
+                )
+            )
     if drawn_annotator:
         if not marginal_brier > 0:
             raise ValueError(f"marginal Brier must be positive, got {marginal_brier}")

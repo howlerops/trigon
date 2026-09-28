@@ -18,7 +18,7 @@ narrative sections are a discipline, not a test.
 | Tests | 740 |
 | Python files (`src`, `tests`, `scripts`) | 135 |
 | Lines in `src/` | 16,859 |
-| Release gates | 10 |
+| Release gates | 11 |
 | Green-tier corpora in the licence audit | 9 |
 | Committed use cases | 3 |
 | Real corpora loadable | 7 |
@@ -115,6 +115,9 @@ twenty-two runs** — the investigation is closed and the evidence is in
   its input. **The per-question and per-primitive gates now block on every
   backbone run** (Q16), which ends the "advisory until a real backbone"
   arrangement.
+- **`accuracy_over_chance`** (Q35, 2026-09-28): the input-use floor as a share
+  of the distance to perfect, ≥ 0.25, so a 77-way question cannot certify at
+  13%. Beside `accuracy_over_baseline`, never instead of it.
 - **`injection_robustness`, the first gate that reads anything but clean
   state** (Q34, 2026-09-28). Accuracy on a case less accuracy on the same case
   with an instruction naming a wrong answer, from the paired benchmark's
@@ -637,14 +640,15 @@ what order, and how each step is known to be done.
   trained heads start Banking77 near the uniform solution. Transfer to the
   synthetic suite, and the stream mixed into training rather than used as an
   init, are unrun.
-- **`accuracy_over_baseline` is an absolute margin, and on 77 classes it is a
-  low bar.** A teacher-initialised seed at 13% accuracy passed every blocking
-  gate at 1,000 cases: +0.113 over a 1.6% marginal clears +0.05. The gate was
-  sized on questions with a handful of options, where +0.05 is a real
-  distance from chance; on a 77-way question it admits a model that is wrong
-  seven times in eight. Found, not yet decided: a relative margin, or one
-  scaled by the marginal, would change what the gate enforces and is the
-  owner's call.
+- ~~`accuracy_over_baseline` is an absolute margin, and on 77 classes it is a
+  low bar.~~ **Closed by the owner, 2026-09-28 (Q35): `accuracy_over_chance`.**
+  The share of the gap from the marginal to perfect the model closed, at least
+  0.25, beside the absolute +0.05 rather than instead of it. Blocking on a
+  backbone run, advisory on the spike: the spike's weakest honest CI seeds
+  (0.116) are indistinguishable from the 13% Banking77 seed (0.115) on this
+  measure, so no threshold separates them there. Against every committed
+  report, no certified backbone run falls below 0.25; the 13% seed and a 12%
+  resilience smoke run, which passed every blocking gate, now fail.
 
 - ~~The served Banking77 model no longer certifies.~~ **Closed, 2026-09-28:
   replaced.** The gateway on Modal now serves seed 1 of the paired

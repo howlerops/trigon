@@ -66,6 +66,8 @@ cannot tell those two apart, the baseline has to become conditional.
 | | Question | Resolution |
 | --- | --- | --- |
 | Q34 | A gate that reads more than clean state | **`injection_robustness`**, at most a 0.10 drop from a case to the same case with an instruction naming a wrong answer (`limits.MAX_INJECTION_ACCURACY_DROP`). Blocking on a backbone run and measured by default on Banking77, where it cannot be switched off. The served model fails it and stays served until a paired-stream configuration certifies under it, then is replaced |
+| Q35 | `accuracy_over_baseline` on many classes | **Scale it by chance**: `accuracy_over_chance`, (accuracy − marginal) / (1 − marginal) ≥ 0.25, beside the absolute +0.05. Blocking on a backbone run, advisory on the spike, whose weakest honest seeds read the same as the 13% seed that prompted it |
+| Q36 | What the next weights release holds | **The robust model**: a v2 bundle from the served paired-stream adapter, its calibrators and a card stating the injection result |
 
 **What would change Q34:** a certified configuration whose injection drop sits
 within one standard error of 0.10 on some seed. Then the limit is a coin on
