@@ -269,10 +269,12 @@ commits, and every shard's summary on the volume records its own commit.
   questions have levels that are not in order, such as
   `mild, moderate, low, high, …` or a risk scale written high to low. The
   contract cannot catch that, and the generator should be made to.
-- **Transfer is not measured.** Whether training on this stream changes
-  Banking77 or the synthetic suite was not checked, because it did not fit
-  the GPU cap alongside the four seeds. That is the next measurement, and
-  what the stream is for. Coverage is believed, not measured.
+- **Transfer to Banking77 is measured, and negative** (`transfer.md`, added
+  2026-09-28). Used as the init for the certified Banking77 recipe, these
+  students left the ln 77 plateau later than the base model. At 1,000 cases
+  the median accuracy was 0.0895 against 0.6549. At the full budget one seed
+  of four was still at chance (median 0.8787, against 0.9009 certified). The
+  synthetic suite is still unrun.
 - **The domains are one teacher's idea of them.** The states read as
   plausible and generic: many are about a "John Doe". Diversity was set by
   the plan, not measured against real traffic.
