@@ -18,6 +18,15 @@ spread from 0.51 to 0.91 is not one a caller can be handed. It stays off by
 default. The negation half bought coherence without an answer: the Noul
 head reads 50% on its own questions.
 
+**Without negation, at weight 0, it certifies on four seeds of four**
+(below, *Without negation*): accuracy 0.8859 (0.8692–0.9196), every
+blocking gate on every seed, injection accuracy drop at most 0.035, and
+padding at 16 lines 0.7825 against the baseline's 0.064. It does **not**
+confirm the hypothesis that set it up. The raw Choice head is exactly as
+overconfident as before (uncalibrated ECE median 0.0517 against 0.0519).
+What changed on the seed that failed is that a calibrator was accepted
+this time.
+
 **The ablation (consistency weight 0) moves the failure, it does not remove
 it.** Without the term the slow seed learns (0.862 against 0.511), which
 puts the stall on the consistency term, and robustness holds at about the
@@ -219,8 +228,144 @@ so the term did not cause it: the Noul head was never trained well enough to
 read a claim that embeds one of 77 intents. Coherence at weight 1 is the
 term making two uninformed answers agree.
 
+## Without negation: certified on four seeds
+
+> **Certified adapters.** On the `trigon-runs` Volume under
+> **`banking77-paired-qwen15b-mix05-nonneg-cw0-019425daee66-20260928T172328`**
+> are `seed0.pt`, `seed1.pt`, `seed2.pt` and `seed3.pt`. Model versions are
+> `+7f72ab98`, `+4e0792e7`, `+7a385484` and `+6f1141f0`. Seed 0 has the best
+> accuracy and the best calibration of the four (0.9196, ECE 0.0156) and the
+> smallest injection drop.
+
+Same recipe, same seeds, same splits. `--paired-mix 0.5 --paired-kinds
+injection,padding,paraphrase --consistency-weight 0`, at commit `019425d`
+(clean) on `NVIDIA A10G`. That gives 9,563 cases an epoch. Negation pairs
+contribute two cases each, and there are none here, so the epoch has fewer
+cases than the 10,360 above even though the three remaining kinds share the
+mix.
+
+### The gates
+
+| Seed | Accuracy | Lift | Uncalibrated ECE | Calibrator | ECE | Adaptive ECE | Floor mean (p95) | Overconfidence | Injection drop | Kept epoch | Verdict |
+| ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| 0 | 0.9196 | +0.9036 | 0.0573 | temperature T=2.45 | 0.0156 | 0.0125 | 0.0090 (0.0122) | −0.006 | −0.008 | 2 | PASS |
+| 1 | 0.8762 | +0.8596 | 0.0477 | isotonic | 0.0175 | 0.0235 | 0.0074 (0.0118) | +0.007 | 0.035 | 1 | PASS |
+| 2 | 0.8956 | +0.8782 | 0.0557 | isotonic | 0.0318 | 0.0337 | 0.0073 (0.0102) | +0.022 | 0.020 | 2 | PASS |
+| 3 | 0.8692 | +0.8530 | 0.0325 | isotonic | 0.0224 | 0.0231 | 0.0089 (0.0123) | +0.022 | 0.026 | 1 | PASS |
+
+| Median (range) | Baseline | Weight 0, with negation | **Weight 0, without negation** |
+| --- | ---: | ---: | ---: |
+| Accuracy | 0.9009 (0.8502–0.9054) | 0.8967 (0.8618–0.9074) | **0.8859 (0.8692–0.9196)** |
+| Lift | +0.8839 (+0.8340–+0.8894) | — | +0.8689 (+0.8530–+0.9036) |
+| ECE | 0.0209 (0.0105–0.0448) | 0.0298 (0.0170–0.0516) | 0.0200 (0.0156–0.0318) |
+| Adaptive ECE | 0.0164 (0.0106–0.0445) | — | 0.0233 (0.0125–0.0337) |
+| Uncalibrated ECE | — | 0.0519 (0.0400–0.0566) | 0.0517 (0.0325–0.0573) |
+| Blocking gates passed | 4 / 4 | 3 / 4 | **4 / 4** |
+| Injection drop ≤ 0.10 | — | 4 / 4 (max 0.052) | **4 / 4 (max 0.035)** |
+
+Every ECE is above its simulated floor's p95, so each one measures real
+miscalibration. None is indistinguishable from perfect, and all are well
+under the 0.05 gate. The injection drop is `accuracy_anchor −
+accuracy_variant` on `paired_injection`, which `injection_robustness`
+bounds at 0.10 (`limits.MAX_INJECTION_ACCURACY_DROP`). This worktree
+predates that gate, so the reports do not print it and it is computed here
+from the numbers they do print.
+
+**Accuracy costs a point and a half at the median.** The medians are 0.8859
+here and 0.9009 for the baseline, and the ranges overlap. Part of the cost
+comes from calibration, not training: the isotonic map is monotone per class
+and not jointly, so it moved seed 2's accuracy from 0.9094 to 0.8956 and
+seed 3's from 0.8838 to 0.8692. Seeds 1 and 3 kept epoch 1, because
+validation loss rose after it. Seed 3 went from 0.65 to 0.98 at epoch 3.
+
+### Why it certified: the calibrator, not the missing negation
+
+The hypothesis was that negation's Noul cases cost the Choice head its
+calibration. Measurement does not support it:
+
+* **The raw head is equally overconfident either way.** Uncalibrated
+  Choice ECE is 0.0521, 0.0566, 0.0516 and 0.0400 with negation, and
+  0.0573, 0.0477, 0.0557 and 0.0325 without it. The medians are 0.0519
+  and 0.0517.
+* **What differs is the calibrator decision.** The run decides on a slice
+  of the calibration split that neither candidate was fitted on. With
+  negation, that slice read seed 2's raw head at 0.0381 against a best fit
+  of 0.0341. That is not a demonstrable improvement, so the calibrator was
+  declined and the evaluation set then read 0.0516. Seed 3 was declined the
+  same way, 0.0512 against 0.0325, and passed at 0.0400 anyway. Without
+  negation, the slice read 0.0510 to 0.0730 on every seed, a calibrator was
+  accepted on all four, and it brought each one under the gate.
+
+The configuration therefore certifies under the gates as they stand, but its
+margin rests on the decline rule firing. On seed 2 that happened this time
+and not last time, with a raw head just as miscalibrated both times. A
+fifth seed whose scoring slice happens to read low would be declined and
+land about 0.05, as seed 2 did. Removing negation cost nothing measurable:
+negation accuracy was 0.499 before and after, which is chance. But removing
+it is not what fixed calibration.
+
+### The robustness benchmarks
+
+1,000 evaluation cases per benchmark per seed, from templates training never
+saw.
+
+| Benchmark | Metric | Baseline | Weight 0, with negation | **Weight 0, without negation** | Per seed (0, 1, 2, 3) |
+| --- | --- | ---: | ---: | ---: | --- |
+| injection | accuracy on the anchor | 0.9005 | 0.8940 | 0.8885 (0.866–0.917) | 0.917, 0.888, 0.889, 0.866 |
+| injection | accuracy on the variant | **0.4760** | 0.8870 | **0.8610 (0.840–0.925)** | 0.925, 0.853, 0.869, 0.840 |
+| injection | accuracy drop | 0.424 | 0.0070 | 0.0230 (−0.008–0.035) | −0.008, 0.035, 0.020, 0.026 |
+| injection | flip rate | 0.5010 | 0.0655 | 0.0755 (0.023–0.107) | 0.023, 0.079, 0.072, 0.107 |
+| padding | accuracy at 4 lines | 0.2730 | 0.8725 | 0.8465 (0.775–0.913) | 0.913, 0.838, 0.855, 0.775 |
+| padding | accuracy at 16 lines | **0.0635** | 0.8520 | **0.7825 (0.581–0.911)** | 0.911, 0.754, 0.811, 0.581 |
+| padding | rot | 0.8395 | 0.0420 | 0.1060 (0.006–0.285) | 0.006, 0.134, 0.078, 0.285 |
+| paraphrase | flip rate | 0.0140 | 0.0085 | 0.0060 (0.001–0.016) | 0.001, 0.003, 0.016, 0.009 |
+| negation | accuracy | 0.4997 | 0.4958 | 0.4988 (0.497–0.501) | chance on every seed |
+| negation | mean incoherence | 0.4582 | 0.0508 | 0.4876 (0.404–0.548) | back to the baseline's |
+
+**The robustness gains hold.** Injection accuracy on the variant is 0.861
+against the baseline's 0.476. Padding accuracy at 16 lines is 0.783 against
+0.064, and on the worst seed it is still nine times the baseline. Padding is
+weaker than it was with negation (median 0.852), even though padding now
+gets a third of the mix instead of a quarter. The two lowest seeds, 1 and 3,
+are the two that kept epoch 1, so early-epoch selection is a likely cause.
+That is inferred from two seeds, not measured.
+
+**Negation coherence is back to the baseline's**, 0.49, as it should be:
+nothing trained it. Its accuracy is chance in all three arms.
+
+### Cost
+
+| Run | GPU time | Estimated cost |
+| --- | ---: | ---: |
+| Four seeds, about 108 min each (80 training, 28 evaluating) | 7.21 h | $7.9 |
+
+That is 25,939 s of `elapsed_s` at about $1.10 an hour on A10G, not
+counting start-up. Training is 80 minutes per seed against 95 with
+negation, because there are fewer cases and no anchor forwards.
+
+### Reproduce
+
+```bash
+python scripts/modal_train.py launch --corpus banking77 --seeds 0,1,2,3 -n 0 --epochs 4 \
+    --prefix paired-qwen15b-mix05-nonneg-cw0 --extra "--backbone qwen2.5-1.5b --lr 0.0001 \
+    --save-model model.pt --paired-mix 0.5 --paired-kinds injection,padding,paraphrase \
+    --consistency-weight 0 --robustness-n 1000 --jaggedness-n 40"
+python scripts/modal_train.py collect \
+    banking77-paired-qwen15b-mix05-nonneg-cw0-019425daee66-20260928T172328 --out-dir reports/paired
+```
+
 ## Believed, not measured
 
+* **That this configuration certifies on a fifth seed.** Its ECE margin
+  depends on the calibrator being accepted, and above that decision
+  flipped between two runs with equally miscalibrated raw heads. A seed
+  sweep wider than four, or a raw head that is calibrated without help,
+  would settle it.
+* ~~That negation's Noul cases cost the Choice head its calibration.~~
+  **Not supported**: uncalibrated Choice ECE has a median of 0.0519 with
+  negation and 0.0517 without (above).
+* **That early epoch selection is what weakened padding on seeds 1 and 3.**
+  Two seeds, correlated, not tested.
 * ~~That the consistency term is what slowed seed 1.~~ **Measured**: at
   weight 0 the same seed reaches 0.862 (above).
 * **That negation failed for lack of signal.** 1,594 negation cases over four
