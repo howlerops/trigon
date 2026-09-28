@@ -1,0 +1,35 @@
+{
+  "epochs": [
+    {
+      "epoch": 1,
+      "mean_loss": 3.888061634419011,
+      "seconds": 801.291742765,
+      "validation_loss": 1.4354477860314994
+    },
+    {
+      "epoch": 2,
+      "mean_loss": 0.6858001799600966,
+      "seconds": 806.1756610780003,
+      "validation_loss": 0.4404053740122249
+    },
+    {
+      "epoch": 3,
+      "mean_loss": 0.24930636680903306,
+      "seconds": 809.6506233939999,
+      "validation_loss": 0.47863390184422966
+    },
+    {
+      "epoch": 4,
+      "mean_loss": 0.07228720039823264,
+      "seconds": 806.1724903699987,
+      "validation_loss": 0.5255127665660188
+    }
+  ],
+  "n_cases": 6375,
+  "n_questions": 6375,
+  "seconds": 3234.8898871129995,
+  "first_loss": 3.888061634419011,
+  "final_loss": 0.07228720039823264,
+  "kept_epoch": 2,
+  "n_rationales": 0
+}
