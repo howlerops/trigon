@@ -66,6 +66,12 @@ jobs:
           # from inside torch. torch itself is already satisfied by the line
           # above, so this adds numpy and nothing else.
           pip install -e ".[dev,server,llm,train]"
+      - uses: actions/setup-go@v5
+        # The Go client's drift check needs gofmt, and its live-gateway test
+        # needs `go run`; without Go both would skip.
+        with:
+          go-version: "1.22"
+          cache: false
       - name: Lint
         run: ruff check src tests scripts sdk
       - name: Format check
@@ -80,13 +86,20 @@ jobs:
         run: |
           python scripts/export_openapi.py
           git diff --exit-code spec/openapi.json
-      - name: TypeScript client typechecks
+      - name: TypeScript client typechecks and builds
         # Nobody reads generated code, so the compiler is the review. Strict
-        # mode here caught a real bug the first time it ran.
+        # mode here caught a real bug the first time it ran. The build is what
+        # the published package ships, so it has to succeed here first.
         working-directory: sdk/typescript
         run: |
           npm install --no-audit --no-fund
           npm run typecheck
+          npm run build
+      - name: Go client vets
+        working-directory: sdk/go
+        run: |
+          go vet ./...
+          test -z "$(gofmt -l .)"
       - name: Generated artifacts are current
         # Each is generated from something else in the tree, so a change that
         # is not regenerated has to fail in the same commit rather than later.

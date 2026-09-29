@@ -202,7 +202,7 @@ regenerate in the same commit — CI fails otherwise, which is the point:
 | Artifact | From | Regenerate with |
 | --- | --- | --- |
 | `spec/openapi.json` | the gateway | `python scripts/export_openapi.py` |
-| `sdk/python/trigon_client/_generated.py` | that spec | `python scripts/generate_sdk.py` |
+| `sdk/python/trigon_client/_generated.py`, `sdk/typescript/src/generated.ts`, `sdk/go/trigon.go` | that spec | `python scripts/generate_sdk.py` (the Go file needs `gofmt`) |
 | `src/trigon/data/bpe.json` | the eval corpus | `python scripts/train_tokenizer.py` |
 | the cost tables in `docs/architecture.md` | the compiler and `limits.py` | `python scripts/attention_table.py --write` |
 

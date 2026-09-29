@@ -1,19 +1,20 @@
 # SDKs
 
-Both clients are **generated** from `spec/openapi.json` by
+All three clients are **generated** from `spec/openapi.json` by
 `scripts/generate_sdk.py`, which is the only definition of the contract. A
 hand-written client is a second definition, and two definitions drift.
 `tests/test_sdk.py` runs the generator with `--check`, so a contract change
 that is not regenerated fails CI in the commit that made it.
 
-Neither client has a runtime dependency. An SDK is the first thing a
+No client has a runtime dependency. An SDK is the first thing a
 prospective user installs, and one that drags in an HTTP stack to call three
 endpoints is a worse first impression than forty lines of `urllib` or `fetch`.
 
 | | Path | Runtime | Tested by |
 | --- | --- | --- | --- |
 | Python | `sdk/python/trigon_client/` | standard library (`urllib`) | the live gateway, in-process |
-| TypeScript | `sdk/typescript/src/generated.ts` | `fetch` | `tsc --strict`, then the live gateway from node |
+| TypeScript | `sdk/typescript/src/generated.ts`, published as `@howlerops/trigon-client` | `fetch` | `tsc --strict`, then the live gateway from node |
+| Go | `sdk/go/trigon.go`, `go get github.com/howlerops/trigon/sdk/go` | standard library (`net/http`) | `go vet`, then the live gateway with `go run` |
 
 Both are tested against a running server rather than a fixture: a client that
 parses a fixture proves nothing about the server it claims to speak to.
@@ -65,3 +66,8 @@ is the review, and it caught a real bug the first time it ran.
 python scripts/export_openapi.py   # after any change to trigon.types
 python scripts/generate_sdk.py     # both clients, from that spec
 ```
+
+## Go and installing
+
+See `docs/quickstart.md`: installing from GitHub Packages, `go get`, the
+container image, and the headers the hosted deployment needs.

@@ -278,3 +278,73 @@ def test_the_typescript_client_has_no_runtime_dependencies():
 
     manifest = json.loads((TS / "package.json").read_text())
     assert not manifest.get("dependencies"), manifest.get("dependencies")
+
+
+# -- Go ----------------------------------------------------------------------
+
+GO = ROOT / "sdk" / "go"
+
+
+def _go() -> str | None:
+    import shutil
+
+    return shutil.which("go")
+
+
+def test_the_go_client_answers_against_a_live_gateway():
+    """Compiling proves nothing about the server. This starts the real gateway
+    and drives it from `go run`, the way the TypeScript smoke does from node."""
+    if _go() is None:
+        pytest.skip("go is not installed")
+
+    import threading
+    import time
+
+    import uvicorn
+
+    app = build_app(ServerConfig(backend="lexical"))
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=8934, log_level="error"))
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    try:
+        deadline = time.time() + 15
+        while not server.started and time.time() < deadline:
+            time.sleep(0.05)
+        assert server.started, "the gateway did not come up"
+        result = subprocess.run(
+            [_go(), "run", "./cmd/smoke", "http://127.0.0.1:8934"],
+            cwd=GO,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=300,
+        )
+    finally:
+        server.should_exit = True
+        thread.join(timeout=10)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "route    billing" in result.stdout or "route    shipping" in result.stdout
+    assert "bad request -> 422" in result.stdout
+
+
+def test_the_go_client_describes_the_same_contract_version():
+    source = (GO / "trigon.go").read_text()
+    assert f'const ContractVersion = "{trigon_client.CONTRACT_VERSION}"' in source
+
+
+def test_the_go_client_has_no_dependencies():
+    """A go.mod with no require block: the standard library only."""
+    assert "require" not in (GO / "go.mod").read_text()
+
+
+def test_the_published_typescript_package_is_versioned_by_the_contract():
+    """`.github/workflows/publish.yml` publishes a version once and never
+    overwrites it, so the version has to move when the contract does."""
+    import json
+
+    manifest = json.loads((TS / "package.json").read_text())
+    assert manifest["version"] == trigon_client.CONTRACT_VERSION
+    assert manifest["name"] == "@howlerops/trigon-client"
+    assert manifest["publishConfig"]["registry"] == "https://npm.pkg.github.com"
+    assert manifest["exports"]["."]["import"] == "./dist/generated.js"

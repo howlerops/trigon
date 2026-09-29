@@ -1,0 +1,6 @@
+*
+!pyproject.toml
+!README.md
+!src/
+!docker/entrypoint.py
+**/__pycache__

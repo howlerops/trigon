@@ -278,3 +278,22 @@ def test_healthz_counts_the_premium_tier_as_well(tmp_path):
         )["trained"]
         is True
     )
+
+
+def test_serve_reads_the_backend_from_the_environment_unless_the_flag_is_given(monkeypatch):
+    """A container is configured by environment variables. `trigon serve` used
+    to overwrite TRIGON_BACKEND with its --backend default, so an image set up
+    for the torch model served the lexical floor instead."""
+    import trigon.cli as cli
+
+    seen = {}
+    monkeypatch.setattr("uvicorn.run", lambda app, host, port: seen.setdefault("app", app))
+    monkeypatch.setattr(
+        "trigon.server.app.build_app", lambda config: seen.setdefault("backend", config.backend)
+    )
+    monkeypatch.setenv("TRIGON_BACKEND", "lexical-from-env")
+    cli.main(["serve"])
+    assert seen["backend"] == "lexical-from-env"
+    seen.clear()
+    cli.main(["serve", "--backend", "lexical"])
+    assert seen["backend"] == "lexical"

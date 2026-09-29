@@ -100,7 +100,11 @@ def cmd_serve(args: argparse.Namespace) -> int:
     from .server.config import ServerConfig
 
     config = ServerConfig.from_env()
-    config.backend = args.backend
+    # Only an explicit --backend overrides TRIGON_BACKEND. It used to override
+    # it always, with its default, so a container configured by environment
+    # alone served the lexical floor while saying nothing.
+    if args.backend:
+        config.backend = args.backend
     if args.weights:
         config.weights = args.weights
     if args.unsupervised_evidence:
@@ -1052,6 +1056,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     serve = sub.add_parser("serve", help="run the reference gateway")
     shared(serve)
+    serve.set_defaults(backend=None)
     serve.add_argument("--weights", default=None, help="a checkpoint written by 'trigon train'")
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8000)
