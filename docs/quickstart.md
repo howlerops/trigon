@@ -50,14 +50,19 @@ curl -s localhost:8000/v1/decide -H 'content-type: application/json' -d '{
 
 ### TypeScript — `@howlerops/trigon-client`
 
-Published to GitHub Packages. Point the `@howlerops` scope at it once, with a
-GitHub token that has `read:packages` (GitHub Packages asks for one even for
-public packages):
+```bash
+npm install @howlerops/trigon-client
+```
+
+Published to npmjs.com by trusted publishing, so each version carries a
+provenance attestation naming the commit and workflow run that built it
+(`npm audit signatures` checks it). The same package is on GitHub Packages
+too, which asks for a GitHub token with `read:packages` even for a public
+package:
 
 ```bash
 echo "@howlerops:registry=https://npm.pkg.github.com" >> .npmrc
 echo "//npm.pkg.github.com/:_authToken=\${GITHUB_TOKEN}" >> .npmrc
-npm install @howlerops/trigon-client
 ```
 
 ```ts
