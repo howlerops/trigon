@@ -92,6 +92,7 @@ DOC_GROUPS: tuple[tuple[str, tuple[Doc, ...]], ...] = (
         "Getting started",
         (
             Doc("index", "README.md", "Introduction", title="Introduction"),
+            Doc("quickstart", "docs/quickstart.md", "Quickstart: TypeScript, Go, curl"),
             Doc("model-card", "docs/model-card.md", "Model card"),
         ),
     ),

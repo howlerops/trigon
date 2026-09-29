@@ -63,8 +63,18 @@ twenty-two runs** — the investigation is closed and the evidence is in
   for. The compat route keeps their path, written once as
   `trigon.server.compat_path.COMPAT_PATH`, and `tests/test_no_incumbent_names.py`
   and the site test fail the build on their name anywhere else.
-- Generated Python and TypeScript SDKs, both dependency-free, both exercised
-  against a live gateway in CI.
+- Generated Python, TypeScript and Go SDKs, all dependency-free, all exercised
+  against a live gateway in CI. **Published** (2026-09-29): the TypeScript
+  client as `@howlerops/trigon-client` on GitHub Packages, the Go module by a
+  `sdk/go/vX.Y.Z` tag, both versioned by the contract and never overwritten;
+  and the gateway as `ghcr.io/howlerops/trigon`, a CPU image that fetches a
+  release bundle at start and refuses one whose SHA-256 does not match
+  (`docs/quickstart.md`, `.github/workflows/publish.yml`). Checked before
+  shipping: the packed npm tarball installed into an empty project and called
+  a live gateway from plain Node, and the image served the v2 bundle to the Go
+  client. `trigon serve` used to overwrite `TRIGON_BACKEND` with its flag's
+  default, so an image configured by environment would have served the
+  lexical floor; it now yields to the environment.
 - CLI: `ask`, `serve`, `spec`, `eval`, `fit`, `train`.
 - **Auth, rate limiting and overload shedding** — 401, 429 and 529 with the
   headers a client acts on, on both the native and compat paths, all off

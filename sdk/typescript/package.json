@@ -1,14 +1,37 @@
 {
-  "name": "@trigon/client",
+  "name": "@howlerops/trigon-client",
   "version": "0.1.0",
   "description": "Typed, calibrated decisions from the Trigon API. Generated from the OpenAPI contract; no runtime dependencies.",
   "license": "Apache-2.0",
   "type": "module",
-  "main": "src/generated.ts",
-  "types": "src/generated.ts",
-  "files": ["src"],
+  "main": "dist/generated.js",
+  "types": "dist/generated.d.ts",
+  "files": [
+    "dist",
+    "src"
+  ],
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build": "tsc -p tsconfig.build.json",
+    "prepack": "npm run build"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/generated.d.ts",
+      "import": "./dist/generated.js"
+    }
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/howlerops/trigon.git",
+    "directory": "sdk/typescript"
+  },
+  "homepage": "https://howlerops.github.io/trigon/",
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
   },
   "devDependencies": {
     "typescript": "^5.6.0"
