@@ -3,7 +3,8 @@ name: Publish
 # Publishes the three things a TypeScript, Go or container user installs, on
 # every push to the default branch:
 #
-#   npm   @howlerops/trigon-client   GitHub Packages (npm.pkg.github.com)
+#   npm   @howlerops/trigon-client   npmjs.com (trusted publishing, see below)
+#                                    and GitHub Packages (npm.pkg.github.com)
 #   go    github.com/howlerops/trigon/sdk/go   a sdk/go/vX.Y.Z tag
 #   image ghcr.io/howlerops/trigon   GitHub Container Registry
 #
@@ -66,7 +67,52 @@ jobs:
           if npm view "@howlerops/trigon-client@$CONTRACT" version >/dev/null 2>&1; then
             echo "@howlerops/trigon-client@$CONTRACT is already published"
           else
-            npm publish
+            npm publish --registry https://npm.pkg.github.com
+          fi
+
+  # npmjs.com, where `npm install @howlerops/trigon-client` works with no
+  # token (GitHub Packages asks for one on every install, public or not).
+  #
+  # Trusted publishing: npmjs.com accepts this workflow's short-lived GitHub
+  # OIDC identity instead of a stored NPM_TOKEN, and attaches a provenance
+  # attestation tying each version to the commit and run that built it. It is
+  # configured on the package's settings page on npmjs.com, so the package has
+  # to exist first; until that one-time setup is done this job is switched off
+  # by the NPMJS_TRUSTED_PUBLISHING repository variable rather than failing
+  # every push to main.
+  npmjs:
+    needs: version
+    if: ${{ github.ref_name == github.event.repository.default_branch && vars.NPMJS_TRUSTED_PUBLISHING == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: sdk/typescript
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+      # Trusted publishing needs npm 11.5.1 or later; Node 22 ships npm 10.
+      - run: npm install -g npm@latest
+      - name: The package version is the contract version
+        env:
+          CONTRACT: ${{ needs.version.outputs.contract }}
+        run: test "$(node -p 'require("./package.json").version')" = "$CONTRACT"
+      - run: npm install --no-audit --no-fund
+      - run: npm run typecheck
+      - run: npm run build
+      - name: Publish unless this version exists
+        env:
+          CONTRACT: ${{ needs.version.outputs.contract }}
+        run: |
+          if npm view "@howlerops/trigon-client@$CONTRACT" version >/dev/null 2>&1; then
+            echo "@howlerops/trigon-client@$CONTRACT is already on npmjs.com"
+          else
+            npm publish --access public --provenance
           fi
 
   go:

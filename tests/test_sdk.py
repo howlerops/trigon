@@ -340,11 +340,16 @@ def test_the_go_client_has_no_dependencies():
 
 def test_the_published_typescript_package_is_versioned_by_the_contract():
     """`.github/workflows/publish.yml` publishes a version once and never
-    overwrites it, so the version has to move when the contract does."""
+    overwrites it, so the version has to move when the contract does. And
+    provenance is only verifiable if the manifest names this repository."""
     import json
 
     manifest = json.loads((TS / "package.json").read_text())
     assert manifest["version"] == trigon_client.CONTRACT_VERSION
     assert manifest["name"] == "@howlerops/trigon-client"
-    assert manifest["publishConfig"]["registry"] == "https://npm.pkg.github.com"
+    # No registry pinned in the manifest: publish.yml names one per job, so
+    # the same package goes to npmjs.com and to GitHub Packages.
+    assert "registry" not in manifest["publishConfig"]
+    assert manifest["publishConfig"]["access"] == "public"
     assert manifest["exports"]["."]["import"] == "./dist/generated.js"
+    assert manifest["repository"]["url"] == "git+https://github.com/howlerops/trigon.git"
