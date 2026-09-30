@@ -180,6 +180,10 @@ class LoRALinear(nn.Module):
             nn.init.zeros_(self.lora_b)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if not isinstance(self.base, nn.Linear):
+            # A merged, quantized projection (`QwenReadoutBackend.int8_cpu`):
+            # the adapter is already inside it and it takes float input.
+            return self.base(x.float())
         weight = self.base.weight
         if x.dtype != weight.dtype and not torch.is_autocast_enabled(x.device.type):
             # Full precision against a bf16 backbone (`QwenPrefillModel.full_precision`).
@@ -534,7 +538,9 @@ class QwenReadoutBackend(TorchReadoutBackend):
         backbone = BACKBONES[name]
         shape = QwenShape.from_config(json.loads(fetch(backbone, "config.json").read_text()))
         device = torch.device(device)
-        base_dtype = base_dtype or (torch.bfloat16 if device.type == "cuda" else torch.float32)
+        base_dtype = base_dtype or (
+            torch.bfloat16 if device.type in ("cuda", "mps") else torch.float32
+        )
         max_levels = (config or ReadoutConfig()).max_levels
         with torch.device("meta"):
             model = QwenPrefillModel(
@@ -645,6 +651,50 @@ class QwenReadoutBackend(TorchReadoutBackend):
         model.eval()
         backend._version = version or payload["version"]
         return backend
+
+    # -- int8 on a CPU, for serving -----------------------------------------
+
+    def int8_cpu(self) -> QwenReadoutBackend:
+        """A twin that serves on a CPU with int8 matmuls in every projection.
+
+        Each LoRA update is merged into its frozen weight (``W + scale * B @ A``),
+        then the projection is replaced by PyTorch's dynamically quantized
+        Linear: int8 weights per output channel, activations quantized per call.
+        Only the backbone's projections -- the readout heads, the embeddings and
+        the norms stay in float32, because the heads are what the calibrators
+        were fitted against and the rest is not where the time goes.
+
+        Not the same model, and not assumed to be: the calibrators were fitted
+        to the float weights, so an int8 twin is served only after
+        `scripts/generality.py` has measured it (`reports/cpu/`).
+        """
+        from torch.ao.nn.quantized.dynamic import Linear as DynamicLinear
+        from torch.ao.quantization import default_dynamic_qconfig
+
+        engines = torch.backends.quantized.supported_engines
+        torch.backends.quantized.engine = "qnnpack" if "fbgemm" not in engines else "fbgemm"
+        if "x86" in engines:
+            torch.backends.quantized.engine = "x86"
+        twin_model = copy.deepcopy(self.model).to("cpu").float()
+        with torch.no_grad():
+            for module in twin_model.modules():
+                if not isinstance(module, LoRALinear):
+                    continue
+                if module.rank:
+                    module.base.weight += module.scale * (module.lora_b @ module.lora_a)
+                    module.rank = 0
+                    del module.lora_a, module.lora_b
+                module.base.qconfig = default_dynamic_qconfig
+                module.base = DynamicLinear.from_float(module.base)
+        twin = QwenReadoutBackend(
+            twin_model,  # type: ignore[arg-type]
+            self.tokenizer,
+            backbone=self.backbone,
+            config=self.config,
+            version=f"{self._version}+int8cpu",
+        )
+        twin.model.eval()
+        return twin
 
     # -- the int8 proxy --------------------------------------------------
 

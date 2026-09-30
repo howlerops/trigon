@@ -21,7 +21,7 @@ narrative sections are a discipline, not a test.
 | Release gates | 11 |
 | Green-tier corpora in the licence audit | 9 |
 | Committed use cases | 3 |
-| Real corpora loadable | 7 |
+| Real corpora loadable | 9 |
 
 **Certified on real data: Qwen2.5-1.5B on Banking77**, LoRA rank 16, lr
 1e-4, 4 epochs — median accuracy 0.9009 against the spike's 0.7248, every seed
@@ -328,6 +328,7 @@ The most useful section. Each of these was argued for before it was measured.
 | Negation pairs plus a coherence term teach a Noul to answer a question and its complement | Incoherence falls from 0.46 to 0.035 and accuracy on the pairs stays at chance, 0.498 against 0.498. **Read directly** on all eight treated checkpoints: P(yes) is about 0.50 whether the named intent is true or false (separation −0.0012 to +0.0024), with or without the coherence term. The head never learned the question; the term only made two uninformed answers agree (`reports/paired/README.md`) |
 | The negation Nouls are what cost the paired Choice head its calibration | Dropping them left raw Choice ECE where it was (0.0517 against 0.0519). What certified the run was the calibrator being accepted on every seed, which is a margin, not a mechanism (`reports/paired/README.md`) |
 | Teacher distillation buys coverage that a real corpus can build on (`docs/data.md`) | Used as an init, the teacher-trained students start Banking77 worse than the base model and one seed of four never leaves chance at the full budget. The only gain, one seed at 1,000 cases, fails calibration (`reports/teacher/transfer.md`) |
+| The certified Banking77 model answers the question the caller declares — the drop-in claim's premise | **It answers the one it was trained on.** Same 300 test cases (2026-09-30): 0.900 with its 77 declared options, **0.007 with 50 of the same ones** (the true one always present, chance 0.02) — below chance, spread over 66 wrong labels, not a positional shift (4 of 300). The calibrator reported its floor confidence, 0.2, on answers that were almost never right, and `/healthz` said `calibrated: true`. No training recipe ever varied an option set. The suite that now measures it is `trigon.evals.generality`; the fix under test is `--reshape-*` |
 | Fitting temperature on the training split is the discipline | It is the bug. Raised ECE on half the seeds. |
 | A Score temperature of 0.20 is a degenerate fit | Constructed test: sharpening is correct for an underconfident head. |
 | Burden of proof belongs on *declining* a calibrator | Seven constructed heads say the opposite, on six of them. |
@@ -489,6 +490,24 @@ Errors that flattered the project, found by re-measuring rather than by review:
 ---
 
 ## Open
+
+- **Generality: a caller's own question, on data no mix trains.** The suite
+  (`trigon.evals.generality`, `scripts/generality.py`) sends identical cases
+  to any system on the contract: Banking77 under a 50-option shuffled subset
+  and under renamed options, CLINC150 (held out by decision), BoolQ (held out
+  by licence), and an order-invariance probe. Three levers are built and
+  unmeasured at scale: per-epoch option reshaping (`TrainingConfig.reshape`,
+  `train_corpus.py --reshape-*`), a multi-corpus mix with four teacher
+  domains held out and a calibrator fitted across tasks
+  (`scripts/train_mix.py`), and int8 CPU serving (`TRIGON_INT8=1`,
+  `QwenReadoutBackend.int8_cpu`). Training runs locally on Apple MPS now
+  (`--device mps`, bf16), measured at 3.8 cases/s for 0.5B on Banking77.
+  The int8 path uses `torch.ao` dynamic quantization, which torch 2.14 marks
+  deprecated; it will need porting to `torchao`.
+- **A compatible service caps a Choice at 50 options and requires a Noul's
+  criteria** (observed 2026-09-30); `COMPAT_BUDGET` records neither. Outbound
+  Nouls now carry explicit criteria. Whether the incumbent itself enforces
+  either is unverified.
 
 `docs/plan.md` is the execution plan for closing these: what has to be true, in
 what order, and how each step is known to be done.

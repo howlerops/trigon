@@ -45,7 +45,11 @@ def create_router(config: ServerConfig | None = None) -> TieredRouter:
 
     workhorse = Engine(
         _backend(
-            config.backend, config.weights, config.cache_prefixes, config.unsupervised_evidence
+            config.backend,
+            config.weights,
+            config.cache_prefixes,
+            config.unsupervised_evidence,
+            int8=config.int8,
         ),
         scaler=scaler,
         isotonic=isotonic,
@@ -80,6 +84,8 @@ def _backend(
     weights: str | None = None,
     cache_prefixes: bool = True,
     unsupervised_evidence: str | None = None,
+    *,
+    int8: bool = False,
 ) -> Any:
     if name == "lexical":
         if weights:
@@ -89,6 +95,10 @@ def _backend(
         from ..backends.torch_readout import TorchReadoutBackend
 
         backend = TorchReadoutBackend.load(weights) if weights else TorchReadoutBackend()
+        if int8:
+            if not hasattr(backend, "int8_cpu"):
+                raise ValueError("TRIGON_INT8 needs a pretrained-backbone checkpoint")
+            backend = backend.int8_cpu()
         # A schema prefix belongs to the weights that produced it. Those are
         # fixed for this process's lifetime, which is what makes reuse safe
         # here and unsafe in the trainer.
@@ -175,6 +185,9 @@ def build_app(config: ServerConfig | None = None, router: TieredRouter | None = 
             # comparing two deployments should not have to guess which of
             # them is running it.
             "schema_cache": config.cache_prefixes,
+            # Int8 projections change every answer slightly, and the
+            # calibrators were fitted to the float weights.
+            "int8": config.int8,
             # What a checkpoint never trained on rationales answers
             # `include_evidence` with; null for a backend that cannot
             # attribute. The response names the method too, but an operator

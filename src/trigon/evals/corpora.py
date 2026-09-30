@@ -528,6 +528,54 @@ CIRCA = CorpusSpec(
     holdout_fraction=0.25,
 )
 
+# -- Held-out tasks for the generality suite ---------------------------------
+#
+# Two corpora that no training mix reads, so a model's accuracy on them is its
+# accuracy on a task it has never seen (`trigon.evals.generality`). CLINC150 is
+# green and could train; it is held out by decision, not by licence, and a mix
+# that adds it has to find another held-out intent task first. BoolQ is
+# share-alike and can only ever evaluate.
+
+CLINC150 = CorpusSpec(
+    name="clinc150",
+    primitive="choice",
+    tier="green",
+    licence="CC BY 3.0",
+    attribution=(
+        "CLINC150 (Larson et al., 2019), Clinc Inc. CC BY 3.0. https://github.com/clinc/oos-eval"
+    ),
+    files={
+        "all": "https://raw.githubusercontent.com/clinc/oos-eval/master/data/data_full.json",
+    },
+    sha256={"all": "36923c3705a59e08fe9c3883d8bc2dd966ef93e22cb78ac41171782a698d56e0"},
+    instructions="Which intent does this user request express?",
+)
+
+BOOLQ = CorpusSpec(
+    name="boolq",
+    primitive="noul",
+    tier="amber",
+    licence="CC BY-SA 3.0",
+    attribution=(
+        "BoolQ (Clark et al., 2019), Google. CC BY-SA 3.0. "
+        "https://github.com/google-research-datasets/boolean-questions"
+    ),
+    # The authors' bucket answers with a closed-billing error since at least
+    # 2026-09-30; the Hugging Face copy is the publisher's own organisation.
+    files={
+        "test": (
+            "https://huggingface.co/datasets/google/boolq/resolve/main/data/"
+            "validation-00000-of-00001.parquet"
+        ),
+    },
+    sha256={"test": "52355d11524b4b874a9b9dcc278feb10f672d52c4f4eff9872e695ede59820f8"},
+    converted_from="parquet",
+    instructions="(the question is the instruction)",
+    text_field="question",
+    label_field="answer",
+    state_fields=("passage",),
+)
+
 CORPORA: dict[str, CorpusSpec] = {
     c.name: c
     for c in (
@@ -537,6 +585,8 @@ CORPORA: dict[str, CorpusSpec] = {
         GOEMOTIONS,
         MEASURING_HATE_SPEECH,
         CIRCA,
+        CLINC150,
+        BOOLQ,
     )
 }
 
@@ -620,7 +670,7 @@ def _records(path: pathlib.Path) -> Iterator[dict[str, Any]]:
 
 def _extension(url: str) -> str:
     """The suffix a cached file keeps, so `_records` can dispatch on it."""
-    for suffix in (".jsonl.gz", ".json.gz", ".jsonl", ".csv", ".tsv"):
+    for suffix in (".jsonl.gz", ".json.gz", ".jsonl", ".json", ".csv", ".tsv"):
         if url.endswith(suffix):
             return suffix
     return ".csv"
@@ -1104,6 +1154,89 @@ def _load_hatexplain(
 
 CORPORA[HATEXPLAIN.name] = HATEXPLAIN
 _LOADERS[HATEXPLAIN.name] = _load_hatexplain
+
+
+def _clinc_label(name: str) -> str:
+    return name.replace("_", " ")
+
+
+def _load_clinc150(
+    spec: CorpusSpec, split: str, *, limit: int | None = None, root: pathlib.Path | None = None
+) -> list[Case]:
+    """In-scope utterances as one Choice over all 150 intents.
+
+    The out-of-scope rows are left out: abstention is its own question, and a
+    151st option named "oos" would score a model on a label nobody would
+    declare. The option set is every intent, sorted, on every case -- the
+    declared form; `schema_shift` is what varies it.
+    """
+    if split not in ("train", "test"):
+        raise KeyError(f"{spec.name} has splits 'train' and 'test'; got {split!r}")
+    path = fetch(spec, root=root)["all"]
+    data = json.loads(path.read_text(encoding="utf-8"))
+    rows = data["train"] + data["val"] if split == "train" else data["test"]
+    labels = sorted({label for _, label in data["train"]})
+    index = {label: i for i, label in enumerate(labels)}
+    options = [{"name": _clinc_label(label)} for label in labels]
+    cases = []
+    for i, (text, label) in enumerate(rows[:limit] if limit else rows):
+        cases.append(
+            Case(
+                case_id=f"{spec.name}/{split}/{i}",
+                request=DecisionRequest(
+                    state=text,
+                    questions={
+                        "intent": ChoiceQuestion(instructions=spec.instructions, options=options)
+                    },
+                ),
+                expected={"intent": Expectation(label=index[label])},
+                domain=spec.name,
+                tags=(spec.name, split, "real"),
+            )
+        )
+    return cases
+
+
+_LOADERS[CLINC150.name] = _load_clinc150
+
+
+def _load_boolq(
+    spec: CorpusSpec, split: str, *, limit: int | None = None, root: pathlib.Path | None = None
+) -> list[Case]:
+    """One Noul per passage, asked the corpus's own question.
+
+    Unlike every other corpus here the question changes per case -- which is
+    the point of holding it out: a model that has only learned fixed
+    instructions has nothing to go on.
+    """
+    paths = fetch(spec, root=root)
+    if split not in paths:
+        raise KeyError(f"{spec.name} has no split {split!r}; it has {sorted(paths)}")
+    cases = []
+    for i, row in enumerate(_records(paths[split])):
+        if limit and len(cases) >= limit:
+            break
+        question = str(row.get(spec.text_field) or "").strip()
+        passage = str(row.get("passage") or "").strip()
+        if not question or not passage or row.get(spec.label_field) is None:
+            continue
+        question = question[:1].upper() + question[1:]
+        cases.append(
+            Case(
+                case_id=f"{spec.name}/{split}/{i}",
+                request=DecisionRequest(
+                    state=passage,
+                    questions={"answer": NoulQuestion(instructions=f"{question}?")},
+                ),
+                expected={"answer": Expectation(probability=1.0 if row[spec.label_field] else 0.0)},
+                domain=spec.name,
+                tags=(spec.name, split, "real"),
+            )
+        )
+    return cases
+
+
+_LOADERS[BOOLQ.name] = _load_boolq
 
 
 # -- The teacher-labelled synthetic-workflow stream ----------------------------

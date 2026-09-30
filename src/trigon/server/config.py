@@ -85,6 +85,11 @@ class ServerConfig:
     conformal_dir: str | None = None
     premium_backend: str | None = None
     premium_weights: str | None = None
+    # Serve the workhorse with int8 projections on a CPU
+    # (`QwenReadoutBackend.int8_cpu`). Off by default: the calibrators were
+    # fitted to the float weights, so it is turned on per deployment after the
+    # int8 twin has been measured, never assumed equivalent.
+    int8: bool = False
     escalate_below_confidence: float = 0.35
     # -- the three codes a caller's retry loop branches on -------------------
     #
@@ -111,6 +116,7 @@ class ServerConfig:
             conformal_dir=source.get("TRIGON_CONFORMAL_DIR") or None,
             premium_backend=source.get("TRIGON_PREMIUM_BACKEND") or None,
             premium_weights=source.get("TRIGON_PREMIUM_WEIGHTS") or None,
+            int8=source.get("TRIGON_INT8", "0") not in ("0", "false", ""),
             escalate_below_confidence=float(source.get("TRIGON_ESCALATE_BELOW_CONFIDENCE", "0.35")),
             api_keys=_keys(source.get("TRIGON_API_KEYS")),
             rate_per_minute=_positive(source.get("TRIGON_RATE_PER_MINUTE")),

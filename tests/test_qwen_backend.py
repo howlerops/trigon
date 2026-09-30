@@ -418,3 +418,37 @@ def test_the_evidence_head_trains_and_round_trips_on_the_backbone(tmp_path):
     request = DecisionRequest(state=STATE, questions=BASE, options={"include_evidence": True})
     answer = Engine(loaded, compiler=loaded.make_compiler()).answer(request)
     assert {a.evidence_method for a in answer.answers.values()} == {"span_head"}
+
+
+def test_the_int8_cpu_twin_merges_the_adapter_and_answers_nearly_the_same():
+    """Serving on a CPU: every projection int8, the adapter merged into it.
+
+    A zero adapter would make the merge untestable, so it is drawn nonzero;
+    the twin must then agree with the float model to int8's precision, and
+    keep the heads -- what the calibrators were fitted against -- in float.
+    """
+    from torch.ao.nn.quantized.dynamic import Linear as DynamicLinear
+
+    backend = _tiny(seed=3)
+    with torch.no_grad():
+        for module in backend.model.modules():
+            if isinstance(module, LoRALinear) and module.rank:
+                module.lora_b.normal_(std=0.05)
+    twin = backend.int8_cpu()
+    projections = [m for m in twin.model.modules() if isinstance(m, LoRALinear)]
+    assert projections and all(isinstance(m.base, DynamicLinear) for m in projections)
+    assert all(m.rank == 0 for m in projections)
+    assert twin.model_version.endswith("+int8cpu")
+
+    float_engine = Engine(backend, compiler=backend.make_compiler())
+    int8_engine = Engine(twin, compiler=twin.make_compiler())
+    request = DecisionRequest(state=STATE, questions=BASE)
+    a, b = float_engine.answer(request), int8_engine.answer(request)
+    for qid in BASE:
+        pa = a.answers[qid].model_dump().get("probabilities") or {
+            "p": a.answers[qid].model_dump()["probability"]
+        }
+        pb = b.answers[qid].model_dump().get("probabilities") or {
+            "p": b.answers[qid].model_dump()["probability"]
+        }
+        assert max(abs(pa[k] - pb[k]) for k in pa) < 0.05, qid

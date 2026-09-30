@@ -39,9 +39,10 @@ def columns(spec: CorpusSpec) -> list[str]:
     """Every field the loader reads for this spec, in a stable order."""
     wanted = [
         spec.group_field,
-        spec.holdout_key,
+        spec.holdout_key if spec.holdout_fraction else "",
         spec.abstain_field,
-        spec.label_field if spec.label_separator else "",
+        spec.label_field if spec.label_separator or spec.label_field != "category" else "",
+        spec.text_field if spec.text_field != "text" else "",
         *spec.state_fields,
         *spec.score_fields,
         *(c for group in spec.noul_groups.values() for c in group),
