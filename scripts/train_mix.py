@@ -83,6 +83,13 @@ def main() -> int:
     parser.add_argument("--accumulate", type=int, default=8)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--scale", type=float, default=1.0, help="multiply every MIX count")
+    parser.add_argument(
+        "--extra",
+        action="append",
+        default=[],
+        metavar="CORPUS=N",
+        help="add a corpus to the mix, or change one's count, e.g. teacher-local=8000",
+    )
     parser.add_argument("--calibration-per-corpus", type=int, default=600)
     parser.add_argument("--reshape-max", type=int, default=77)
     parser.add_argument("--reshape-rename", type=float, default=0.3)
@@ -115,7 +122,11 @@ def main() -> int:
     from trigon.training import TrainingConfig
     from trigon.training import train as run_training
 
-    for name in MIX:
+    mix = dict(MIX)
+    for item in args.extra:
+        name, _, count = item.partition("=")
+        mix[name] = int(count)
+    for name in mix:
         if name in NEVER or not corpus(name).permits("train"):
             raise SystemExit(f"{name} is held out or may not train; remove it from MIX")
 
@@ -134,7 +145,7 @@ def main() -> int:
     )
 
     train, calibration, drawn = [], [], {}
-    for name, n in MIX.items():
+    for name, n in mix.items():
         spec = corpus(name)
         want = int(n * args.scale)
         # Calibration comes only from corpora whose labels are evidence.
