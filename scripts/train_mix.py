@@ -67,7 +67,7 @@ NEVER = ("clinc150", "boolq", "circa")
 
 def _draw(name: str, n: int, seed: int) -> list:
     cases = load(name, "train", purpose="train")
-    if name == "teacher-workflows":
+    if name in ("teacher-workflows", "teacher-local"):
         cases = [c for c in cases if c.domain not in HELDOUT_DOMAINS]
     random.Random(f"mix:{name}:{seed}").shuffle(cases)
     return cases[:n]

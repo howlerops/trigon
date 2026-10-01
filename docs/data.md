@@ -110,6 +110,7 @@ Rows marked *unchecked* keep the plan's assumption and are still blockers.
 | LMSYS Arena preferences | Choice (A/B/tie) | **custom LMSYS-Chat-1M Dataset License Agreement, gated access** | **dropped** | not pursued; see sign-off Q18 |
 | Home Credit; IEEE-CIS fraud | Noul on structured state | Kaggle competition terms | **dropped** | not pursued; see sign-off Q18 |
 | teacher-workflows | Choice / Noul / Score, a schema per case, teacher distributions | **Apache-2.0** — output of Qwen2.5-7B-Instruct at `a09a354`, a licence that places no restriction on output; the 3B and 72B instruct models are under the Qwen licence instead | **green** ✓ — trains for coverage; never calibration evidence | HF `Qwen/Qwen2.5-7B-Instruct` metadata and the repository's LICENSE at `a09a35458c70`, checked 2026-09-27 |
+| teacher-local | Choice / Noul / Score, a schema per case, teacher distributions (first-token letter readout) | **Apache-2.0** — output of Qwen3-30B-A3B, a mixture of experts run locally through ollama; the base, Instruct-2507 and Thinking-2507 releases are all Apache-2.0 | **green** ✓ — trains for coverage; never calibration evidence | HF `Qwen/Qwen3-30B-A3B` metadata and LICENSE (`ad44e777bcd1`), and both 2507 releases, checked 2026-10-01 |
 | Autocast | Noul/Choice | **code MIT; dataset hosted "with permission from Metaculus for research purposes only"** | **red** | `andyzoujm/autocast` |
 
 ### Green is a licence, not a format
@@ -129,6 +130,7 @@ the drift tests, neither of which has a GPU stack — a Parquet reader here puts
 | measuring_hate_speech | Parquet only | ✅ built — `scripts/convert_corpus.py` writes gzipped JSONL once |
 | Circa | TSV in its repository | ✅ built — **evaluation only**, CC BY-SA |
 | teacher-workflows | gzipped JSONL on the `trigon-teacher` Modal Volume, pinned by SHA-256 | ✅ built — generated, not fetched; `scripts/modal_teacher.py fetch` |
+| teacher-local | gzipped JSONL built on this machine by `scripts/local_teacher.py` | ✅ built — generated locally, not fetched |
 
 **The three were not all Parquet-only.** The Hugging Face mirrors are, which
 is what the rows above used to say. GoEmotions' authors publish the raw

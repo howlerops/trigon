@@ -1324,3 +1324,28 @@ def _load_teacher(
 
 GENERATED[TEACHER_WORKFLOWS.name] = TEACHER_WORKFLOWS
 _LOADERS[TEACHER_WORKFLOWS.name] = _load_teacher
+
+#: The same stream built on one machine by `scripts/local_teacher.py`: a
+#: different teacher (the Qwen3-30B-A3B mixture of experts through ollama,
+#: pinned by its ollama digest in every record's ``teacher``), a different plan
+#: seed, and a first-token letter readout instead of whole-continuation
+#: scoring. Not pinned by SHA-256 here, because it is built where it is used
+#: and grows; `build.json` beside it records the digest of what was read.
+TEACHER_LOCAL = CorpusSpec(
+    name="teacher-local",
+    primitive="mixed",
+    tier="green",
+    licence="Apache-2.0",
+    attribution=(
+        "Generated and labelled by Qwen3-30B-A3B (Qwen Team, Alibaba Cloud), Apache-2.0, "
+        "huggingface.co/Qwen/Qwen3-30B-A3B, served by ollama. Teacher labels buy coverage, "
+        "not calibration."
+    ),
+    files={"all": "local/cases.jsonl.gz"},
+    instructions="(each case carries its own schema)",
+    holdout_key="case_id",
+    holdout_fraction=0.3,
+    teacher="ollama:qwen3:30b",
+)
+GENERATED[TEACHER_LOCAL.name] = TEACHER_LOCAL
+_LOADERS[TEACHER_LOCAL.name] = _load_teacher
