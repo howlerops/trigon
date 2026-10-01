@@ -28,6 +28,7 @@ on BoolQ, where always answering "yes" scores 0.62.
 | 0.5B, Banking77, reshape + crossover balance 0.5 | 0.030 | 0.664 | 0.565 | 0.451 | 0.369 | 0.802 |
 | 0.5B, mix of six corpora, 2 epochs, crossover 256 | 0.358 | 0.427 | 0.366 | 0.226 | 0.605 | 0.613 |
 | the same mix, resumed to 4 epochs | 0.602 | 0.680 | 0.586 | 0.251 | 0.586 | 0.824 |
+| **the same mix on Qwen3-0.6B**, 4 epochs from the start | 0.663 | 0.729 | 0.653 | **0.585** | 0.565 | 0.832 |
 
 Every 0.5B row is one seed (seed 0) trained locally on Apple MPS, and is a
 measurement, not a certification. ECE beside its noise floor is in each
@@ -74,6 +75,8 @@ moved the wrong way, ECE 0.086–0.116 against floors near 0.045, and no
 calibrator was accepted on held-out calibration data (choice 0.0607 raw
 against 0.0518 fitted, inside its noise). **Held-out task transfer is not a
 matter of more epochs on these six corpora at 0.5B.**
+
+**The backbone was the bottleneck on held-out tasks.** The same six-corpus mix on Qwen3-0.6B (2025, post-trained, QK-norm; `scripts/backbone_parity.py` exact) instead of Qwen2.5-0.5B more than doubles CLINC150, 0.251 to 0.585, and lifts every Banking77 task. BoolQ does not move (0.565, still under always-yes). Calibration on the held-out tasks is not there yet: ECE 0.168 on CLINC150 and 0.161 on BoolQ against floors near 0.043; the cross-task calibrator applied temperatures to Noul and Score and declined Choice. Trained in 8 h on Apple MPS — 2× Qwen2.5-0.5B's time, as its width predicts once nothing else is resident in unified memory (an 18 GB ollama model alongside made it 5×).
 
 **6. The hosted service is not order-invariant either**, and depends on
 option wording: re-ordering identical options changes 36% of its answers,
