@@ -178,6 +178,7 @@ def main() -> int:
     if records_path.exists():
         done = {json.loads(line)["case_id"] for line in records_path.open() if line.strip()}
     plans = [p for p in generation_plan(args.n, seed=args.seed, start=args.start)]
+    # Refused only for a transport error is not refused: try it again.
     plans = [p for p in plans if p.case_id not in done]
     print(f"teacher: {len(done)} done, {len(plans)} to go with {args.model}", file=sys.stderr)
     lock = threading.Lock()
@@ -225,7 +226,10 @@ def main() -> int:
                 "raw_generation": text,
             }
             path, key = records_path, "kept"
-        except (Rejected, KeyError, ValueError) as error:
+        except (Rejected, KeyError, ValueError, OSError) as error:
+            # OSError covers a dropped connection to ollama: the case is logged
+            # as refused for this run and retried by the next, which skips only
+            # what records.jsonl holds.
             record = {"case_id": plan.case_id, "reason": str(error), "text": text}
             path, key = rejected_path, "rejected"
         with lock:
