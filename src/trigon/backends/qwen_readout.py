@@ -75,7 +75,7 @@ def backbone_shards(backbone, device: str | torch.device) -> Iterator[dict[str, 
 
 
 class QwenShape:
-    """The architecture numbers a Qwen2 or Qwen3 `config.json` declares.
+    """The architecture numbers a Qwen2, Qwen3 or Llama `config.json` declares.
 
     Qwen3 differs from Qwen2 in three places, each defaulted here to Qwen2's
     value so a shape saved before Qwen3 existed rebuilds the same model: a
@@ -128,8 +128,13 @@ class QwenShape:
             rope_theta=config.get("rope_theta", 10_000.0),
             eps=config.get("rms_norm_eps", 1e-6),
             head_dim=config.get("head_dim"),
-            # Qwen2 configs carry no `attention_bias` key and do have the bias.
-            attention_bias=config.get("attention_bias", True),
+            # Qwen2 configs carry no `attention_bias` key and do have the bias;
+            # a Llama config that omits it (MiniCPM5-1B) or sets it null has none.
+            attention_bias=(
+                config.get("attention_bias", True)
+                if config.get("model_type", "qwen2") == "qwen2"
+                else bool(config.get("attention_bias"))
+            ),
             qk_norm=config.get("model_type") == "qwen3",
         )
 

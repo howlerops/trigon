@@ -72,6 +72,25 @@ BACKBONES: dict[str, Backbone] = {
         "Apache-2.0",
         sharded=True,
     ),
+    # MiniCPM5 (OpenBMB, 2026), post-trained, Apache-2.0 on the model card. Plain
+    # Llama: full attention in every layer, no q/k/v bias, no QK-norm, head_dim
+    # 128, untied embeddings -- all of which `QwenShape` already expresses. Its
+    # tokenizer chains a digit split before the usual regex and has no
+    # normalizer, which `ByteLevelBPE` covers.
+    "minicpm5-1b": Backbone(
+        "minicpm5-1b",
+        "openbmb/MiniCPM5-1B",
+        "87179e5c1f455ef22e6223592d2d61351b525bfc",
+        "Apache-2.0",
+        sharded=True,
+    ),
+    "minicpm5-2b": Backbone(
+        "minicpm5-2b",
+        "openbmb/MiniCPM5-2B",
+        "f97400052a43d642bbc6e9975e2397e3ae6a6b52",
+        "Apache-2.0",
+        sharded=True,
+    ),
     # Four bf16 shards, 15.2 GB. Untied embeddings: `lm_head.weight` is its
     # own tensor here, and unused, as the tied one is on the smaller models.
     "qwen2.5-7b": Backbone(
