@@ -46,8 +46,11 @@ import urllib.request
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "src"))
 
+from trigon.evals import teacher as _teacher  # noqa: E402
 from trigon.evals.teacher import (  # noqa: E402
     GENERATION_TEMPLATE_SHA256,
+    CasePlan,
+    Domain,
     Rejected,
     generation_messages,
     generation_plan,
@@ -58,6 +61,134 @@ from trigon.schema import render_state  # noqa: E402
 from trigon.types import ChoiceQuestion, NoulQuestion  # noqa: E402
 
 LETTERS = "ABCDEFGHIJKLMNOPQRST"
+
+#: Questions about what a document *says*. The twenty workflow domains ask a
+#: decision about a ticket or a record; almost none ask whether a passage
+#: states, permits or implies something, which is most of what a caller with a
+#: document asks. Added as a separate set with its own plans and case ids
+#: (``td<seed>-``) so the workflow plans, and every build made from them, are
+#: unchanged. Not BoolQ's text or questions: written by the teacher, about
+#: documents of these kinds.
+DOCUMENT_DOMAINS: tuple[Domain, ...] = (
+    Domain(
+        "policy_documents",
+        "an operations team checking what an internal or insurance policy actually says",
+        (
+            "a travel-expense policy",
+            "a parental-leave policy",
+            "a home-insurance exclusions section",
+            "a data-retention policy",
+            "a returns policy",
+            "a remote-work policy",
+        ),
+    ),
+    Domain(
+        "contract_clauses",
+        "a legal-operations team reading clauses of an agreement",
+        (
+            "a termination clause",
+            "a limitation-of-liability clause",
+            "an auto-renewal clause",
+            "a confidentiality clause",
+            "a payment-terms clause",
+            "an assignment clause",
+        ),
+    ),
+    Domain(
+        "product_manuals",
+        "a support engineer answering questions from a product's documentation",
+        (
+            "a router setup guide",
+            "a dishwasher troubleshooting section",
+            "an API rate-limit page",
+            "a car's maintenance schedule",
+            "a medication leaflet",
+            "a camera's battery section",
+        ),
+    ),
+    Domain(
+        "news_articles",
+        "an analyst checking what a news article reports and what it does not",
+        (
+            "a company earnings report",
+            "a local election result",
+            "a product recall",
+            "a court ruling",
+            "a weather emergency",
+            "a scientific study's announcement",
+        ),
+    ),
+    Domain(
+        "reference_articles",
+        "a researcher reading an encyclopedic article about a topic",
+        (
+            "a historical event",
+            "an animal species",
+            "a chemical element",
+            "a city's history",
+            "a sport's rules",
+            "a television series",
+        ),
+    ),
+    Domain(
+        "email_threads",
+        "an assistant reading an email thread to answer questions about it",
+        (
+            "a meeting being rescheduled",
+            "a vendor quote negotiation",
+            "an approval request",
+            "a project handover",
+            "an incident follow-up",
+            "a hiring decision",
+        ),
+    ),
+    Domain(
+        "meeting_notes",
+        "a team member reading meeting notes to see what was decided",
+        (
+            "a sprint planning meeting",
+            "a board meeting",
+            "a design review",
+            "a budget review",
+            "a customer escalation call",
+            "a postmortem",
+        ),
+    ),
+)
+
+#: Weighted towards Nouls -- a yes/no question about a passage is the shape
+#: the workflow set lacks -- and towards the documents state format.
+_DOC_PRIMITIVES = (("noul", 60), ("choice", 30), ("score", 10))
+_DOC_STATE_FORMATS = (("documents", 50), ("prose", 40), ("record", 10))
+
+
+def plan_document_case(seed: int, index: int) -> CasePlan:
+    """`trigon.evals.teacher.plan_case` over the document domains."""
+    import random
+
+    rng = random.Random(f"teacher-doc-plan:{seed}:{index}")
+    domain = DOCUMENT_DOMAINS[index % len(DOCUMENT_DOMAINS)]
+    questions = []
+    for _ in range(_teacher._weighted(rng, _teacher._QUESTION_COUNTS)):
+        kind = _teacher._weighted(rng, _DOC_PRIMITIVES)
+        if kind == "choice":
+            questions.append(("choice", _teacher._weighted(rng, _teacher._CHOICE_OPTIONS)))
+        elif kind == "score":
+            questions.append(("score", _teacher._weighted(rng, _teacher._SCORE_LEVELS)))
+        else:
+            questions.append(("noul", 2))
+    return CasePlan(
+        case_id=f"td{seed}-{index:06d}",
+        index=index,
+        domain=domain.name,
+        scenario=rng.choice(domain.scenarios),
+        state_format=_teacher._weighted(rng, _DOC_STATE_FORMATS),
+        borderline=rng.random() < _teacher._BORDERLINE_SHARE,
+        with_criteria=rng.random() < _teacher._CRITERIA_SHARE,
+        questions=tuple(questions),
+        sample_seed=rng.randrange(2**31),
+    )
+
 
 #: Every request names the same context, so ollama loads the model once. Left
 #: to its default it allocates the model's 262,144-token window per slot, which
@@ -97,11 +228,24 @@ def _members(question) -> list[str]:
     return [m.name + (f": {m.criteria}" if m.criteria else "") for m in members]
 
 
-def label(host: str, model: str, state, question) -> dict:
+def label(host: str, model: str, state, question, *, shuffle_seed: str | None = None) -> dict:
+    """The teacher's distribution over ``question``'s labels, in `labels_of` order.
+
+    With ``shuffle_seed`` the options are lettered in a seeded random order and
+    the answer mapped back. Measured on the first 375 records of the workflow
+    build, the teacher put its argmax on option A 29.8% of the time where a
+    uniform pick would be 23.7%; a fixed order turns any letter preference
+    into a label preference, a shuffled one into noise.
+    """
+    import random
+
     members = _members(question)
     if len(members) > len(LETTERS):
         raise Rejected(f"{len(members)} labels; the first-token readout takes {len(LETTERS)}")
-    options = "\n".join(f"{LETTERS[i]}. {m}" for i, m in enumerate(members))
+    order = list(range(len(members)))
+    if shuffle_seed is not None:
+        random.Random(shuffle_seed).shuffle(order)
+    options = "\n".join(f"{LETTERS[slot]}. {members[i]}" for slot, i in enumerate(order))
     prompt = _chat(
         [
             {"role": "system", "content": LABEL_SYSTEM},
@@ -135,7 +279,9 @@ def label(host: str, model: str, state, question) -> dict:
     if not found:
         raise Rejected("no declared letter in the teacher's top 20")
     floor = min(found.values()) - 1.0
-    logprobs = [found.get(LETTERS[i], floor) for i in range(len(members))]
+    # Back to declared order: label i was shown under the letter of its slot.
+    slot_of = {i: slot for slot, i in enumerate(order)}
+    logprobs = [found.get(LETTERS[slot_of[i]], floor) for i in range(len(members))]
     peak = max(logprobs)
     weights = [math.exp(v - peak) for v in logprobs]
     total = sum(weights)
@@ -144,7 +290,7 @@ def label(host: str, model: str, state, question) -> dict:
         "logprobs": logprobs,
         "probabilities": [w / total for w in weights],
         "declared_mass": sum(math.exp(found[k]) for k in found),
-        "readout": "first-token-letter",
+        "readout": "first-token-letter" + ("-shuffled" if shuffle_seed is not None else ""),
     }
 
 
@@ -156,6 +302,17 @@ def main() -> int:
     parser.add_argument("--model", default="qwen3.6:35b-a3b")
     parser.add_argument("--host", default="http://localhost:11434")
     parser.add_argument("--concurrency", type=int, default=2)
+    parser.add_argument(
+        "--shuffle-letters",
+        action="store_true",
+        help="letter each question's options in a seeded random order (removes position bias)",
+    )
+    parser.add_argument(
+        "--domain-set",
+        choices=("workflows", "documents"),
+        default="workflows",
+        help="the twenty workflow domains, or the document-reading ones",
+    )
     parser.add_argument("--out", type=pathlib.Path, required=True)
     args = parser.parse_args()
 
@@ -170,14 +327,20 @@ def main() -> int:
         "licence": "Apache-2.0",
         "generation_template_sha256": GENERATION_TEMPLATE_SHA256,
         "label_template_sha256": LABEL_TEMPLATE_SHA256,
-        "readout": "first-token-letter",
+        "readout": "first-token-letter" + ("-shuffled" if args.shuffle_letters else ""),
+        "domain_set": args.domain_set,
     }
     args.out.mkdir(parents=True, exist_ok=True)
     records_path, rejected_path = args.out / "records.jsonl", args.out / "rejected.jsonl"
     done = set()
     if records_path.exists():
         done = {json.loads(line)["case_id"] for line in records_path.open() if line.strip()}
-    plans = [p for p in generation_plan(args.n, seed=args.seed, start=args.start)]
+    if args.domain_set == "documents":
+        # `generation_messages` looks a plan's domain up by name.
+        _teacher._DOMAIN_BY_NAME.update({d.name: d for d in DOCUMENT_DOMAINS})
+        plans = [plan_document_case(args.seed, i) for i in range(args.start, args.start + args.n)]
+    else:
+        plans = [p for p in generation_plan(args.n, seed=args.seed, start=args.start)]
     # Refused only for a transport error is not refused: try it again.
     plans = [p for p in plans if p.case_id not in done]
     print(f"teacher: {len(done)} done, {len(plans)} to go with {args.model}", file=sys.stderr)
@@ -210,7 +373,13 @@ def main() -> int:
             text = out["response"]
             request = parse_generated(text, plan)
             labels = {
-                qid: label(args.host, args.model, request.state, q)
+                qid: label(
+                    args.host,
+                    args.model,
+                    request.state,
+                    q,
+                    shuffle_seed=f"{plan.case_id}/{qid}" if args.shuffle_letters else None,
+                )
                 for qid, q in request.questions.items()
             }
             record = {
