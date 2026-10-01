@@ -254,7 +254,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--reshape-crossover-fraction",
         type=float,
-        default=0.5,
+        default=0.0,
         help=(
             "with --reshape-max: share of reshapes above the scoring crossover "
             "(DOT_PRODUCT_CROSSOVER), so both Choice heads train"

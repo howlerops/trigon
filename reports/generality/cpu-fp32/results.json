@@ -1,0 +1,69 @@
+{
+  "system": {
+    "status": "ok",
+    "version": "0.1.0",
+    "calibrated": false,
+    "trained": true,
+    "schema_cache": true,
+    "int8": false,
+    "context_tokens": 524288,
+    "latency_target_ms": {
+      "p50": 150.0,
+      "p99": 500.0
+    }
+  },
+  "n": 500,
+  "tasks": {
+    "banking77/shift": {
+      "kind": "shift",
+      "note": "50 of the same options, shuffled",
+      "n": 500,
+      "failed": 0,
+      "accuracy": 0.772,
+      "chance": 0.02,
+      "majority": 0.038,
+      "ece": 0.05938818282933833,
+      "adaptive_ece": 0.06110552520054808,
+      "ece_floor_p95": 0.05442052034025799,
+      "miscalibration_detectable": true,
+      "mean_confidence": 0.8187706018141202,
+      "nll": 0.8483020234853523,
+      "brier": 0.3392626368006827,
+      "p50_seconds": 0.3492
+    },
+    "clinc150": {
+      "kind": "heldout",
+      "note": "150 intents, 50 per case",
+      "n": 500,
+      "failed": 0,
+      "accuracy": 0.416,
+      "chance": 0.02,
+      "majority": 0.032,
+      "ece": 0.28648508136077444,
+      "adaptive_ece": 0.28648508136077444,
+      "ece_floor_p95": 0.06357420546821302,
+      "miscalibration_detectable": true,
+      "mean_confidence": 0.7024850813607753,
+      "nll": 3.1959800321810348,
+      "brier": 0.8424820566334453,
+      "p50_seconds": 0.2861
+    },
+    "boolq": {
+      "kind": "heldout",
+      "note": "yes/no; a different question on every case",
+      "n": 500,
+      "failed": 0,
+      "accuracy": 0.364,
+      "chance": 0.5,
+      "majority": 0.636,
+      "ece": 0.3282526337596385,
+      "adaptive_ece": 0.32825263375963853,
+      "ece_floor_p95": 0.03997907143529497,
+      "miscalibration_detectable": true,
+      "mean_confidence": 0.6922526337596392,
+      "nll": 0.8822825713644177,
+      "brier": 0.6773080945795025,
+      "p50_seconds": 0.2761
+    }
+  }
+}
