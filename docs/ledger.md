@@ -311,7 +311,7 @@ twenty-two runs** — the investigation is closed and the evidence is in
 
 ---
 
-- **Generality, first measurement** (`reports/generality/README.md`, 1,000 cases per task). The served v2 answers its own 77 options at 0.883 and every other task at or below chance. A 0.5B model trained on Banking77 with per-epoch option reshaping answers 50 shuffled options at 0.782 and renamed ones at 0.677 — above a compatible hosted service on the same cases (0.544, 0.395) — keeps its answer under re-ordering 87% of the time (the service: 64%), and reaches 0.420 on CLINC150 zero-shot. The service leads on held-out tasks: CLINC150 0.849, BoolQ 0.758. A six-corpus mix at two epochs is undertrained and not yet better than Banking77 alone. One seed each, trained locally on Apple MPS.
+- **Generality, first measurement** (`reports/generality/README.md`, 1,000 cases per task). The served v2 answers its own 77 options at 0.883 and every other task at or below chance. A 0.5B model trained on Banking77 with per-epoch option reshaping answers 50 shuffled options at 0.782 and renamed ones at 0.677 — above a compatible hosted service on the same cases (0.544, 0.395) — keeps its answer under re-ordering 87% of the time (the service: 64%), and reaches 0.420 on CLINC150 zero-shot. The service leads on held-out tasks: CLINC150 0.849, BoolQ 0.758. A six-corpus mix resumed to four epochs reaches 0.680 shifted and 0.824 order agreement but stays at 0.251 on CLINC150 and 0.586 on BoolQ, and its ECE rose to 0.086–0.116 with no calibrator accepted: more epochs on these corpora improve what the mix contains, not held-out tasks. One seed each, trained locally on Apple MPS.
 
 ## Believed, then disproved
 

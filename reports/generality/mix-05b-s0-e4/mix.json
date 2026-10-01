@@ -1,0 +1,118 @@
+{
+  "backbone": "qwen2.5-0.5b",
+  "option_crossover": 256,
+  "model_version": "trigon-qwen2.5-0.5b-0.1.0+e97ecd16",
+  "device": "mps (Apple arm64 (MPS))",
+  "seed": 0,
+  "epochs": 4,
+  "lr": 0.0001,
+  "train_seconds": 8104,
+  "corpora": {
+    "banking77": {
+      "train": 4000,
+      "calibration": 600
+    },
+    "goemotions": {
+      "train": 3000,
+      "calibration": 600
+    },
+    "helpsteer2": {
+      "train": 1500,
+      "calibration": 600
+    },
+    "measuring_hate_speech": {
+      "train": 1500,
+      "calibration": 600
+    },
+    "hatexplain": {
+      "train": 2500,
+      "calibration": 600
+    },
+    "teacher-workflows": {
+      "train": 3098,
+      "calibration": 0
+    }
+  },
+  "held_out": {
+    "corpora": [
+      "clinc150",
+      "boolq",
+      "circa"
+    ],
+    "teacher_domains": [
+      "clinical_intake",
+      "contract_review",
+      "code_review",
+      "real_estate"
+    ]
+  },
+  "reshape": {
+    "min_options": 2,
+    "max_options": 77,
+    "shuffle": true,
+    "rename": 0.3,
+    "paraphrases": null,
+    "paraphrase": 0.0,
+    "criteria_only": 0.1,
+    "crossover_fraction": 0.0,
+    "crossover": 256
+  },
+  "calibrated_on": {
+    "cases": 3000,
+    "corpora": [
+      "banking77",
+      "goemotions",
+      "helpsteer2",
+      "measuring_hate_speech",
+      "hatexplain"
+    ],
+    "reshaped": true
+  },
+  "training": {
+    "epochs": [
+      {
+        "epoch": 1,
+        "mean_loss": 1.601435837242812,
+        "seconds": 4848.493767666019,
+        "validation_loss": 1.662873476925303
+      },
+      {
+        "epoch": 2,
+        "mean_loss": 1.1303939165888337,
+        "seconds": 4133.170119583985,
+        "validation_loss": 1.2758836187965896
+      },
+      {
+        "epoch": 3,
+        "mean_loss": 0.9473271658892849,
+        "seconds": 4064.9063582500094,
+        "validation_loss": 1.0904820275869618
+      },
+      {
+        "epoch": 4,
+        "mean_loss": 0.7401088608560318,
+        "seconds": 4028.282585457986,
+        "validation_loss": 1.056339595562317
+      }
+    ],
+    "n_cases": 14039,
+    "n_questions": 54423,
+    "seconds": 8103.632821250008,
+    "first_loss": 1.601435837242812,
+    "final_loss": 0.7401088608560318,
+    "kept_epoch": 4,
+    "n_rationales": 0
+  },
+  "argv": [
+    "--backbone",
+    "qwen2.5-0.5b",
+    "--device",
+    "mps",
+    "--epochs",
+    "4",
+    "--seed",
+    "0",
+    "--out",
+    "runs/mix-05b-s0"
+  ]
+}

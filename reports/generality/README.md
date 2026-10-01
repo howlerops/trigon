@@ -27,6 +27,7 @@ on BoolQ, where always answering "yes" scores 0.62.
 | 0.5B, Banking77, `--reshape-max 77` | 0.011 | **0.782** | **0.677** | 0.420 | 0.369 | **0.867** |
 | 0.5B, Banking77, reshape + crossover balance 0.5 | 0.030 | 0.664 | 0.565 | 0.451 | 0.369 | 0.802 |
 | 0.5B, mix of six corpora, 2 epochs, crossover 256 | 0.358 | 0.427 | 0.366 | 0.226 | 0.605 | 0.613 |
+| the same mix, resumed to 4 epochs | 0.602 | 0.680 | 0.586 | 0.251 | 0.586 | 0.824 |
 
 Every 0.5B row is one seed (seed 0) trained locally on Apple MPS, and is a
 measurement, not a certification. ECE beside its noise floor is in each
@@ -64,7 +65,15 @@ epochs: validation loss was still falling steeply (1.66 → 1.28). It reads
 the always-yes rate (0.62); everything else is below the Banking77-only
 reshape model, CLINC150 included. Calibration held: no calibrator was
 needed on any primitive, and the Banking77 tasks sit within their floors.
-The same run extended to four epochs is next.
+**Four epochs improve what the mix contains and not what it does not.**
+Resumed to four epochs (the schedule recomputed for four at the resume, so
+not identical to a four-epoch run from the start): Banking77 rises to 0.680
+shifted, 0.586 renamed, 0.824 order agreement and 0.602 at 77 options;
+CLINC150 stays at 0.251 and BoolQ at 0.586, below always-yes. Calibration
+moved the wrong way, ECE 0.086–0.116 against floors near 0.045, and no
+calibrator was accepted on held-out calibration data (choice 0.0607 raw
+against 0.0518 fitted, inside its noise). **Held-out task transfer is not a
+matter of more epochs on these six corpora at 0.5B.**
 
 **6. The hosted service is not order-invariant either**, and depends on
 option wording: re-ordering identical options changes 36% of its answers,
