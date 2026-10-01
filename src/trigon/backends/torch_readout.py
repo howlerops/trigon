@@ -83,7 +83,7 @@ from ..schema import (
     SegmentKind,
     mask_shape_key,
 )
-from ..schema.compiler import MASK_CACHE_CELLS
+from ..schema.compiler import DOT_PRODUCT_CROSSOVER, MASK_CACHE_CELLS
 from ..schema.tokens import CallableEstimator
 from ..types import DecisionRequest
 from .base import BackendOutput, QuestionOutput
@@ -206,6 +206,7 @@ class ReadoutConfig:
         match_residual: bool = True,
         match_residual_score: bool = False,
         evidence_supervised: bool = False,
+        option_crossover: int = DOT_PRODUCT_CROSSOVER,
     ) -> None:
         if d_model % n_heads:
             raise ValueError(f"d_model {d_model} must divide by n_heads {n_heads}")
@@ -245,6 +246,9 @@ class ReadoutConfig:
         #: because an evidence head nobody trained is a random projection, and
         #: its spans would look exactly as confident as a trained one's.
         self.evidence_supervised = evidence_supervised
+        #: Saved with the checkpoint, because it decides which Choice head
+        #: answers and only the trained one should (`option_crossover_of`).
+        self.option_crossover = option_crossover
 
 
 def _sinusoidal(length: int, d_model: int, device, dtype) -> torch.Tensor:
@@ -609,6 +613,7 @@ class TorchReadoutBackend:
 
     def make_compiler(self, **kwargs) -> SchemaCompiler:
         """A compiler wired to this backend's tokenizer."""
+        kwargs.setdefault("crossover", self.config.option_crossover)
         return SchemaCompiler(estimator=self.estimator, **kwargs)
 
     def quantized(self) -> TorchReadoutBackend:
@@ -682,6 +687,7 @@ class TorchReadoutBackend:
                     "match_normalize": self.config.match_normalize,
                     "match_residual": self.config.match_residual,
                     "evidence_supervised": self.config.evidence_supervised,
+                    "option_crossover": self.config.option_crossover,
                 },
                 "tokenizer": describe(self.tokenizer),
                 "state_dict": self.model.state_dict(),

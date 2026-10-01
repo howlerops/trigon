@@ -106,3 +106,24 @@ def test_renames_keep_the_words():
         assert rename("card_not_Working").lower().replace("-", " ").replace("_", " ") == (
             "card not working"
         ), name
+
+
+def test_the_crossover_fraction_trains_both_scoring_heads():
+    """Half the reshapes above the crossover, half at or below it."""
+    from trigon.schema.compiler import DOT_PRODUCT_CROSSOVER
+
+    spec = Reshape(min_options=2, max_options=77, crossover_fraction=0.5)
+    rng = random.Random(0)
+    sizes = [
+        len(reshape_case(_case(), rng, spec).request.questions["intent"].options)
+        for _ in range(400)
+    ]
+    above = sum(size > DOT_PRODUCT_CROSSOVER for size in sizes) / len(sizes)
+    assert 0.4 < above < 0.6
+    assert min(sizes) >= 2 and max(sizes) <= 77
+    # Without it, a uniform draw puts only 13 of 76 sizes above.
+    plain = [
+        len(reshape_case(_case(), rng, Reshape(max_options=77)).request.questions["intent"].options)
+        for _ in range(400)
+    ]
+    assert sum(size > DOT_PRODUCT_CROSSOVER for size in plain) / len(plain) < 0.3

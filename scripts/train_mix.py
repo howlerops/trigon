@@ -87,6 +87,23 @@ def main() -> int:
     parser.add_argument("--reshape-max", type=int, default=77)
     parser.add_argument("--reshape-rename", type=float, default=0.3)
     parser.add_argument("--reshape-criteria-only", type=float, default=0.1)
+    parser.add_argument(
+        "--reshape-crossover-fraction",
+        type=float,
+        default=0.0,
+        help="share of reshapes above --option-crossover, so both Choice heads train",
+    )
+    parser.add_argument(
+        "--option-crossover",
+        type=int,
+        default=256,
+        help=(
+            "above this many options a Choice is scored by the dot-product head; saved "
+            "with the weights. The per-option head learns option names quickly and the "
+            "dot-product head barely moved in three epochs at 0.5B, so the default puts "
+            "every corpus in the mix -- and the incumbent's 50-option cap -- under it"
+        ),
+    )
     parser.add_argument("--max-batch-cells", type=int, default=20_000_000)
     parser.add_argument("--log-every", type=int, default=100)
     parser.add_argument("--out", type=pathlib.Path, required=True)
@@ -112,6 +129,8 @@ def main() -> int:
         shuffle=True,
         rename=args.reshape_rename,
         criteria_only=args.reshape_criteria_only,
+        crossover_fraction=args.reshape_crossover_fraction,
+        crossover=args.option_crossover,
     )
 
     train, calibration, drawn = [], [], {}
@@ -127,8 +146,14 @@ def main() -> int:
         print(f"mix: {name} {drawn[name]}", file=sys.stderr, flush=True)
     calibration = reshape_all(calibration, reshape, seed=args.seed + 11)
 
+    from trigon.backends.torch_readout import ReadoutConfig
+
     backend = QwenReadoutBackend.from_backbone(
-        args.backbone, device=device, seed=args.seed, lora_rank=args.lora_rank
+        args.backbone,
+        device=device,
+        seed=args.seed,
+        lora_rank=args.lora_rank,
+        config=ReadoutConfig(option_crossover=args.option_crossover),
     )
     backend.model.checkpointing = True
     backend.to(device)
@@ -169,6 +194,7 @@ def main() -> int:
         json.dumps(
             {
                 "backbone": args.backbone,
+                "option_crossover": args.option_crossover,
                 "model_version": backend.model_version,
                 "device": f"{device} ({hardware})",
                 "seed": args.seed,

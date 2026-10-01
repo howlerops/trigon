@@ -252,6 +252,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--reshape-min", type=int, default=2)
     parser.add_argument(
+        "--reshape-crossover-fraction",
+        type=float,
+        default=0.5,
+        help=(
+            "with --reshape-max: share of reshapes above the scoring crossover "
+            "(DOT_PRODUCT_CROSSOVER), so both Choice heads train"
+        ),
+    )
+    parser.add_argument(
         "--reshape-rename",
         type=float,
         default=0.0,
@@ -405,6 +414,7 @@ def reshape_spec(args):
         shuffle=True,
         rename=args.reshape_rename,
         criteria_only=args.reshape_criteria_only,
+        crossover_fraction=args.reshape_crossover_fraction,
     )
 
 
@@ -658,6 +668,7 @@ def header(
                 f" --reshape-max {args.reshape_max} --reshape-min {args.reshape_min}"
                 f" --reshape-rename {args.reshape_rename}"
                 f" --reshape-criteria-only {args.reshape_criteria_only}"
+                f" --reshape-crossover-fraction {args.reshape_crossover_fraction}"
                 if args.reshape_max
                 else ""
             )

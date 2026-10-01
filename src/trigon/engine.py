@@ -25,7 +25,13 @@ import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 
-from .backends.base import Backend, QuestionOutput, estimator_of, validate_output
+from .backends.base import (
+    Backend,
+    QuestionOutput,
+    estimator_of,
+    option_crossover_of,
+    validate_output,
+)
 from .calibration.conformal import ConformalPredictor
 from .calibration.isotonic import IsotonicCalibrator
 from .calibration.temperature import TemperatureScaler
@@ -90,7 +96,9 @@ class Engine:
         # counts have to match the tensors the backend builds, and a mismatch
         # is a 500 at serve time rather than anything a caller can fix.
         self.compiler = compiler or SchemaCompiler(
-            budget=self.config.budget, estimator=estimator_of(backend)
+            budget=self.config.budget,
+            estimator=estimator_of(backend),
+            crossover=option_crossover_of(backend),
         )
         self.scaler = scaler or TemperatureScaler()
         # Two calibrators, selected per primitive at fit time, because neither

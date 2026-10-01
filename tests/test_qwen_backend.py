@@ -452,3 +452,50 @@ def test_the_int8_cpu_twin_merges_the_adapter_and_answers_nearly_the_same():
             "p": b.answers[qid].model_dump()["probability"]
         }
         assert max(abs(pa[k] - pb[k]) for k in pa) < 0.05, qid
+
+
+def test_the_option_crossover_belongs_to_the_checkpoint(tmp_path):
+    """Which Choice head answers is decided by the weights' own crossover.
+
+    A model trained at 77 options under a crossover of 64 only ever trained
+    its dot-product head; served 50 options, it answered from the other one
+    at its initialisation. So the crossover is saved with the checkpoint and
+    the engine compiles with it, and a checkpoint that records none keeps 64.
+    """
+    from trigon.backends.torch_readout import ReadoutConfig
+    from trigon.schema import OptionScoring
+    from trigon.schema.compiler import DOT_PRODUCT_CROSSOVER
+
+    tokenizer = default_tokenizer()
+    shape = QwenShape(
+        vocab_size=tokenizer.vocab_size, d_model=64, n_layers=2, n_heads=4, n_kv_heads=2, d_ff=96
+    )
+    model = QwenPrefillModel(shape, lora_rank=4, lora_alpha=8.0)
+    backend = QwenReadoutBackend(
+        model, tokenizer, backbone=None, config=ReadoutConfig(option_crossover=256)
+    )
+    hundred = DecisionRequest(
+        state=STATE,
+        questions={
+            "q": ChoiceQuestion(
+                instructions="Pick.", options=[{"name": f"o{i}"} for i in range(100)]
+            )
+        },
+    )
+
+    def scoring(engine: Engine) -> OptionScoring:
+        return engine.compiler.compile_request(hundred).schema.questions[0].option_scoring
+
+    assert scoring(Engine(backend)) is OptionScoring.READOUT_PER_OPTION
+    path = tmp_path / "adapter.pt"
+    backend.save(path)
+    loaded = TorchReadoutBackend.load(path)
+    assert loaded.config.option_crossover == 256
+    assert scoring(Engine(loaded)) is OptionScoring.READOUT_PER_OPTION
+
+    payload = torch.load(path, weights_only=False)
+    del payload["config"]["option_crossover"]
+    torch.save(payload, path)
+    old = TorchReadoutBackend.load(path)
+    assert old.config.option_crossover == DOT_PRODUCT_CROSSOVER
+    assert scoring(Engine(old)) is OptionScoring.DOT_PRODUCT

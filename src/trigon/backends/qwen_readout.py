@@ -605,6 +605,7 @@ class QwenReadoutBackend(TorchReadoutBackend):
                 "match_residual": self.config.match_residual,
                 "match_residual_score": self.config.match_residual_score,
                 "evidence_supervised": self.config.evidence_supervised,
+                "option_crossover": self.config.option_crossover,
             },
             "tokenizer": describe(self.tokenizer),
             "trainable": {k: v.detach().cpu() for k, v in model.trainable_state().items()},

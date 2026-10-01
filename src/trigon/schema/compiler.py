@@ -263,8 +263,14 @@ class SchemaCompiler:
         isolate_question_schemas: bool = True,
         state_attends_to_schema: bool = False,
         bidirectional: bool = True,
+        crossover: int = DOT_PRODUCT_CROSSOVER,
     ) -> None:
         self.estimator = estimator or CharHeuristicEstimator()
+        #: Above this many options a Choice is scored by the dot-product head,
+        #: at or below it by the per-option readout. A property of the weights,
+        #: not of the compiler -- training reaches only the heads its option
+        #: counts select -- so a backend passes its own (`option_crossover_of`).
+        self.crossover = crossover
         self.budget = budget
         self.option_scoring = option_scoring
         self.isolate_question_schemas = isolate_question_schemas
@@ -379,7 +385,7 @@ class SchemaCompiler:
             return OptionScoring.DOT_PRODUCT
         if self.option_scoring is not OptionScoring.AUTO:
             return self.option_scoring
-        if cardinality > DOT_PRODUCT_CROSSOVER:
+        if cardinality > self.crossover:
             return OptionScoring.DOT_PRODUCT
         return OptionScoring.READOUT_PER_OPTION
 

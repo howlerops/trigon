@@ -29,6 +29,7 @@ import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 
+from ..schema.compiler import DOT_PRODUCT_CROSSOVER
 from ..types import ChoiceQuestion, OptionSpec
 from .harness import Case, Expectation
 
@@ -74,6 +75,16 @@ class Reshape:
     paraphrases: dict[str, Sequence[str]] | None = None
     paraphrase: float = 0.0
     criteria_only: float = 0.0
+    #: Share of reshapes drawn *above* the scoring crossover, where a question
+    #: has more options than it. A Choice over more than
+    #: `DOT_PRODUCT_CROSSOVER` options is scored by the dot-product head and
+    #: one over fewer by the per-option readout head, so a size drawn uniformly
+    #: from 2..77 trains the second and leaves the first near its
+    #: initialisation: validation at 77 options sat at ln 77 for three epochs
+    #: while training loss halved. 0.5 trains both. Ignored for a question
+    #: that cannot exceed the crossover.
+    crossover_fraction: float = 0.0
+    crossover: int = DOT_PRODUCT_CROSSOVER
 
     def __call__(self, case: Case, rng: random.Random) -> Case:
         return reshape_case(case, rng, self)
@@ -138,6 +149,11 @@ def reshape_case(case: Case, rng: random.Random, spec: Reshape) -> Case:
         if label is not None:
             upper = n if spec.max_options is None else min(n, spec.max_options)
             lower = min(max(2, spec.min_options), upper)
+            if spec.crossover_fraction and upper > spec.crossover >= lower:
+                if rng.random() < spec.crossover_fraction:
+                    lower = spec.crossover + 1
+                else:
+                    upper = spec.crossover
             size = rng.randint(lower, upper)
             others = [i for i in indices if i != label]
             keep = sorted([label, *rng.sample(others, size - 1)])
