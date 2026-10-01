@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Build the teacher-labelled stream on this machine, with a local MoE teacher.
 
-    ollama pull qwen3:30b            # Qwen3-30B-A3B, Apache-2.0, ~3B active per token
+    ollama pull qwen3.6:35b-a3b      # Qwen3.6-35B-A3B, Apache-2.0, ~3B active per token
     python scripts/local_teacher.py --n 6000 --seed 1 --out "$TRIGON_CORPUS_CACHE/teacher-local"
 
 `scripts/modal_teacher.py` builds the same stream on rented GPUs with vLLM.
@@ -9,7 +9,8 @@ This builds it through a local ollama server instead, and differs in exactly
 two places, both recorded on every record:
 
 * **The teacher** is the ollama model named by ``--model`` (default
-  ``qwen3:30b``, the Qwen3-30B-A3B mixture of experts), pinned by the digest
+  ``qwen3.6:35b-a3b``, the Qwen3.6-35B-A3B mixture of experts; ``qwen3:30b``,
+  Qwen3-30B-A3B, also works), pinned by the digest
   ollama reports for it at build time rather than by a Hugging Face revision.
   Thinking is suppressed with Qwen3's documented empty think block.
 * **The label readout** is first-token: each option is given a letter, the
@@ -146,7 +147,7 @@ def main() -> int:
     parser.add_argument("--n", type=int, default=6000)
     parser.add_argument("--seed", type=int, default=1, help="the build's plan seed; tw0 used 0")
     parser.add_argument("--start", type=int, default=0)
-    parser.add_argument("--model", default="qwen3:30b")
+    parser.add_argument("--model", default="qwen3.6:35b-a3b")
     parser.add_argument("--host", default="http://localhost:11434")
     parser.add_argument("--concurrency", type=int, default=2)
     parser.add_argument("--out", type=pathlib.Path, required=True)
