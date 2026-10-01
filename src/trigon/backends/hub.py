@@ -55,6 +55,23 @@ BACKBONES: dict[str, Backbone] = {
         "060db6499f32faf8b98477b0a26969ef7d8b9987",
         "Apache-2.0",
     ),
+    # Qwen3 (2025), post-trained: the instruction-following model, not -Base.
+    # Full attention with a per-head QK-norm and its own head_dim
+    # (`QwenShape`). The newer Qwen3.5 small models are three-quarters linear
+    # attention, which the block mask cannot reach, so they are not here.
+    "qwen3-0.6b": Backbone(
+        "qwen3-0.6b",
+        "Qwen/Qwen3-0.6B",
+        "c1899de289a04d12100db370d81485cdf75e47ca",
+        "Apache-2.0",
+    ),
+    "qwen3-1.7b": Backbone(
+        "qwen3-1.7b",
+        "Qwen/Qwen3-1.7B",
+        "70d244cc86ccca08cf5af4e1e306ecf908b1ad5e",
+        "Apache-2.0",
+        sharded=True,
+    ),
     # Four bf16 shards, 15.2 GB. Untied embeddings: `lm_head.weight` is its
     # own tensor here, and unused, as the tied one is on the smaller models.
     "qwen2.5-7b": Backbone(

@@ -499,3 +499,49 @@ def test_the_option_crossover_belongs_to_the_checkpoint(tmp_path):
     old = TorchReadoutBackend.load(path)
     assert old.config.option_crossover == DOT_PRODUCT_CROSSOVER
     assert scoring(Engine(old)) is OptionScoring.DOT_PRODUCT
+
+
+def test_a_qwen3_shape_keeps_the_architectural_claims():
+    """Qwen3: head_dim apart from the width, no q/k/v bias, QK-norm per head.
+
+    The real 0.6B matches `transformers` to 0.0 (`scripts/backbone_parity.py`);
+    this pins the shape on a tiny model, and that the claims the mask makes --
+    one question's answer unmoved by another's -- hold through the new norm.
+    """
+    tokenizer = default_tokenizer()
+    torch.manual_seed(0)
+    shape = QwenShape(
+        vocab_size=tokenizer.vocab_size,
+        d_model=48,
+        n_layers=2,
+        n_heads=4,
+        n_kv_heads=2,
+        d_ff=96,
+        head_dim=32,
+        attention_bias=False,
+        qk_norm=True,
+    )
+    model = QwenPrefillModel(shape, lora_rank=4, lora_alpha=8.0)
+    attention = model.layers[0].self_attn
+    assert attention.q_proj.base.weight.shape == (4 * 32, 48)
+    assert attention.o_proj.base.weight.shape == (48, 4 * 32)
+    assert attention.q_proj.base.bias is None and attention.q_norm.weight.shape == (32,)
+    with torch.no_grad():
+        for p in model.parameters():
+            if not p.requires_grad and p.dim() > 1:
+                p.normal_(std=0.05)
+    engine = Engine(QwenReadoutBackend(model, tokenizer, backbone=None))
+    before = _answers(engine, BASE)
+    extra = {**BASE, "other": NoulQuestion(instructions="Is this about travel?")}
+    after = _answers(engine, extra)
+    for qid in BASE:
+        assert_answer_unmoved(before[qid], after[qid], qid)
+    # A shape saved before Qwen3 existed rebuilds Qwen2.
+    old = {
+        k: v
+        for k, v in shape.to_dict().items()
+        if k not in ("head_dim", "attention_bias", "qk_norm")
+    }
+    old["d_model"], old["n_heads"] = 64, 4
+    rebuilt = QwenShape(**old)
+    assert (rebuilt.head_dim, rebuilt.attention_bias, rebuilt.qk_norm) == (16, True, False)
