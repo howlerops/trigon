@@ -59,6 +59,12 @@ from trigon.types import ChoiceQuestion, NoulQuestion  # noqa: E402
 
 LETTERS = "ABCDEFGHIJKLMNOPQRST"
 
+#: Every request names the same context, so ollama loads the model once. Left
+#: to its default it allocates the model's 262,144-token window per slot, which
+#: on a 64 GB machine sharing memory with anything else meant eviction and a
+#: reload mid-build -- 120 cases an hour. A case is under 4,000 tokens.
+NUM_CTX = 8192
+
 LABEL_SYSTEM = (
     "You label one decision about a piece of state. Read the state and the question, "
     "then answer with the single letter of the option that fits best."
@@ -117,7 +123,7 @@ def label(host: str, model: str, state, question) -> dict:
             "prompt": prompt,
             "logprobs": True,
             "top_logprobs": 20,
-            "options": {"temperature": 0, "num_predict": 1},
+            "options": {"temperature": 0, "num_predict": 1, "num_ctx": NUM_CTX},
         },
     )
     top = out["logprobs"][0]["top_logprobs"]
@@ -188,7 +194,11 @@ def main() -> int:
                     "raw": True,
                     "stream": False,
                     "prompt": _chat(generation_messages(plan), prefill=""),
+                    # Constrained to JSON: a sixth of unconstrained generations
+                    # were refused for malformed JSON, each a wasted minute.
+                    "format": "json",
                     "options": {
+                        "num_ctx": NUM_CTX,
                         "temperature": 0.7,
                         "top_p": 0.9,
                         "seed": plan.sample_seed,
