@@ -600,6 +600,37 @@ MIND2WEB = CorpusSpec(
     instructions="(each step carries its own goal)",
 )
 
+#: The other nine shards of the same train split, for training. Held apart from
+#: `mind2web` by *website*: a step from any site that appears in the
+#: evaluation shard is dropped, so the evaluation measures acting on sites the
+#: model has never seen, not recall of a site's layout.
+MIND2WEB_TRAIN = CorpusSpec(
+    name="mind2web-train",
+    primitive="choice",
+    tier="green",
+    licence="CC BY 4.0",
+    attribution=MIND2WEB.attribution,
+    files={
+        f"part{i}": (
+            "https://huggingface.co/datasets/osunlp/Mind2Web/resolve/"
+            f"17ece8eb89862368edc0cc806acee6fca5163474/data/train/train_{i}.json"
+        )
+        for i in (0, 2, 3, 4, 5, 6, 7, 8, 9)
+    },
+    sha256={
+        "part0": "c8b622901057bca813a6d171733c41e4fc266c2902a23d63b9094c0add3f8f2c",
+        "part2": "3e8a77b835517a3b88d59d0afb3412448b3bbf7f6791db796459268f73106bdf",
+        "part3": "65077d1e9b89984e6fca2494c2a3137e4920a19161e5086b7aa88837b6188405",
+        "part4": "fcb8903310ffe43e3e1e9e50f8744b7a0ca0299e9772fef3fc124355e1eeeb0b",
+        "part5": "a6bf7490e3c8808363f829a6eb97a194578886ee7a73f3de65ec6d8c6cfca6dd",
+        "part6": "49b2764d8ce2d902448d024de0a7e3943169c3c4209d2fc6ddedcc353c4b3296",
+        "part7": "085e5bf60e0ba8a6bafb861bafc6a15660853f9408ca7f5817b11b6670bd9642",
+        "part8": "0cb825512cbc19a9ee0bd41b32f7b6cd2640ae0e91f3cb4263c70356600b6acf",
+        "part9": "07377a0c1a06c0aef22dd3c2ed400f393add51dc2cb727e859c0928acdaa5077",
+    },
+    instructions="(each step carries its own goal)",
+)
+
 CORPORA: dict[str, CorpusSpec] = {
     c.name: c
     for c in (
@@ -612,6 +643,7 @@ CORPORA: dict[str, CorpusSpec] = {
         CLINC150,
         BOOLQ,
         MIND2WEB,
+        MIND2WEB_TRAIN,
     )
 }
 
@@ -1276,6 +1308,36 @@ def _load_mind2web(
 
 
 _LOADERS[MIND2WEB.name] = _load_mind2web
+
+
+def _load_mind2web_train(
+    spec: CorpusSpec, split: str, *, limit: int | None = None, root: pathlib.Path | None = None
+) -> list[Case]:
+    """Steps from the training shards, every evaluation website excluded."""
+    import random as _random
+
+    from .webact import case as _case
+    from .webact import steps as _steps
+
+    if split != "train":
+        raise KeyError(f"{spec.name} has one split, 'train'; got {split!r}")
+    evaluation = fetch(MIND2WEB, root=root)["test"]
+    held_out = {t.get("website") for t in json.loads(evaluation.read_text(encoding="utf-8"))}
+    rng = _random.Random(20261002)
+    out: list[Case] = []
+    for key in sorted(spec.files):
+        tasks = json.loads(fetch(spec, root=root)[key].read_text(encoding="utf-8"))
+        tasks = [t for t in tasks if t.get("website") not in held_out]
+        for step in _steps(tasks, prefix=spec.name):
+            built = _case(step, rng)
+            if built is not None:
+                out.append(built)
+            if limit and len(out) >= limit:
+                return out
+    return out
+
+
+_LOADERS[MIND2WEB_TRAIN.name] = _load_mind2web_train
 
 
 # -- The teacher-labelled synthetic-workflow stream ----------------------------
