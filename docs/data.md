@@ -87,6 +87,7 @@ Rows marked *unchecked* keep the plan's assumption and are still blockers.
 | --- | --- | --- | --- | --- |
 | Banking77 | Choice (77) | CC BY 4.0 | **green** ✓ | HF `PolyAI/banking77` metadata |
 | CLINC150 | Choice (151) | **CC BY 3.0** | **green** ⬆ | HF `clinc/clinc_oos` metadata |
+| Mind2Web | Choice (operation + element, per step) | **CC BY 4.0** | **green** ✓ — held out by decision: the web-action evaluation | HF `osunlp/Mind2Web` metadata at `17ece8eb8986`, checked 2026-10-02; train split only, the test splits are not used |
 | MASSIVE | Choice (60) | CC BY 4.0 | **green** ✓ | HF `AmazonScience/massive` metadata |
 | AG News | Choice (4) | **licence "unknown" on the dataset card** | **red** | HF `fancyzhx/ag_news` |
 | DBpedia-14 | Choice (14) | **CC BY-SA 3.0 + GFDL** | **amber** ⬆ | HF `fancyzhx/dbpedia_14` |

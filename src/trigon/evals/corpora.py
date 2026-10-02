@@ -576,6 +576,30 @@ BOOLQ = CorpusSpec(
     state_fields=("passage",),
 )
 
+#: Real-website action steps, the ground truth for `trigon.evals.webact`. Green
+#: and trainable, held out by decision like CLINC150: it is the web-agent
+#: workload's evaluation, and a mix that trained on it could not be judged by
+#: it. One shard of the train split (the test splits are distributed encrypted
+#: and are not used); `_load_mind2web` builds one request per step.
+MIND2WEB = CorpusSpec(
+    name="mind2web",
+    primitive="choice",
+    tier="green",
+    licence="CC BY 4.0",
+    attribution=(
+        "Mind2Web (Deng et al., 2023), The Ohio State University. CC BY 4.0. "
+        "https://huggingface.co/datasets/osunlp/Mind2Web"
+    ),
+    files={
+        "test": (
+            "https://huggingface.co/datasets/osunlp/Mind2Web/resolve/"
+            "17ece8eb89862368edc0cc806acee6fca5163474/data/train/train_1.json"
+        ),
+    },
+    sha256={"test": "41084922c50174ec032185707ae43bb04d3e8d725788b2e95936db629ba59100"},
+    instructions="(each step carries its own goal)",
+)
+
 CORPORA: dict[str, CorpusSpec] = {
     c.name: c
     for c in (
@@ -587,6 +611,7 @@ CORPORA: dict[str, CorpusSpec] = {
         CIRCA,
         CLINC150,
         BOOLQ,
+        MIND2WEB,
     )
 }
 
@@ -1237,6 +1262,20 @@ def _load_boolq(
 
 
 _LOADERS[BOOLQ.name] = _load_boolq
+
+
+def _load_mind2web(
+    spec: CorpusSpec, split: str, *, limit: int | None = None, root: pathlib.Path | None = None
+) -> list[Case]:
+    from .webact import cases_from_file
+
+    paths = fetch(spec, root=root)
+    if split not in paths:
+        raise KeyError(f"{spec.name} has no split {split!r}; it has {sorted(paths)}")
+    return cases_from_file(str(paths[split]), limit or 1000)
+
+
+_LOADERS[MIND2WEB.name] = _load_mind2web
 
 
 # -- The teacher-labelled synthetic-workflow stream ----------------------------
