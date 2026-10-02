@@ -29,6 +29,7 @@ on BoolQ, where always answering "yes" scores 0.62.
 | 0.5B, mix of six corpora, 2 epochs, crossover 256 | 0.358 | 0.427 | 0.366 | 0.226 | 0.605 | 0.613 |
 | the same mix, resumed to 4 epochs | 0.602 | 0.680 | 0.586 | 0.251 | 0.586 | 0.824 |
 | **the same mix on Qwen3-0.6B**, 4 epochs from the start | 0.663 | 0.729 | 0.653 | **0.585** | 0.565 | 0.832 |
+| MiniCPM5-1B, the mix plus 1,464 local-teacher cases (workflows and documents), 4 epochs | **0.751** | **0.806** | **0.695** | 0.487 | 0.524 | **0.919** |
 
 Every 0.5B row is one seed (seed 0) trained locally on Apple MPS, and is a
 measurement, not a certification. ECE beside its noise floor is in each
@@ -77,6 +78,8 @@ against 0.0518 fitted, inside its noise). **Held-out task transfer is not a
 matter of more epochs on these six corpora at 0.5B.**
 
 **The backbone was the bottleneck on held-out tasks.** The same six-corpus mix on Qwen3-0.6B (2025, post-trained, QK-norm; `scripts/backbone_parity.py` exact) instead of Qwen2.5-0.5B more than doubles CLINC150, 0.251 to 0.585, and lifts every Banking77 task. BoolQ does not move (0.565, still under always-yes). Calibration on the held-out tasks is not there yet: ECE 0.168 on CLINC150 and 0.161 on BoolQ against floors near 0.043; the cross-task calibrator applied temperatures to Noul and Score and declined Choice. Trained in 8 h on Apple MPS — 2× Qwen2.5-0.5B's time, as its width predicts once nothing else is resident in unified memory (an 18 GB ollama model alongside made it 5×).
+
+**MiniCPM5-1B with the local teacher is the strongest on what the mix contains and the weakest on transfer.** Best on every Banking77 task, 0.919 order agreement, and ECE within or near its floor on all four Banking77 tasks with no calibrator applied; but CLINC150 0.487 against Qwen3-0.6B's 0.585, and BoolQ 0.524. Two things changed at once -- backbone and data -- so this does not say which; the document-reading teacher cases, built for BoolQ's shape, did not lift BoolQ.
 
 **6. The hosted service is not order-invariant either**, and depends on
 option wording: re-ordering identical options changes 36% of its answers,
