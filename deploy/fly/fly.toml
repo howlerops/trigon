@@ -1,0 +1,41 @@
+# A scale-to-zero test endpoint on Fly.io. docs/self-host.md has the rest.
+#
+#   fly apps create <name>                 # once
+#   fly volumes create trigon_cache --size 5 -r <region> -a <name>   # once
+#   fly secrets set TRIGON_API_KEYS=<key> -a <name>
+#   fly deploy -c deploy/fly/fly.toml -a <name> <build context with ./bundle>
+#
+# The model is baked in (deploy/fly/Dockerfile copies ./bundle to /model); the
+# backbone is fetched from Hugging Face on first start into the volume, so a
+# machine that wakes from zero loads it from disk, not the network.
+primary_region = "lax"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  TRIGON_CACHE_PREFIXES = "1"
+  TRIGON_WEIGHTS_CACHE = "/cache/backbones"
+
+[[mounts]]
+  source = "trigon_cache"
+  destination = "/cache"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [[http_service.checks]]
+    grace_period = "300s"
+    interval = "30s"
+    method = "GET"
+    path = "/healthz"
+    timeout = "5s"
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 4
+  memory = "8gb"

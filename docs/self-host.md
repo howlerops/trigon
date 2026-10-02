@@ -47,6 +47,24 @@ writes.
 `/healthz` reports whether the calibrators loaded, whether the schema cache is
 on and whether the int8 path is serving -- check it before trusting a number.
 
+## A cheap test endpoint
+
+`deploy/fly/` runs the image on Fly.io with the bundle baked in, the backbone
+cached on a volume, an API key required and machines stopped when idle -- the
+cost is the seconds a machine is awake. Measured on `shared-cpu-4x`, 8 GB:
+0.30 s round trip for a warm two-question request from Arizona to `lax`, 0.69 s
+on the first. Cloudflare Containers is the other scale-to-zero option
+(`standard-3`: 2 vCPU, 8 GiB, billed per 10 ms awake); its disk does not
+persist, so the backbone would be baked into the image.
+
+## Where the models live
+
+A bundle is published to a Hugging Face model repository (revision-pinned,
+with a model card naming every corpus and its licence) and mirrored to
+Cloudflare R2, which charges nothing for egress, with the same SHA-256 checked
+by `docker/entrypoint.py` from either. The backbone is never re-published: it
+is fetched from its own repository at the pinned revision.
+
 ## Two front doors
 
 * `POST /v1/decide` -- the native contract (`spec/openapi.json`).
