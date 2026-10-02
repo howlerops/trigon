@@ -1,0 +1,36 @@
+# One self-hosted service for typed decisions, and the text model an agent needs.
+#
+#   ./bundle/               adapter.pt, temperatures.json, isotonic.json -- a model
+#                           trained here (scripts/train_mix.py) or a release bundle
+#   docker compose up
+#
+# trigon answers on :8000 -- /v1/decide (native) and /compat/<the incumbent's path> (the
+# incumbent's wire, for a client that changes only its base URL). ollama answers
+# on :11434 with an OpenAI-compatible /v1 for free text: a browser agent's
+# TYPE_TEXT values, which a prefill-only decision model deliberately never writes.
+# Nothing here calls a hosted API. docs/self-host.md has the details.
+services:
+  trigon:
+    build: .
+    image: trigon:local
+    ports: ["8000:8000"]
+    volumes:
+      - ./bundle:/model:ro
+      - trigon-cache:/cache
+    environment:
+      # The schema prefix cache: an agent re-sends the same instructions every
+      # step, so this is where its repeated schema stops costing a prefill.
+      TRIGON_CACHE_PREFIXES: "1"
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama
+    ports: ["11434:11434"]
+    volumes: [ollama:/root/.ollama]
+    environment:
+      OLLAMA_NUM_PARALLEL: "4"
+    restart: unless-stopped
+
+volumes:
+  trigon-cache: {}
+  ollama: {}
