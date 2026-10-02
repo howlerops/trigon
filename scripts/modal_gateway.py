@@ -158,3 +158,82 @@ def bench(requests: list[dict], repeats: int = 2) -> dict:
         "prefill_tokens_median": statistics.median(tokens),
         "bundle": os.environ["TRIGON_BUNDLE"],
     }
+
+
+#: Where requests enter Modal. A Modal Server routes through a low-latency
+#: proxy pinned here instead of the general web-function ingress, which cost
+#: ~450 ms of every ~515 ms round trip while the model took 64 ms.
+ROUTING_REGION = os.environ.get("TRIGON_GATEWAY_ROUTING_REGION", "us-west")
+PORT = 8000
+
+
+@app.server(
+    image=image,
+    gpu=GPU,
+    volumes={"/runs": runs, "/weights": weights},
+    secrets=[modal.Secret.from_name("trigon-gateway-auth")],
+    port=PORT,
+    routing_region=ROUTING_REGION,
+    min_containers=0,
+    max_containers=MAX_CONTAINERS,
+    target_concurrency=8,
+    # The default drained a ready replica a minute after its first request;
+    # five minutes keeps it across the gaps between an agent's steps.
+    scaledown_window=300,
+    startup_timeout=600,
+    exit_grace_period=10,
+)
+class Gateway:
+    """The same gateway as `gateway`, as a process behind Modal's low-latency router.
+
+    Authenticated by Modal by default, like the web function: the Worker's
+    proxy token is what reaches it.
+    """
+
+    @modal.enter()
+    def start(self) -> None:
+        import subprocess
+        import time
+        import urllib.request
+
+        bundle = pathlib.Path("/runs/bundles") / os.environ["TRIGON_BUNDLE"]
+        env = dict(
+            os.environ,
+            TRIGON_BACKEND="torch",
+            TRIGON_WEIGHTS=str(bundle / "adapter.pt"),
+            TRIGON_RATE_PER_MINUTE=os.environ.get("TRIGON_RATE_PER_MINUTE", "600"),
+        )
+        for name, variable in (
+            ("temperatures.json", "TRIGON_TEMPERATURE_PATH"),
+            ("isotonic.json", "TRIGON_ISOTONIC_PATH"),
+        ):
+            if (bundle / name).exists():
+                env[variable] = str(bundle / name)
+        self.process = subprocess.Popen(
+            [
+                "python",
+                "-m",
+                "uvicorn",
+                "trigon.server.app:build_app",
+                "--factory",
+                "--host",
+                "0.0.0.0",
+                "--port",
+                str(PORT),
+            ],
+            env=env,
+        )
+        deadline = time.monotonic() + 590
+        while time.monotonic() < deadline:
+            if self.process.poll() is not None:
+                raise RuntimeError(f"gateway exited with {self.process.returncode}")
+            try:
+                with urllib.request.urlopen(f"http://127.0.0.1:{PORT}/healthz", timeout=2):
+                    return
+            except OSError:
+                time.sleep(1)
+        raise RuntimeError("gateway did not become healthy")
+
+    @modal.exit()
+    def stop(self) -> None:
+        self.process.terminate()

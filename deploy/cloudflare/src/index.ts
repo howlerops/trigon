@@ -52,18 +52,35 @@ async function authorised(request: Request, env: Env): Promise<boolean> {
   return ok;
 }
 
+/** How long a request may wait for a GPU replica to come up from zero. */
+const COLD_START_BUDGET_MS = 90_000;
+
 async function forward(request: Request, env: Env, path: string): Promise<Response> {
   const url = new URL(path + new URL(request.url).search, env.ORIGIN);
-  const upstream = await fetch(url, {
+  // Buffered once, so a retry can resend it.
+  const body = request.method === "GET" ? undefined : await request.arrayBuffer();
+  const init = {
     method: request.method,
-    body: request.method === "GET" ? undefined : request.body,
+    body,
     headers: {
       "Content-Type": request.headers.get("Content-Type") ?? "application/json",
       Authorization: `Bearer ${env.GATEWAY_KEY}`,
       "Modal-Key": env.MODAL_KEY,
       "Modal-Secret": env.MODAL_SECRET,
     },
-  });
+  };
+  // A Modal Server answers 503 while no replica is ready -- from zero, for the
+  // tens of seconds a GPU container takes to load. Retried here with backoff,
+  // so a caller sees one slow request rather than an error.
+  const deadline = Date.now() + COLD_START_BUDGET_MS;
+  let delay = 500;
+  let upstream = await fetch(url, init);
+  while (upstream.status === 503 && Date.now() + delay < deadline) {
+    await upstream.body?.cancel();
+    await new Promise((resolve) => setTimeout(resolve, delay));
+    delay = Math.min(delay * 2, 5_000);
+    upstream = await fetch(url, init);
+  }
   const headers = new Headers(upstream.headers);
   for (const [k, v] of Object.entries(CORS)) headers.set(k, v);
   return new Response(upstream.body, { status: upstream.status, headers });

@@ -10,8 +10,12 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-09-15",
   "vars": {
-    "ORIGIN": "https://jbeck018--trigon-gateway-gateway.modal.run"
+    "ORIGIN": "https://jbeck018--trigon-gateway-gateway.us-west.modal.direct"
   },
   "observability": { "enabled": true },
+  // Run near the GPU origin rather than near the caller: each request is one
+  // short hop from the caller and one to Modal, and the second is the one that
+  // pays a TLS handshake when the isolate has no warm connection.
+  "placement": { "mode": "smart" },
   "r2_buckets": [{ "binding": "MODELS", "bucket_name": "trigon-models" }]
 }
