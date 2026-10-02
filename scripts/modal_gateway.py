@@ -132,9 +132,7 @@ def bench(requests: list[dict], repeats: int = 2) -> dict:
     from fastapi.testclient import TestClient
 
     bundle = pathlib.Path("/runs/bundles") / os.environ["TRIGON_BUNDLE"]
-    os.environ.update(
-        {"TRIGON_BACKEND": "torch", "TRIGON_WEIGHTS": str(bundle / "adapter.pt")}
-    )
+    os.environ.update({"TRIGON_BACKEND": "torch", "TRIGON_WEIGHTS": str(bundle / "adapter.pt")})
     if (bundle / "temperatures.json").exists():
         os.environ["TRIGON_TEMPERATURE_PATH"] = str(bundle / "temperatures.json")
     from trigon.server.app import build_app
