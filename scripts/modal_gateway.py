@@ -1,6 +1,6 @@
 """Serve any trained bundle behind the real gateway, on a scale-to-zero GPU.
 
-    modal volume put trigon-runs <bundle dir>/adapter.pt bundles/<name>/adapter.pt   # and the calibrators
+    modal volume put trigon-runs <dir>/adapter.pt bundles/<name>/adapter.pt  # + calibrators
     modal secret create trigon-gateway-auth TRIGON_API_KEYS=<key>
     TRIGON_BUNDLE=<name> modal deploy scripts/modal_gateway.py
 
@@ -94,7 +94,7 @@ weights = modal.Volume.from_name("trigon-weights")
 def gateway():
     bundle = pathlib.Path("/runs/bundles") / os.environ["TRIGON_BUNDLE"]
     if not (bundle / "adapter.pt").exists():
-        raise RuntimeError(f"no adapter.pt in {bundle}; upload the bundle to the trigon-runs volume")
+        raise RuntimeError(f"no adapter.pt in {bundle}; upload it to the trigon-runs volume")
     env = {
         "TRIGON_BACKEND": "torch",
         "TRIGON_WEIGHTS": str(bundle / "adapter.pt"),
