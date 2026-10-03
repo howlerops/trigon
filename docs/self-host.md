@@ -65,6 +65,40 @@ Cloudflare R2, which charges nothing for egress, with the same SHA-256 checked
 by `docker/entrypoint.py` from either. The backbone is never re-published: it
 is fetched from its own repository at the pinned revision.
 
+## Hosted: Cloudflare in front, a GPU behind
+
+For agent-sized requests a GPU is the difference between the incumbent's per-request latency
+and seconds per step: the 0.6B mix answers a ~1,400-token web-action request
+in 149 ms p50 on an L4 and 6.55 s on a Fly `shared-cpu-4x`. The hosted shape:
+
+```
+caller ──► Cloudflare Worker (deploy/cloudflare)       ──► Modal Server (scripts/modal_gateway.py)
+           API keys, CORS, 503 retry, Smart Placement       L4, scale to zero, ≤2 containers,
+           GET /models/* from R2 (trigon-models)            low-latency regional router, proxy auth
+```
+
+* **The Worker** checks the caller's key in constant time before anything is
+  forwarded, holds the Modal proxy token and the gateway key as secrets, and
+  retries the Server's 503s for up to 90 s, so a request that wakes a GPU from
+  zero is one slow answer rather than an error. `/healthz` answers at the edge
+  unless `?deep=1` from an authorised caller.
+* **The Modal Server** runs the same gateway under uvicorn behind Modal's
+  low-latency router. The general web-function ingress cost ~450 ms of a
+  ~515 ms round trip; the Server, kept alive, ~226 ms with ~90 ms of it the
+  model. It drains five minutes after its last request.
+* **R2** holds every published bundle (`scripts/publish_bundle.py`) at an
+  immutable `bundles/<name>/<version>/` path with `SHA256SUMS` and a model card,
+  and charges nothing for downloads.
+
+Measured end to end (Arizona, 2026-10-02): ~0.31 s median through the Worker
+for a small request with a fresh TLS connection per request; 45.6 s for the
+first request from zero. Deploy:
+
+```bash
+TRIGON_BUNDLE=<name> modal deploy scripts/modal_gateway.py
+cd deploy/cloudflare && npx wrangler deploy   # secrets: CLIENT_KEYS, GATEWAY_KEY, MODAL_KEY, MODAL_SECRET
+```
+
 ## Two front doors
 
 * `POST /v1/decide` -- the native contract (`spec/openapi.json`).
