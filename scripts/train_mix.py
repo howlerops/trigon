@@ -114,6 +114,15 @@ def main() -> int:
     parser.add_argument("--max-batch-cells", type=int, default=20_000_000)
     parser.add_argument("--log-every", type=int, default=100)
     parser.add_argument("--out", type=pathlib.Path, required=True)
+    parser.add_argument(
+        "--init",
+        type=pathlib.Path,
+        default=None,
+        help=(
+            "continue from a trained adapter.pt instead of a fresh LoRA: the same backbone, "
+            "rank and crossover are required and checked, and the build name records it"
+        ),
+    )
     args = parser.parse_args()
 
     import torch
@@ -159,13 +168,27 @@ def main() -> int:
 
     from trigon.backends.torch_readout import ReadoutConfig
 
-    backend = QwenReadoutBackend.from_backbone(
-        args.backbone,
-        device=device,
-        seed=args.seed,
-        lora_rank=args.lora_rank,
-        config=ReadoutConfig(option_crossover=args.option_crossover),
-    )
+    if args.init:
+        from trigon.backends.torch_readout import TorchReadoutBackend
+
+        backend = TorchReadoutBackend.load(args.init)
+        found = (getattr(backend, "backbone", None), backend.model.lora_rank)
+        found += (backend.config.option_crossover,)
+        wanted = (args.backbone, args.lora_rank, args.option_crossover)
+        if found != wanted:
+            raise SystemExit(f"--init {args.init} is {found}; this run asks for {wanted}")
+        init_version = backend.model_version
+        backend._version = init_version.split("+", 1)[0]
+        backend.model.train()
+    else:
+        init_version = None
+        backend = QwenReadoutBackend.from_backbone(
+            args.backbone,
+            device=device,
+            seed=args.seed,
+            lora_rank=args.lora_rank,
+            config=ReadoutConfig(option_crossover=args.option_crossover),
+        )
     backend.model.checkpointing = True
     backend.to(device)
     compiler = backend.make_compiler(option_scoring=OptionScoring("auto"))
@@ -193,6 +216,10 @@ def main() -> int:
         compiler=compiler,
     )
     trained_seconds = time.perf_counter() - started
+    if init_version is not None:
+        # Named after both: what answered and what it started from.
+        digest = init_version.split("+", 1)[-1]
+        backend._version = backend.stamp_version() + ".init." + digest
     backend.save(args.out / "adapter.pt")
 
     backend.cache_prefixes = True
@@ -206,6 +233,7 @@ def main() -> int:
             {
                 "backbone": args.backbone,
                 "option_crossover": args.option_crossover,
+                "init": str(args.init) if args.init else None,
                 "model_version": backend.model_version,
                 "device": f"{device} ({hardware})",
                 "seed": args.seed,
