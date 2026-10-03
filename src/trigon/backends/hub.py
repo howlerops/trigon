@@ -72,6 +72,23 @@ BACKBONES: dict[str, Backbone] = {
         "Apache-2.0",
         sharded=True,
     ),
+    # Larger Qwen3 for the scale ladder and as teachers to distil from: the same
+    # architecture as 0.6B/1.7B (8B with untied embeddings), too large to train
+    # on a 64 GB machine, trained on rented GPUs (`deploy/hf/`).
+    "qwen3-4b": Backbone(
+        "qwen3-4b",
+        "Qwen/Qwen3-4B",
+        "1cfa9a7208912126459214e8b04321603b3df60c",
+        "Apache-2.0",
+        sharded=True,
+    ),
+    "qwen3-8b": Backbone(
+        "qwen3-8b",
+        "Qwen/Qwen3-8B",
+        "b968826d9c46dd6066d109eabc6255188de91218",
+        "Apache-2.0",
+        sharded=True,
+    ),
     # MiniCPM5 (OpenBMB, 2026), post-trained, Apache-2.0 on the model card. Plain
     # Llama: full attention in every layer, no q/k/v bias, no QK-norm, head_dim
     # 128, untied embeddings -- all of which `QwenShape` already expresses. Its
