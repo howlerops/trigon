@@ -125,6 +125,18 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    # PyTorch's MPS allocator keeps freed blocks, and a mix of very different
+    # sequence lengths fragments them: an uncapped run reached 68 GB on a 64 GB
+    # machine and pushed it into swap. Capped, it frees instead (and a real
+    # shortfall is an error rather than hours of swapping). Set before torch
+    # touches the device; an operator's own value wins.
+    import os
+
+    # The low watermark (where the allocator starts reclaiming) must sit below
+    # the high one (the hard cap); its default, 1.4, makes a 0.7 cap invalid.
+    os.environ.setdefault("PYTORCH_MPS_HIGH_WATERMARK_RATIO", "0.7")
+    os.environ.setdefault("PYTORCH_MPS_LOW_WATERMARK_RATIO", "0.5")
+
     import torch
 
     from trigon.backends.qwen_readout import QwenReadoutBackend
@@ -171,7 +183,7 @@ def main() -> int:
     if args.init:
         from trigon.backends.torch_readout import TorchReadoutBackend
 
-        backend = TorchReadoutBackend.load(args.init)
+        backend = TorchReadoutBackend.load(args.init, device=device)
         found = (getattr(backend, "backbone", None), backend.model.lora_rank)
         found += (backend.config.option_crossover,)
         wanted = (args.backbone, args.lora_rank, args.option_crossover)

@@ -382,6 +382,9 @@ def train(
             torch.nn.utils.clip_grad_norm_(model.parameters(), config.grad_clip)
             optimizer.step()
             optimizer.zero_grad(set_to_none=True)
+            if step % 50 == 0 and next(model.parameters()).device.type == "mps":
+                # Return cached blocks the varying lengths have fragmented.
+                torch.mps.empty_cache()
             if config.log_every and step % config.log_every == 0:
                 print(
                     f"  epoch {epoch + 1} step {step}/{total_steps} "
