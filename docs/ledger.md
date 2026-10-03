@@ -19,9 +19,9 @@ narrative sections are a discipline, not a test.
 | Python files (`src`, `tests`, `scripts`) | 145 |
 | Lines in `src/` | 17,955 |
 | Release gates | 11 |
-| Green-tier corpora in the licence audit | 13 |
+| Green-tier corpora in the licence audit | 14 |
 | Committed use cases | 3 |
-| Real corpora loadable | 11 |
+| Real corpora loadable | 12 |
 
 **Certified on real data: Qwen2.5-1.5B on Banking77**, LoRA rank 16, lr
 1e-4, 4 epochs — median accuracy 0.9009 against the spike's 0.7248, every seed

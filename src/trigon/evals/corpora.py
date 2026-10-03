@@ -631,6 +631,36 @@ MIND2WEB_TRAIN = CorpusSpec(
     instructions="(each step carries its own goal)",
 )
 
+#: Natural-language inference as yes/no questions about a passage. Built to
+#: fix a measured failure: the mix's Noul head moves with the question's
+#: wording (|ΔP| 0.22 for another passage's question) but not with what the
+#: passage says (correlation with BoolQ's answer -0.09), and a negated question
+#: moves it the same way as the original (+0.69). Each pair asks whether the
+#: premise implies, rules out, or makes true the hypothesis, so the same kind of
+#: passage gets both answers and both polarities.
+WANLI = CorpusSpec(
+    name="wanli",
+    primitive="noul",
+    tier="green",
+    licence="CC BY 4.0",
+    attribution=(
+        "WANLI (Liu et al., 2022), University of Washington and the Allen Institute for AI. "
+        "CC BY 4.0. https://huggingface.co/datasets/alisawuffles/WANLI"
+    ),
+    files={
+        split: (
+            "https://huggingface.co/datasets/alisawuffles/WANLI/resolve/"
+            f"61c95318fd71c55b6ba355d76253254615f387ec/{split}.jsonl"
+        )
+        for split in ("train", "test")
+    },
+    sha256={
+        "train": "85058cf017a911e89242dc29fa0a4ddaad3664cb923dc0a82145fdda14b694e5",
+        "test": "4276e0af7fcdf657d1ab7beb54eaf025fda592a76c9ee86b63b7871953fc74fd",
+    },
+    instructions="(the question is built per case from the hypothesis)",
+)
+
 CORPORA: dict[str, CorpusSpec] = {
     c.name: c
     for c in (
@@ -644,6 +674,7 @@ CORPORA: dict[str, CorpusSpec] = {
         BOOLQ,
         MIND2WEB,
         MIND2WEB_TRAIN,
+        WANLI,
     )
 }
 
@@ -1338,6 +1369,52 @@ def _load_mind2web_train(
 
 
 _LOADERS[MIND2WEB_TRAIN.name] = _load_mind2web_train
+
+#: (question template, the gold labels that make its answer "yes"). Implication
+#: and truth share the entailment answer; "rules out" is yes only for a
+#: contradiction, so polarity is supervised rather than hoped for.
+_WANLI_TEMPLATES = (
+    ("Does the passage imply that {h}?", {"entailment"}),
+    ("Based only on the passage, is it true that {h}?", {"entailment"}),
+    ("Does the passage rule out that {h}?", {"contradiction"}),
+)
+
+
+def _load_wanli(
+    spec: CorpusSpec, split: str, *, limit: int | None = None, root: pathlib.Path | None = None
+) -> list[Case]:
+    paths = fetch(spec, root=root)
+    if split not in paths:
+        raise KeyError(f"{spec.name} has no split {split!r}; it has {sorted(paths)}")
+    cases = []
+    for row in _records(paths[split]):
+        if limit and len(cases) >= limit:
+            break
+        premise = str(row.get("premise") or "").strip()
+        hypothesis = str(row.get("hypothesis") or "").strip().rstrip(".")
+        gold = row.get("gold")
+        if not premise or not hypothesis or gold not in ("entailment", "neutral", "contradiction"):
+            continue
+        key = str(row.get("id"))
+        pick = int.from_bytes(hashlib.blake2b(key.encode(), digest_size=2).digest(), "big")
+        template, yes = _WANLI_TEMPLATES[pick % len(_WANLI_TEMPLATES)]
+        claim = hypothesis[:1].lower() + hypothesis[1:]
+        cases.append(
+            Case(
+                case_id=f"{spec.name}/{split}/{key}",
+                request=DecisionRequest(
+                    state=premise,
+                    questions={"answer": NoulQuestion(instructions=template.format(h=claim))},
+                ),
+                expected={"answer": Expectation(probability=1.0 if gold in yes else 0.0)},
+                domain=spec.name,
+                tags=(spec.name, split, "real"),
+            )
+        )
+    return cases
+
+
+_LOADERS[WANLI.name] = _load_wanli
 
 
 # -- The teacher-labelled synthetic-workflow stream ----------------------------
