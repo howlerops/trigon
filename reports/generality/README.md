@@ -30,6 +30,7 @@ on BoolQ, where always answering "yes" scores 0.62.
 | the same mix, resumed to 4 epochs | 0.602 | 0.680 | 0.586 | 0.251 | 0.586 | 0.824 |
 | **the same mix on Qwen3-0.6B**, 4 epochs from the start | 0.663 | 0.729 | 0.653 | **0.585** | 0.565 | 0.832 |
 | MiniCPM5-1B, the mix plus 1,464 local-teacher cases (workflows and documents), 4 epochs | **0.751** | **0.806** | **0.695** | 0.487 | 0.524 | **0.919** |
+| Qwen3-0.6B broad: the mix, both teachers, 2,264 web steps, 4 epochs (epoch 3 kept) | 0.670 | 0.744 | 0.669 | 0.586 | 0.500 | 0.830 |
 
 Every 0.5B row is one seed (seed 0) trained locally on Apple MPS, and is a
 measurement, not a certification. ECE beside its noise floor is in each
