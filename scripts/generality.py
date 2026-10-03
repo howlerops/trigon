@@ -44,17 +44,19 @@ from trigon.server.compat import (  # noqa: E402
 from trigon.types import ChoiceQuestion, NoulQuestion  # noqa: E402
 
 
-def _in_process(bundle: pathlib.Path, int8: bool = False):
+def _in_process(bundle: pathlib.Path, int8: bool = False, lm: str | None = None, device=None):
     from fastapi.testclient import TestClient
 
     from trigon.server.app import build_app
     from trigon.server.config import ServerConfig
 
     env = {
-        "TRIGON_BACKEND": "torch",
-        "TRIGON_WEIGHTS": str(bundle / "adapter.pt"),
+        "TRIGON_BACKEND": "lm-score" if lm else "torch",
+        "TRIGON_WEIGHTS": lm or str(bundle / "adapter.pt"),
         "TRIGON_INT8": "1" if int8 else "0",
     }
+    if device:
+        env["TRIGON_DEVICE"] = device
     for key, name in (
         ("TRIGON_TEMPERATURE_PATH", "temperatures.json"),
         ("TRIGON_ISOTONIC_PATH", "isotonic.json"),
@@ -187,21 +189,25 @@ def main() -> int:
     who = parser.add_mutually_exclusive_group(required=True)
     who.add_argument("--bundle", type=pathlib.Path, help="adapter.pt + calibrators, in process")
     who.add_argument("--compat", help="base URL of a service on the incumbent's wire")
+    who.add_argument("--lm", help="a causal LM's Hugging Face id, scored zero-shot (lm-score)")
     parser.add_argument("--model", default=None, help="model name, with --compat")
     parser.add_argument("--int8", action="store_true", help="with --bundle: int8 CPU twin")
     parser.add_argument("--threads", type=int, default=0, help="torch threads; 0 leaves default")
+    parser.add_argument("--device", default=None, help="cuda, mps or cpu for an in-process model")
     parser.add_argument("--concurrency", type=int, default=4, help="with --compat")
     parser.add_argument("--tasks", nargs="*", default=[t.name for t in TASKS])
     parser.add_argument("-n", type=int, default=DEFAULT_N)
     parser.add_argument("--out", type=pathlib.Path, required=True)
     args = parser.parse_args()
 
-    if args.bundle:
+    if args.bundle or args.lm:
         if args.threads:
             import torch
 
             torch.set_num_threads(args.threads)
-        answer, system, workers = _in_process(args.bundle, int8=args.int8)
+        answer, system, workers = _in_process(
+            args.bundle or pathlib.Path("."), int8=args.int8, lm=args.lm, device=args.device
+        )
     else:
         if not args.model:
             parser.error("--model is required with --compat")

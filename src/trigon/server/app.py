@@ -50,6 +50,7 @@ def create_router(config: ServerConfig | None = None) -> TieredRouter:
             config.cache_prefixes,
             config.unsupervised_evidence,
             int8=config.int8,
+            device=config.device,
         ),
         scaler=scaler,
         isotonic=isotonic,
@@ -86,15 +87,39 @@ def _backend(
     unsupervised_evidence: str | None = None,
     *,
     int8: bool = False,
+    device: str | None = None,
 ) -> Any:
     if name == "lexical":
         if weights:
             raise ValueError("the lexical backend has no weights to load")
         return LexicalBackend()
+    if name == "lm-score":
+        # `weights` names the causal LM, or a trained adapter for one.
+        import os
+
+        from ..backends.lm_score import LMScoreBackend
+
+        # TRIGON_WEIGHTS is a Hugging Face id (zero-shot) or a trained
+        # adapter.pt, which names its own base model.
+        if weights and weights.endswith(".pt"):
+            import torch
+
+            base = torch.load(weights, map_location="cpu", weights_only=True)["base"]
+            return LMScoreBackend(base, device=device, adapter=weights)
+        return LMScoreBackend(
+            weights or "Qwen/Qwen3-0.6B",
+            device=device,
+            content_free=os.environ.get("TRIGON_LM_CONTENT_FREE", "1") != "0",
+        )
     if name == "torch":
         from ..backends.torch_readout import TorchReadoutBackend
 
-        backend = TorchReadoutBackend.load(weights) if weights else TorchReadoutBackend()
+        backend = (
+            TorchReadoutBackend.load(weights, device=device) if weights else TorchReadoutBackend()
+        )
+        if hasattr(backend, "merge_adapters") and not int8:
+            # Serving never trains: fold LoRA into the frozen weights.
+            backend.merge_adapters()
         if int8:
             if not hasattr(backend, "int8_cpu"):
                 raise ValueError("TRIGON_INT8 needs a pretrained-backbone checkpoint")

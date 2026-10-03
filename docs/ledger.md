@@ -107,6 +107,15 @@ twenty-two runs** — the investigation is closed and the evidence is in
   cached schema prefix; independence, completeness and batching-invariance
   asserted on the spike and the Qwen2 forward. `train_corpus.py --weights`
   scores it beside gradient × input on an existing checkpoint.
+- **LM-score backend** (2026-10-03, `TRIGON_BACKEND=lm-score`). A causal LM
+  scores each answer as its own continuation tokens, one prompt per question,
+  every candidate packed into one forward pass behind a mask that lets each
+  see the prompt and itself (equal to one pass per candidate to 1e-4 nats).
+  Zero-shot from a Hugging Face id, with optional contextual calibration, or
+  from `scripts/train_lm_score.py`'s adapter: LoRA plus
+  `w * logprob + residual`, the residual zero at init so step zero is the
+  zero-shot model. `scripts/decision_bench.py` scores any backend on a public
+  8,016-case decision benchmark beside the incumbent's published answers.
 
 ### Calibration
 - Temperature scaling and isotonic calibration, **selected per primitive** on a
@@ -308,6 +317,8 @@ twenty-two runs** — the investigation is closed and the evidence is in
 | Evidence cost, the spike, one question | p50 2.68 ms plain, 3.36 ms span head, 5.16 ms gradient × input; the span head's answers bit-identical to the plain ones |
 | Evidence across shapes | float32 gradient × input moves 1.7e-06 when a question is added, 14× the logits' 1.2e-07; float64 reads exactly 0.0. A real leak moves it 1e-03 |
 | Qwen2.5 offsets against `tokenizers` | Offset for offset on NFC text; on text NFC changes, ours cover the whole composed character and the reference drops the combining mark |
+| Where an agent-sized request spends CPU time (Qwen3-0.6B, 1,391 tokens, M1 Max, 8 threads, float32) | Compile 3.9 ms; model 2.8 s. Of the model: matmuls 56%, attention 25%, every elementwise op together ~13%. Accelerate's sgemm runs at 1.80 TFLOP/s on this CPU; bfloat16 and float16 matmuls at ~0.0003 (no kernel), so float32 is the only CPU precision here. LoRA merged into the frozen weights for serving: 2,465 → 1,940 ms, answers within 2.7e-06 |
+| The zero-shot LM-score backend on the public decision benchmark, Qwen3-0.6B, 60 cases a slice | Macro accuracy 0.439 raw and 0.429 with contextual calibration, against the incumbent's 0.808 and a compatible hosted service's 0.477 on the same cases. Calibration helps the yes/no slices (jailbreak 0.383 → 0.567, prompt injection 0.333 → 0.567) and costs the multiple-choice ones. Knowledge slices are where the gap is: MMLU-Pro 0.20 against 0.75, MedQA 0.32–0.33 against 0.83 |
 
 ---
 
@@ -372,6 +383,7 @@ The most useful section. Each of these was argued for before it was measured.
 | Gradient × input would be a usable unsupervised attribution, and the spike's was below *every word* only because the spike is small | On Qwen2.5-1.5B, four seeds, it is still below highlighting every word: token F1 0.287–0.308 against 0.434–0.437, IOU F1 0.211–0.234 — no better than the spike's 0.30–0.32. The span head on the same weights scores 0.715–0.720. The falsifier in `docs/decisions.md` fired; integrated gradients is built and is not the default until it is measured to clear the same bar |
 | Integrated gradients' completeness failure on the backbone (median 78–895%) is bf16 rounding, and a float32 path fixes it | Half right. On tiny Qwen2s bf16 is the whole failure: median 8.8% in bf16 against 0.04% in float32, and more points do not help. On Qwen2.5-1.5B's own weights on CPU, float32 still misses by 130% and 853% (63× and 200× with a non-zero segment embedding). The path jumps by up to 2.6 nats between points 0.025 apart. Where it is smooth, autograd matches finite differences (−0.5065 against −0.5085); where it is rough, they disagree. The float32 path stays as the default, since it removes the rounding. It does not make the method complete here |
 | Integrated gradients needs only enough evenly spaced steps | On a pre-norm forward the path's change is packed against the zero baseline: 32 evenly spaced points on a tiny Qwen2 summed 12–91% away from the difference they must add up to, and 64 were no better. Spaced as `u³`, 32 are within 0.04% |
+| A hand-written SIMD engine (Go or Rust) would make the frozen backbone much faster on CPU | Measured before building: 81% of model time is already in vendor BLAS and fused attention, and sgemm runs at 1.80 TFLOP/s, so a perfect float32 engine could save at most the ~13% of elementwise work plus kernel-launch overhead. Go has no GEMM near Accelerate's; Rust would have to reimplement it. What did move it was arithmetic removed, not arithmetic done faster: merging LoRA, 21%. The levers left are fewer FLOPs (state prefix reuse), int8/4-bit kernels from a maintained runtime, and the GPU |
 
 ---
 

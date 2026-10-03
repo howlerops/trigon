@@ -545,3 +545,21 @@ def test_a_qwen3_shape_keeps_the_architectural_claims():
     old["d_model"], old["n_heads"] = 64, 4
     rebuilt = QwenShape(**old)
     assert (rebuilt.head_dim, rebuilt.attention_bias, rebuilt.qk_norm) == (16, True, False)
+
+
+def test_merged_adapters_answer_as_the_unmerged_model():
+    """Serving folds LoRA into the frozen weights; the answer must not move."""
+    backend = _tiny(rank=4)
+    # A trained adapter, not a zero one, or merging adds nothing to test.
+    with torch.no_grad():
+        for name, p in backend.model.named_parameters():
+            if "lora_b" in name:
+                p.normal_(std=0.05)
+    compiled = backend.make_compiler().compile_request(DecisionRequest(state=STATE, questions=BASE))
+    before = backend.infer(compiled, DecisionRequest(state=STATE, questions=BASE))
+    backend.merge_adapters()
+    assert not any("lora_" in n for n, _ in backend.model.named_parameters())
+    after = backend.infer(compiled, DecisionRequest(state=STATE, questions=BASE))
+    for qid, out in before.outputs.items():
+        for x, y in zip(out.logits, after.outputs[qid].logits, strict=True):
+            assert abs(x - y) < 1e-4
