@@ -63,3 +63,34 @@ def test_a_bundle_url_without_a_checksum_is_refused(tmp_path, monkeypatch):
     monkeypatch.delenv("TRIGON_BUNDLE_SHA256", raising=False)
     with pytest.raises(SystemExit, match="needs TRIGON_BUNDLE_SHA256"):
         module.main()
+
+
+def test_a_mounted_bundle_is_served_without_a_url(tmp_path, monkeypatch):
+    """docker-compose mounts a locally trained bundle at /model."""
+    (tmp_path / "adapter.pt").write_bytes(b"weights")
+    (tmp_path / "temperatures.json").write_text("{}")
+    module = _entrypoint(monkeypatch, tmp_path)
+    # main() sets variables with os.environ.setdefault, which monkeypatch does
+    # not track: on the real environment they outlived this test and pointed
+    # every later app at a deleted adapter. A copy is thrown away afterwards.
+    environ = {
+        k: v
+        for k, v in module.os.environ.items()
+        if k
+        not in (
+            "TRIGON_BUNDLE_URL",
+            "TRIGON_BACKEND",
+            "TRIGON_WEIGHTS",
+            "TRIGON_TEMPERATURE_PATH",
+            "TRIGON_ISOTONIC_PATH",
+        )
+    }
+    monkeypatch.setattr(module.os, "environ", environ)
+    ran = []
+    monkeypatch.setattr(module.sys, "argv", ["entrypoint"])
+    monkeypatch.setattr(module.os, "execvp", lambda cmd, args: ran.append(args))
+    module.main()
+    assert module.os.environ["TRIGON_WEIGHTS"] == str(tmp_path / "adapter.pt")
+    assert module.os.environ["TRIGON_TEMPERATURE_PATH"] == str(tmp_path / "temperatures.json")
+    assert "TRIGON_ISOTONIC_PATH" not in module.os.environ
+    assert ran and ran[0][:2] == ["trigon", "serve"]

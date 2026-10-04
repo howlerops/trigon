@@ -15,8 +15,10 @@ schema's text repeats on every request and the memo below catches it, and
 -- to a path that otherwise has no compiled dependency.
 
 It covers the pipeline Qwen2 declares -- NFC, its split regex, byte-level
-mapping, BPE by merge rank -- and refuses a `tokenizer.json` declaring
-anything else, rather than encoding a different pipeline and agreeing with
+mapping, BPE by merge rank -- and the one MiniCPM5 declares, which differs in
+two places: no normalizer, and a chain of two isolated splits (digit runs of up
+to three first, then the familiar regex). It refuses a `tokenizer.json`
+declaring anything else, rather than encoding a different pipeline and agreeing with
 nothing. Added special tokens (`<|im_start|>` and the like) are not parsed out
 of text: this project never sends one.
 """
@@ -40,15 +42,26 @@ class ByteLevelBPE:
     def __init__(self, spec: dict, *, source: str = "") -> None:
         import regex
 
-        if spec.get("normalizer") != {"type": "NFC"}:
-            raise ValueError(f"unsupported normalizer {spec.get('normalizer')}")
+        normalizer = spec.get("normalizer")
+        if normalizer not in ({"type": "NFC"}, None):
+            raise ValueError(f"unsupported normalizer {normalizer}")
+        self._nfc = normalizer is not None
         steps = spec["pre_tokenizer"]["pretokenizers"]
-        if [s["type"] for s in steps] != ["Split", "ByteLevel"] or steps[1]["use_regex"]:
+        splits, last = steps[:-1], steps[-1]
+        if (
+            not splits
+            or last["type"] != "ByteLevel"
+            or last["use_regex"]
+            or any(
+                s["type"] != "Split" or s.get("behavior") != "Isolated" or s.get("invert")
+                for s in splits
+            )
+        ):
             raise ValueError("unsupported pre-tokenizer pipeline")
         model = spec["model"]
         if model["type"] != "BPE" or model.get("byte_fallback"):
             raise ValueError("unsupported tokenizer model")
-        self._split = regex.compile(steps[0]["pattern"]["Regex"])
+        self._splits = [regex.compile(s["pattern"]["Regex"]) for s in splits]
         self.vocab: dict[str, int] = model["vocab"]
         merges = [
             tuple(m.split(" ", 1)) if isinstance(m, str) else tuple(m) for m in model["merges"]
@@ -103,9 +116,35 @@ class ByteLevelBPE:
         self._memo[piece] = ids
         return ids
 
+    def _pieces(self, text: str) -> list[tuple[str, int]]:
+        """Pre-tokenized pieces and where each starts, through every split in turn.
+
+        An isolated split keeps both what its pattern matches and the gaps
+        between matches, as separate pieces -- the `tokenizers` semantics. For
+        Qwen's single regex the gaps are always empty, so this is the
+        ``findall`` it replaced; MiniCPM5's first split, on digit runs, leaves
+        the rest of the text in gaps for the second to cut.
+        """
+        pieces = [(text, 0)]
+        for pattern in self._splits:
+            out = []
+            for piece, offset in pieces:
+                position = 0
+                for match in pattern.finditer(piece):
+                    if match.start() > position:
+                        out.append((piece[position : match.start()], offset + position))
+                    if match.end() > match.start():
+                        out.append((match.group(), offset + match.start()))
+                    position = match.end()
+                if position < len(piece):
+                    out.append((piece[position:], offset + position))
+            pieces = out
+        return pieces
+
     def encode(self, text: str) -> list[int]:
         out: list[int] = []
-        for piece in self._split.findall(unicodedata.normalize("NFC", text)):
+        normalized = unicodedata.normalize("NFC", text) if self._nfc else text
+        for piece, _ in self._pieces(normalized):
             out.extend(self._merge("".join(self._bytes[b] for b in piece.encode("utf-8"))))
         return out
 
@@ -124,15 +163,15 @@ class ByteLevelBPE:
         maps it to the ``e`` alone and drops the combining mark from every
         token; that is the one place these offsets deliberately differ from it.
         """
-        normalized, origin = _nfc_alignment(text)
+        if self._nfc:
+            normalized, origin = _nfc_alignment(text)
+        else:
+            normalized, origin = text, [(i, i + 1) for i in range(len(text))]
         out: list[tuple[int, int, int]] = []
-        for match in self._split.finditer(normalized):
-            piece = match.group()
+        for piece, offset in self._pieces(normalized):
             ids = self._merge("".join(self._bytes[b] for b in piece.encode("utf-8")))
             lengths = [len(self._symbols[i]) for i in ids]
-            for token_id, (start, end) in zip(
-                ids, char_spans(piece, match.start(), lengths), strict=True
-            ):
+            for token_id, (start, end) in zip(ids, char_spans(piece, offset, lengths), strict=True):
                 out.append((token_id, origin[start][0], origin[end - 1][1]))
         return out
 

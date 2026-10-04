@@ -1,0 +1,98 @@
+{
+  "system": {
+    "compat": "a compatible hosted service (not named)",
+    "model": "its latest model, 2026-09-30"
+  },
+  "n": 1000,
+  "tasks": {
+    "banking77/declared": {
+      "skipped": "over the incumbent's per-question option cap"
+    },
+    "banking77/shift": {
+      "kind": "shift",
+      "note": "50 of the same options, shuffled",
+      "n": 999,
+      "failed": 1,
+      "accuracy": 0.5435435435435435,
+      "chance": 0.02,
+      "majority": 0.02902902902902903,
+      "ece": 0.20223310130700298,
+      "adaptive_ece": 0.20313788774183994,
+      "ece_floor_p95": 0.04984095378073244,
+      "miscalibration_detectable": true,
+      "mean_confidence": 0.3577100519810022,
+      "nll": 2.049131532033974,
+      "brier": 0.6887285199591344,
+      "p50_seconds": 1.2374
+    },
+    "banking77/renamed": {
+      "kind": "shift",
+      "note": "50, shuffled, every name redrawn in another case style",
+      "n": 1000,
+      "failed": 0,
+      "accuracy": 0.395,
+      "chance": 0.02,
+      "majority": 0.028,
+      "ece": 0.10925159609732188,
+      "adaptive_ece": 0.10953428100397222,
+      "ece_floor_p95": 0.04945202020821789,
+      "miscalibration_detectable": true,
+      "mean_confidence": 0.35096550707379964,
+      "nll": 2.4977859894730745,
+      "brier": 0.7903228949460869,
+      "p50_seconds": 1.2258
+    },
+    "clinc150": {
+      "kind": "heldout",
+      "note": "150 intents, 50 per case",
+      "n": 996,
+      "failed": 4,
+      "accuracy": 0.8493975903614458,
+      "chance": 0.02,
+      "majority": 0.029116465863453816,
+      "ece": 0.08816811701270863,
+      "adaptive_ece": 0.08840970060230822,
+      "ece_floor_p95": 0.04111770537585279,
+      "miscalibration_detectable": true,
+      "mean_confidence": 0.7613236765002948,
+      "nll": 0.6036759013083698,
+      "brier": 0.24502235953950596,
+      "p50_seconds": 1.1705
+    },
+    "boolq": {
+      "kind": "heldout",
+      "note": "yes/no; a different question on every case",
+      "n": 1000,
+      "failed": 0,
+      "accuracy": 0.758,
+      "chance": 0.5,
+      "majority": 0.631,
+      "ece": 0.04542580000000001,
+      "adaptive_ece": 0.05427980000000002,
+      "ece_floor_p95": 0.04370459999999999,
+      "miscalibration_detectable": true,
+      "mean_confidence": 0.7187290000000001,
+      "nll": 0.5066309726558405,
+      "brier": 0.332321694,
+      "p50_seconds": 1.8876
+    },
+    "banking77/order": {
+      "kind": "invariance",
+      "note": "banking77/shift again, in a different order",
+      "n": 1000,
+      "failed": 0,
+      "accuracy": 0.539,
+      "chance": 0.02,
+      "majority": 0.03,
+      "ece": 0.20684934927603973,
+      "adaptive_ece": 0.20491073162606727,
+      "ece_floor_p95": 0.04899275017739891,
+      "miscalibration_detectable": true,
+      "mean_confidence": 0.3554707606780751,
+      "nll": 2.050375212221736,
+      "brier": 0.6889198652911358,
+      "p50_seconds": 1.2327,
+      "agreement": 0.6406406406406406
+    }
+  }
+}

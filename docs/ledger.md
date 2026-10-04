@@ -14,14 +14,14 @@ narrative sections are a discipline, not a test.
 
 | | |
 | --- | ---: |
-| Commits | 275 |
-| Tests | 740 |
-| Python files (`src`, `tests`, `scripts`) | 135 |
-| Lines in `src/` | 16,859 |
+| Commits | 309 |
+| Tests | 788 |
+| Python files (`src`, `tests`, `scripts`) | 145 |
+| Lines in `src/` | 17,955 |
 | Release gates | 11 |
-| Green-tier corpora in the licence audit | 9 |
+| Green-tier corpora in the licence audit | 14 |
 | Committed use cases | 3 |
-| Real corpora loadable | 7 |
+| Real corpora loadable | 12 |
 
 **Certified on real data: Qwen2.5-1.5B on Banking77**, LoRA rank 16, lr
 1e-4, 4 epochs — median accuracy 0.9009 against the spike's 0.7248, every seed
@@ -107,6 +107,15 @@ twenty-two runs** — the investigation is closed and the evidence is in
   cached schema prefix; independence, completeness and batching-invariance
   asserted on the spike and the Qwen2 forward. `train_corpus.py --weights`
   scores it beside gradient × input on an existing checkpoint.
+- **LM-score backend** (2026-10-03, `TRIGON_BACKEND=lm-score`). A causal LM
+  scores each answer as its own continuation tokens, one prompt per question,
+  every candidate packed into one forward pass behind a mask that lets each
+  see the prompt and itself (equal to one pass per candidate to 1e-4 nats).
+  Zero-shot from a Hugging Face id, with optional contextual calibration, or
+  from `scripts/train_lm_score.py`'s adapter: LoRA plus
+  `w * logprob + residual`, the residual zero at init so step zero is the
+  zero-shot model. `scripts/decision_bench.py` scores any backend on a public
+  8,016-case decision benchmark beside the incumbent's published answers.
 
 ### Calibration
 - Temperature scaling and isotonic calibration, **selected per primitive** on a
@@ -308,8 +317,15 @@ twenty-two runs** — the investigation is closed and the evidence is in
 | Evidence cost, the spike, one question | p50 2.68 ms plain, 3.36 ms span head, 5.16 ms gradient × input; the span head's answers bit-identical to the plain ones |
 | Evidence across shapes | float32 gradient × input moves 1.7e-06 when a question is added, 14× the logits' 1.2e-07; float64 reads exactly 0.0. A real leak moves it 1e-03 |
 | Qwen2.5 offsets against `tokenizers` | Offset for offset on NFC text; on text NFC changes, ours cover the whole composed character and the reference drops the combining mark |
+| Where an agent-sized request spends CPU time (Qwen3-0.6B, 1,391 tokens, M1 Max, 8 threads, float32) | Compile 3.9 ms; model 2.8 s. Of the model: matmuls 56%, attention 25%, every elementwise op together ~13%. Accelerate's sgemm runs at 1.80 TFLOP/s on this CPU; bfloat16 and float16 matmuls at ~0.0003 (no kernel), so float32 is the only CPU precision here. LoRA merged into the frozen weights for serving: 2,465 → 1,940 ms, answers within 2.7e-06 |
+| The broad Qwen3-0.6B model (readout heads, 4 epochs) on the public decision benchmark, all 8,016 cases | Macro accuracy 0.424 against the incumbent's 0.838 and a compatible hosted service's 0.486. No better than the untrained backbone scoring its own tokens (0.415–0.418): the heads win only on what the mix trained (Banking77 0.604). Calibration is not the gap: ECE at or under the incumbent's on six of eleven slices (`reports/decision-bench/README.md`) |
+| One 1,391-token Qwen3-0.6B prefill on an M1 Max's GPU, idle | MLX bfloat16 287 ms; PyTorch MPS float16 352 ms, float32 397 ms; MLX 8-bit 375 ms and 4-bit 429 ms. **Quantization slows prefill here**: a long single pass is compute-bound and dequantizing costs more than the bandwidth it saves -- it is a memory and decode optimisation, not one for this workload. MLX is the fastest local runtime measured, 1.4× PyTorch; the GPU is 7× the merged CPU path |
+| The zero-shot LM-score backend on the public decision benchmark, Qwen3-0.6B, a seeded 60 cases a slice | Macro accuracy 0.418 raw and 0.415 with contextual calibration, against the incumbent's 0.823 and a compatible hosted service's 0.495 on the same cases. Knowledge slices are where the gap is: MMLU-Pro 0.27–0.37 against 0.83, MedQA 0.32–0.37 against 0.87 |
+| **The LM-score readout trained, Qwen3-0.6B, one epoch, one seed** (2.8 h on MPS) | Public decision benchmark **0.465** on all 8,016 cases (broad heads 0.424, hosted service 0.486, incumbent 0.838), ahead of the service on 8 of 11 slices. CLINC150 **0.812** (heads 0.585, service 0.849); renamed 50-option Banking77 0.785; order agreement 0.902; Mind2Web step success **0.438** (heads 0.260, service 0.050). Yes/no is the loss: BoolQ 0.565 under its 0.631 majority, trajectory safety 0.198. `w` settled at 0.62 (`reports/decision-bench/README.md`) |
 
 ---
+
+- **Generality, first measurement** (`reports/generality/README.md`, 1,000 cases per task). The served v2 answers its own 77 options at 0.883 and every other task at or below chance. A 0.5B model trained on Banking77 with per-epoch option reshaping answers 50 shuffled options at 0.782 and renamed ones at 0.677 — above a compatible hosted service on the same cases (0.544, 0.395) — keeps its answer under re-ordering 87% of the time (the service: 64%), and reaches 0.420 on CLINC150 zero-shot. The service leads on held-out tasks: CLINC150 0.849, BoolQ 0.758. A six-corpus mix resumed to four epochs reaches 0.680 shifted and 0.824 order agreement but stays at 0.251 on CLINC150 and 0.586 on BoolQ, and its ECE rose to 0.086–0.116 with no calibrator accepted: more epochs on these corpora improve what the mix contains, not held-out tasks. **On Qwen3-0.6B the same mix reaches CLINC150 0.585 (from 0.251)** and 0.729 shifted, 0.832 order agreement: the backbone, not the epochs, was what held transfer back. BoolQ stays at 0.565 and held-out ECE at 0.16–0.17. One seed each, trained locally on Apple MPS.
 
 ## Believed, then disproved
 
@@ -328,6 +344,8 @@ The most useful section. Each of these was argued for before it was measured.
 | Negation pairs plus a coherence term teach a Noul to answer a question and its complement | Incoherence falls from 0.46 to 0.035 and accuracy on the pairs stays at chance, 0.498 against 0.498. **Read directly** on all eight treated checkpoints: P(yes) is about 0.50 whether the named intent is true or false (separation −0.0012 to +0.0024), with or without the coherence term. The head never learned the question; the term only made two uninformed answers agree (`reports/paired/README.md`) |
 | The negation Nouls are what cost the paired Choice head its calibration | Dropping them left raw Choice ECE where it was (0.0517 against 0.0519). What certified the run was the calibrator being accepted on every seed, which is a margin, not a mechanism (`reports/paired/README.md`) |
 | Teacher distillation buys coverage that a real corpus can build on (`docs/data.md`) | Used as an init, the teacher-trained students start Banking77 worse than the base model and one seed of four never leaves chance at the full budget. The only gain, one seed at 1,000 cases, fails calibration (`reports/teacher/transfer.md`) |
+| The certified Banking77 model answers the question the caller declares — the drop-in claim's premise | **It answers the one it was trained on.** Same 300 test cases (2026-09-30): 0.900 with its 77 declared options, **0.007 with 50 of the same ones** (the true one always present, chance 0.02) — below chance, spread over 66 wrong labels, not a positional shift (4 of 300). The calibrator reported its floor confidence, 0.2, on answers that were almost never right, and `/healthz` said `calibrated: true`. **Mechanism, found the next day, and not the first one proposed** (that it had "learned the set"): `DOT_PRODUCT_CROSSOVER` is 64, so a Choice over more than 64 options is scored by the dot-product head and one over 64 or fewer by the per-option readout head. Every Banking77 run trained at 77 options, so only the first was ever trained, and 50 options routed every answer to a head at its initialisation. A 0.5B model trained on reshaped option sets (2–77, mostly under the crossover) shows the mirror image: training loss 3.25 → 1.23 against a uniform 3.43, validation at 77 options pinned at ln 77 (4.32–4.34) for three epochs. **Two heads, switched by cardinality, and training reaches only the ones its option counts select.** Measured by `trigon.evals.generality` |
+| Int8 makes CPU serving faster (`TRIGON_INT8`, dynamic int8 projections with the adapter merged) | **Slower on Apple silicon**: 0.82 s against 0.35 s p50 on 50-option Banking77, 0.60 against 0.29 on CLINC150, and 2.4 points of accuracy lost (`reports/generality/README.md`). Float32 runs on Accelerate; PyTorch's ARM int8 kernels (qnnpack) do not. x86 (fbgemm) is unmeasured. It stays off by default |
 | Fitting temperature on the training split is the discipline | It is the bug. Raised ECE on half the seeds. |
 | A Score temperature of 0.20 is a degenerate fit | Constructed test: sharpening is correct for an underconfident head. |
 | Burden of proof belongs on *declining* a calibrator | Seven constructed heads say the opposite, on six of them. |
@@ -368,6 +386,7 @@ The most useful section. Each of these was argued for before it was measured.
 | Gradient × input would be a usable unsupervised attribution, and the spike's was below *every word* only because the spike is small | On Qwen2.5-1.5B, four seeds, it is still below highlighting every word: token F1 0.287–0.308 against 0.434–0.437, IOU F1 0.211–0.234 — no better than the spike's 0.30–0.32. The span head on the same weights scores 0.715–0.720. The falsifier in `docs/decisions.md` fired; integrated gradients is built and is not the default until it is measured to clear the same bar |
 | Integrated gradients' completeness failure on the backbone (median 78–895%) is bf16 rounding, and a float32 path fixes it | Half right. On tiny Qwen2s bf16 is the whole failure: median 8.8% in bf16 against 0.04% in float32, and more points do not help. On Qwen2.5-1.5B's own weights on CPU, float32 still misses by 130% and 853% (63× and 200× with a non-zero segment embedding). The path jumps by up to 2.6 nats between points 0.025 apart. Where it is smooth, autograd matches finite differences (−0.5065 against −0.5085); where it is rough, they disagree. The float32 path stays as the default, since it removes the rounding. It does not make the method complete here |
 | Integrated gradients needs only enough evenly spaced steps | On a pre-norm forward the path's change is packed against the zero baseline: 32 evenly spaced points on a tiny Qwen2 summed 12–91% away from the difference they must add up to, and 64 were no better. Spaced as `u³`, 32 are within 0.04% |
+| A hand-written SIMD engine (Go or Rust) would make the frozen backbone much faster on CPU | Measured before building: 81% of model time is already in vendor BLAS and fused attention, and sgemm runs at 1.80 TFLOP/s, so a perfect float32 engine could save at most the ~13% of elementwise work plus kernel-launch overhead. Go has no GEMM near Accelerate's; Rust would have to reimplement it. What did move it was arithmetic removed, not arithmetic done faster: merging LoRA, 21%. The levers left are fewer FLOPs (state prefix reuse), int8/4-bit kernels from a maintained runtime, and the GPU |
 
 ---
 
@@ -391,6 +410,12 @@ to hold.
 ## Corrected in our own favour
 
 Errors that flattered the project, found by re-measuring rather than by review:
+
+- **The zero-shot screening sampled each slice's first 60 cases.** At least
+  one benchmark file is ordered by label, so a model that says "yes" to
+  nearly everything scored 0.917 on agent-trajectory safety from a prefix and
+  0.517 from a random sample; the macro read 0.439 and 0.429 against 0.418 and
+  0.415 on seeded samples. `--limit` now samples (`scripts/decision_bench.py`).
 
 - **The cost figure was the spike's, and the savings it printed were 15–20×
   too high.** The inherited $0.007/MTok assumed ~30k prefill tokens a second
@@ -489,6 +514,24 @@ Errors that flattered the project, found by re-measuring rather than by review:
 ---
 
 ## Open
+
+- **Generality: a caller's own question, on data no mix trains.** The suite
+  (`trigon.evals.generality`, `scripts/generality.py`) sends identical cases
+  to any system on the contract: Banking77 under a 50-option shuffled subset
+  and under renamed options, CLINC150 (held out by decision), BoolQ (held out
+  by licence), and an order-invariance probe. Three levers are built and
+  unmeasured at scale: per-epoch option reshaping (`TrainingConfig.reshape`,
+  `train_corpus.py --reshape-*`), a multi-corpus mix with four teacher
+  domains held out and a calibrator fitted across tasks
+  (`scripts/train_mix.py`), and int8 CPU serving (`TRIGON_INT8=1`,
+  `QwenReadoutBackend.int8_cpu`). Training runs locally on Apple MPS now
+  (`--device mps`, bf16), measured at 3.8 cases/s for 0.5B on Banking77.
+  The int8 path uses `torch.ao` dynamic quantization, which torch 2.14 marks
+  deprecated; it will need porting to `torchao`.
+- **A compatible service caps a Choice at 50 options and requires a Noul's
+  criteria** (observed 2026-09-30); `COMPAT_BUDGET` records neither. Outbound
+  Nouls now carry explicit criteria. Whether the incumbent itself enforces
+  either is unverified.
 
 `docs/plan.md` is the execution plan for closing these: what has to be true, in
 what order, and how each step is known to be done.

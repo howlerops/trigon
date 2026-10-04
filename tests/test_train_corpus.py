@@ -201,7 +201,7 @@ def test_the_baseline_is_fitted_on_train_not_on_evaluation(script, corpus_on_dis
     assert script.baseline_accuracy(train, evaluation)["q"] == pytest.approx(0.1)
 
 
-def test_a_named_cuda_is_refused_rather_than_replaced_by_the_cpu(script):
+def test_a_named_cuda_is_refused_rather_than_replaced_by_the_cpu(script, monkeypatch):
     """The Modal job asks for cuda by name so a missing GPU fails the run.
 
     The launcher once recorded the A10G it was given while every tensor stayed
@@ -213,7 +213,20 @@ def test_a_named_cuda_is_refused_rather_than_replaced_by_the_cpu(script):
         pytest.skip("this machine has the GPU the test needs to be missing")
     with pytest.raises(SystemExit, match="no CUDA device"):
         script.resolve_device("cuda")
+    monkeypatch.setattr(torch.backends.mps, "is_available", lambda: False)
     assert script.resolve_device("auto")[0] == "cpu"
+    with pytest.raises(SystemExit, match="no MPS device"):
+        script.resolve_device("mps")
+
+
+def test_auto_takes_apple_silicon_when_there_is_no_cuda(script, monkeypatch):
+    """Local training on a Mac: `auto` is cuda, then mps, then cpu."""
+    torch = pytest.importorskip("torch")
+    if torch.cuda.is_available():
+        pytest.skip("cuda wins over mps, so this machine cannot show the mps branch")
+    monkeypatch.setattr(torch.backends.mps, "is_available", lambda: True)
+    device, hardware = script.resolve_device("auto")
+    assert device == "mps" and "MPS" in hardware
 
 
 def test_the_hard_label_ablation_trains_on_the_majority_and_nothing_else(script):

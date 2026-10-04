@@ -429,7 +429,17 @@ def to_compat_request(request: DecisionRequest, model: str) -> dict[str, Any]:
     questions: dict[str, Any] = {}
     for qid, question in request.questions.items():
         if isinstance(question, NoulQuestion):
-            questions[qid] = {"type": "noul", "instructions": question.instructions}
+            # Their contract documents a Noul's criteria as optional, and a
+            # compatible service observed 2026-09-30 refuses a Noul without it
+            # (422, "The criteria field is required"). Our Noul has no criteria
+            # to send, so the boundaries it implies go out explicitly: harmless
+            # where optional, and the difference between an answer and a 422
+            # where not.
+            questions[qid] = {
+                "type": "noul",
+                "instructions": question.instructions,
+                "criteria": {"true": "Yes", "false": "No"},
+            }
         elif isinstance(question, ChoiceQuestion):
             questions[qid] = {
                 "type": "choice",

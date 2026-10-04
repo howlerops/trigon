@@ -132,3 +132,43 @@ def test_offsets_match_the_reference_library_on_qwen25():
         triples = ours.encode_with_offsets(text)
         assert [t[0] for t in triples] == encoding.ids
         assert [(t[1], t[2]) for t in triples] == [tuple(o) for o in encoding.offsets], text
+
+
+def test_a_chain_of_isolated_splits_keeps_matches_and_gaps():
+    """MiniCPM5's pipeline: digit runs of up to three, then the usual regex.
+
+    Isolated keeps both what a pattern matches and the text between matches,
+    each its own piece, and the second split cuts the gaps the first left.
+    Checked against `tokenizers` on 2,005 corpus texts for the real file; this
+    pins the semantics without a download.
+    """
+    from trigon.backends.hf_bpe import ByteLevelBPE
+
+    letters = [chr(c) for c in range(ord("a"), ord("z") + 1)]
+    vocab = {ch: i for i, ch in enumerate(["Ġ", "0", "1", "2", "3", "4", *letters])}
+    spec = {
+        "normalizer": None,
+        "pre_tokenizer": {
+            "type": "Sequence",
+            "pretokenizers": [
+                {"type": "Split", "pattern": {"Regex": "\\p{N}{1,3}"}, "behavior": "Isolated"},
+                {"type": "Split", "pattern": {"Regex": " ?\\p{L}+"}, "behavior": "Isolated"},
+                {"type": "ByteLevel", "add_prefix_space": False, "use_regex": False},
+            ],
+        },
+        "model": {"type": "BPE", "vocab": vocab, "merges": []},
+    }
+    tokenizer = ByteLevelBPE(spec)
+    pieces = [piece for piece, _ in tokenizer._pieces("ab 12340 cd")]
+    assert pieces == ["ab", " ", "123", "40", " cd"]
+    starts = [start for _, start in tokenizer._pieces("ab 12340 cd")]
+    assert starts == [0, 2, 3, 6, 8]
+    with pytest.raises(ValueError, match="pre-tokenizer"):
+        bad = dict(
+            spec,
+            pre_tokenizer={
+                "type": "Sequence",
+                "pretokenizers": spec["pre_tokenizer"]["pretokenizers"][-1:],
+            },
+        )
+        ByteLevelBPE(bad)

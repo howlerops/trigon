@@ -418,3 +418,148 @@ def test_the_evidence_head_trains_and_round_trips_on_the_backbone(tmp_path):
     request = DecisionRequest(state=STATE, questions=BASE, options={"include_evidence": True})
     answer = Engine(loaded, compiler=loaded.make_compiler()).answer(request)
     assert {a.evidence_method for a in answer.answers.values()} == {"span_head"}
+
+
+def test_the_int8_cpu_twin_merges_the_adapter_and_answers_nearly_the_same():
+    """Serving on a CPU: every projection int8, the adapter merged into it.
+
+    A zero adapter would make the merge untestable, so it is drawn nonzero;
+    the twin must then agree with the float model to int8's precision, and
+    keep the heads -- what the calibrators were fitted against -- in float.
+    """
+    from torch.ao.nn.quantized.dynamic import Linear as DynamicLinear
+
+    backend = _tiny(seed=3)
+    with torch.no_grad():
+        for module in backend.model.modules():
+            if isinstance(module, LoRALinear) and module.rank:
+                module.lora_b.normal_(std=0.05)
+    twin = backend.int8_cpu()
+    projections = [m for m in twin.model.modules() if isinstance(m, LoRALinear)]
+    assert projections and all(isinstance(m.base, DynamicLinear) for m in projections)
+    assert all(m.rank == 0 for m in projections)
+    assert twin.model_version.endswith("+int8cpu")
+
+    float_engine = Engine(backend, compiler=backend.make_compiler())
+    int8_engine = Engine(twin, compiler=twin.make_compiler())
+    request = DecisionRequest(state=STATE, questions=BASE)
+    a, b = float_engine.answer(request), int8_engine.answer(request)
+    for qid in BASE:
+        pa = a.answers[qid].model_dump().get("probabilities") or {
+            "p": a.answers[qid].model_dump()["probability"]
+        }
+        pb = b.answers[qid].model_dump().get("probabilities") or {
+            "p": b.answers[qid].model_dump()["probability"]
+        }
+        assert max(abs(pa[k] - pb[k]) for k in pa) < 0.05, qid
+
+
+def test_the_option_crossover_belongs_to_the_checkpoint(tmp_path):
+    """Which Choice head answers is decided by the weights' own crossover.
+
+    A model trained at 77 options under a crossover of 64 only ever trained
+    its dot-product head; served 50 options, it answered from the other one
+    at its initialisation. So the crossover is saved with the checkpoint and
+    the engine compiles with it, and a checkpoint that records none keeps 64.
+    """
+    from trigon.backends.torch_readout import ReadoutConfig
+    from trigon.schema import OptionScoring
+    from trigon.schema.compiler import DOT_PRODUCT_CROSSOVER
+
+    tokenizer = default_tokenizer()
+    shape = QwenShape(
+        vocab_size=tokenizer.vocab_size, d_model=64, n_layers=2, n_heads=4, n_kv_heads=2, d_ff=96
+    )
+    model = QwenPrefillModel(shape, lora_rank=4, lora_alpha=8.0)
+    backend = QwenReadoutBackend(
+        model, tokenizer, backbone=None, config=ReadoutConfig(option_crossover=256)
+    )
+    hundred = DecisionRequest(
+        state=STATE,
+        questions={
+            "q": ChoiceQuestion(
+                instructions="Pick.", options=[{"name": f"o{i}"} for i in range(100)]
+            )
+        },
+    )
+
+    def scoring(engine: Engine) -> OptionScoring:
+        return engine.compiler.compile_request(hundred).schema.questions[0].option_scoring
+
+    assert scoring(Engine(backend)) is OptionScoring.READOUT_PER_OPTION
+    path = tmp_path / "adapter.pt"
+    backend.save(path)
+    loaded = TorchReadoutBackend.load(path)
+    assert loaded.config.option_crossover == 256
+    assert scoring(Engine(loaded)) is OptionScoring.READOUT_PER_OPTION
+
+    payload = torch.load(path, weights_only=False)
+    del payload["config"]["option_crossover"]
+    torch.save(payload, path)
+    old = TorchReadoutBackend.load(path)
+    assert old.config.option_crossover == DOT_PRODUCT_CROSSOVER
+    assert scoring(Engine(old)) is OptionScoring.DOT_PRODUCT
+
+
+def test_a_qwen3_shape_keeps_the_architectural_claims():
+    """Qwen3: head_dim apart from the width, no q/k/v bias, QK-norm per head.
+
+    The real 0.6B matches `transformers` to 0.0 (`scripts/backbone_parity.py`);
+    this pins the shape on a tiny model, and that the claims the mask makes --
+    one question's answer unmoved by another's -- hold through the new norm.
+    """
+    tokenizer = default_tokenizer()
+    torch.manual_seed(0)
+    shape = QwenShape(
+        vocab_size=tokenizer.vocab_size,
+        d_model=48,
+        n_layers=2,
+        n_heads=4,
+        n_kv_heads=2,
+        d_ff=96,
+        head_dim=32,
+        attention_bias=False,
+        qk_norm=True,
+    )
+    model = QwenPrefillModel(shape, lora_rank=4, lora_alpha=8.0)
+    attention = model.layers[0].self_attn
+    assert attention.q_proj.base.weight.shape == (4 * 32, 48)
+    assert attention.o_proj.base.weight.shape == (48, 4 * 32)
+    assert attention.q_proj.base.bias is None and attention.q_norm.weight.shape == (32,)
+    with torch.no_grad():
+        for p in model.parameters():
+            if not p.requires_grad and p.dim() > 1:
+                p.normal_(std=0.05)
+    engine = Engine(QwenReadoutBackend(model, tokenizer, backbone=None))
+    before = _answers(engine, BASE)
+    extra = {**BASE, "other": NoulQuestion(instructions="Is this about travel?")}
+    after = _answers(engine, extra)
+    for qid in BASE:
+        assert_answer_unmoved(before[qid], after[qid], qid)
+    # A shape saved before Qwen3 existed rebuilds Qwen2.
+    old = {
+        k: v
+        for k, v in shape.to_dict().items()
+        if k not in ("head_dim", "attention_bias", "qk_norm")
+    }
+    old["d_model"], old["n_heads"] = 64, 4
+    rebuilt = QwenShape(**old)
+    assert (rebuilt.head_dim, rebuilt.attention_bias, rebuilt.qk_norm) == (16, True, False)
+
+
+def test_merged_adapters_answer_as_the_unmerged_model():
+    """Serving folds LoRA into the frozen weights; the answer must not move."""
+    backend = _tiny(rank=4)
+    # A trained adapter, not a zero one, or merging adds nothing to test.
+    with torch.no_grad():
+        for name, p in backend.model.named_parameters():
+            if "lora_b" in name:
+                p.normal_(std=0.05)
+    compiled = backend.make_compiler().compile_request(DecisionRequest(state=STATE, questions=BASE))
+    before = backend.infer(compiled, DecisionRequest(state=STATE, questions=BASE))
+    backend.merge_adapters()
+    assert not any("lora_" in n for n, _ in backend.model.named_parameters())
+    after = backend.infer(compiled, DecisionRequest(state=STATE, questions=BASE))
+    for qid, out in before.outputs.items():
+        for x, y in zip(out.logits, after.outputs[qid].logits, strict=True):
+            assert abs(x - y) < 1e-4

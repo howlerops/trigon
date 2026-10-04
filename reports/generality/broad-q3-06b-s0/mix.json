@@ -1,0 +1,131 @@
+{
+  "backbone": "qwen3-0.6b",
+  "option_crossover": 256,
+  "model_version": "trigon-qwen3-0.6b-0.1.0+2ef0acd4",
+  "device": "mps (Apple arm64 (MPS))",
+  "seed": 0,
+  "epochs": 4,
+  "lr": 0.0001,
+  "train_seconds": 71149,
+  "corpora": {
+    "banking77": {
+      "train": 4000,
+      "calibration": 600
+    },
+    "goemotions": {
+      "train": 3000,
+      "calibration": 600
+    },
+    "helpsteer2": {
+      "train": 1500,
+      "calibration": 600
+    },
+    "measuring_hate_speech": {
+      "train": 1500,
+      "calibration": 600
+    },
+    "hatexplain": {
+      "train": 2500,
+      "calibration": 600
+    },
+    "teacher-workflows": {
+      "train": 3098,
+      "calibration": 0
+    },
+    "teacher-local": {
+      "train": 1464,
+      "calibration": 0
+    },
+    "mind2web-train": {
+      "train": 2264,
+      "calibration": 600
+    }
+  },
+  "held_out": {
+    "corpora": [
+      "clinc150",
+      "boolq",
+      "circa"
+    ],
+    "teacher_domains": [
+      "clinical_intake",
+      "contract_review",
+      "code_review",
+      "real_estate"
+    ]
+  },
+  "reshape": {
+    "min_options": 2,
+    "max_options": 77,
+    "shuffle": true,
+    "rename": 0.3,
+    "paraphrases": null,
+    "paraphrase": 0.0,
+    "criteria_only": 0.1,
+    "crossover_fraction": 0.0,
+    "crossover": 256
+  },
+  "calibrated_on": {
+    "cases": 3600,
+    "corpora": [
+      "banking77",
+      "goemotions",
+      "helpsteer2",
+      "measuring_hate_speech",
+      "hatexplain",
+      "mind2web-train"
+    ],
+    "reshaped": true
+  },
+  "training": {
+    "epochs": [
+      {
+        "epoch": 1,
+        "mean_loss": 1.4863839775775607,
+        "seconds": 15551.900852583989,
+        "validation_loss": 1.7142785156558327
+      },
+      {
+        "epoch": 2,
+        "mean_loss": 1.17765172981606,
+        "seconds": 17281.28610858298,
+        "validation_loss": 1.177860554429658
+      },
+      {
+        "epoch": 3,
+        "mean_loss": 0.8172434626668229,
+        "seconds": 18727.09095574997,
+        "validation_loss": 1.0164266785864386
+      },
+      {
+        "epoch": 4,
+        "mean_loss": 0.6779523035258652,
+        "seconds": 19557.771364124957,
+        "validation_loss": 1.022874461007371
+      }
+    ],
+    "n_cases": 17394,
+    "n_questions": 62452,
+    "seconds": 71148.053967583,
+    "first_loss": 1.4863839775775607,
+    "final_loss": 0.6779523035258652,
+    "kept_epoch": 3,
+    "n_rationales": 0
+  },
+  "argv": [
+    "--backbone",
+    "qwen3-0.6b",
+    "--device",
+    "mps",
+    "--epochs",
+    "4",
+    "--seed",
+    "0",
+    "--extra",
+    "teacher-local=3200",
+    "--extra",
+    "mind2web-train=2864",
+    "--out",
+    "<run>"
+  ]
+}

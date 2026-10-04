@@ -1,0 +1,21 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  // The front door of the hosted service (docs/self-host.md, *Hosted*): API
+  // keys, routing to the GPU gateway on Modal, and the open model downloads
+  // from R2. Secrets, set with `wrangler secret put`, never committed:
+  //   CLIENT_KEYS    comma-separated keys callers present as `Authorization: Bearer`
+  //   GATEWAY_KEY    a key in the Modal `trigon-gateway-auth` secret
+  //   MODAL_KEY, MODAL_SECRET   a Modal proxy auth token
+  "name": "trigon",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-15",
+  "vars": {
+    "ORIGIN": "https://jbeck018--trigon-gateway-gateway.us-west.modal.direct"
+  },
+  "observability": { "enabled": true },
+  // Run near the GPU origin rather than near the caller: each request is one
+  // short hop from the caller and one to Modal, and the second is the one that
+  // pays a TLS handshake when the isolate has no warm connection.
+  "placement": { "mode": "smart" },
+  "r2_buckets": [{ "binding": "MODELS", "bucket_name": "trigon-models" }]
+}
