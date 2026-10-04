@@ -104,8 +104,10 @@ def _backend(
         if weights and weights.endswith(".pt"):
             import torch
 
-            base = torch.load(weights, map_location="cpu", weights_only=True)["base"]
-            return LMScoreBackend(base, device=device, adapter=weights)
+            meta = torch.load(weights, map_location="cpu", weights_only=True)
+            return LMScoreBackend(
+                meta["base"], revision=meta.get("revision"), device=device, adapter=weights
+            )
         return LMScoreBackend(
             weights or "Qwen/Qwen3-0.6B",
             device=device,

@@ -69,7 +69,11 @@ def examples(cases) -> list[tuple[str, list[str], str, object]]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--model", default="Qwen/Qwen3-0.6B")
+    parser.add_argument(
+        "--model",
+        default="qwen3-0.6b",
+        help="a pinned backbone name (`trigon.backends.hub`) or a Hugging Face id",
+    )
     parser.add_argument("--device", default="mps")
     parser.add_argument("--lora-rank", type=int, default=16)
     parser.add_argument("--lora-alpha", type=float, default=32.0)
@@ -123,10 +127,15 @@ def main() -> int:
 
     torch.manual_seed(args.seed)
     device = torch.device(args.device)
-    tokenizer = AutoTokenizer.from_pretrained(args.model)
-    # float32: Apple's M1 has no bfloat16 arithmetic, and the frozen weights
-    # are 2.4 GB at this size.
-    model = AutoModelForCausalLM.from_pretrained(args.model, dtype=torch.float32)
+    from trigon.backends.hub import BACKBONES
+
+    pinned = BACKBONES.get(args.model)
+    repo, revision = (pinned.repo, pinned.revision) if pinned else (args.model, None)
+    tokenizer = AutoTokenizer.from_pretrained(repo, revision=revision)
+    # float32 off CUDA: Apple's M1 has no bfloat16 arithmetic. On a GPU the
+    # frozen weights are bfloat16; the LoRA weights stay float32 either way.
+    dtype = torch.bfloat16 if device.type == "cuda" else torch.float32
+    model = AutoModelForCausalLM.from_pretrained(repo, revision=revision, dtype=dtype)
     lora = add_lora(model, args.lora_rank, args.lora_alpha)
     model.to(device)
     if args.checkpointing:
@@ -196,7 +205,8 @@ def main() -> int:
     torch.save(
         {
             "kind": "lm-score",
-            "base": args.model,
+            "base": repo,
+            "revision": revision,
             "name": name,
             "rank": args.lora_rank,
             "alpha": args.lora_alpha,
@@ -213,7 +223,7 @@ def main() -> int:
     from trigon.cli import _fit_calibration
     from trigon.engine import Engine
 
-    backend = LMScoreBackend(args.model, device=args.device, adapter=str(adapter))
+    backend = LMScoreBackend(repo, revision=revision, device=args.device, adapter=str(adapter))
     scaler, isotonic = _fit_calibration(Engine(backend), calibration)
     scaler.save(args.out / "temperatures.json")
     if isotonic.knots:
@@ -222,7 +232,8 @@ def main() -> int:
         json.dumps(
             {
                 "kind": "lm-score",
-                "base": args.model,
+                "base": repo,
+                "revision": revision,
                 "model_version": backend.model_version,
                 "lora_rank": args.lora_rank,
                 "epochs": args.epochs,
