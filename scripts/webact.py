@@ -106,19 +106,26 @@ def main() -> int:
     who = parser.add_mutually_exclusive_group(required=True)
     who.add_argument("--bundle", type=pathlib.Path)
     who.add_argument("--compat")
+    who.add_argument("--lm", help="a trained lm-score adapter.pt, or a Hugging Face id")
     parser.add_argument("--model", default=None)
     parser.add_argument("--concurrency", type=int, default=3)
     parser.add_argument("--threads", type=int, default=0)
+    parser.add_argument("--device", default=None)
     parser.add_argument("-n", type=int, default=600)
     parser.add_argument("--out", type=pathlib.Path, required=True)
     args = parser.parse_args()
 
-    if args.bundle:
+    if args.bundle or args.lm:
         if args.threads:
             import torch
 
             torch.set_num_threads(args.threads)
-        answer, system, workers = _in_process(args.bundle)
+        bundle = args.bundle
+        if args.lm:
+            bundle = pathlib.Path(args.lm).parent if args.lm.endswith(".pt") else None
+        answer, system, workers = _in_process(
+            bundle or pathlib.Path("/nonexistent"), lm=args.lm, device=args.device
+        )
     else:
         if not args.model:
             parser.error("--model is required with --compat")

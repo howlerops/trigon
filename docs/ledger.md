@@ -318,8 +318,9 @@ twenty-two runs** — the investigation is closed and the evidence is in
 | Evidence across shapes | float32 gradient × input moves 1.7e-06 when a question is added, 14× the logits' 1.2e-07; float64 reads exactly 0.0. A real leak moves it 1e-03 |
 | Qwen2.5 offsets against `tokenizers` | Offset for offset on NFC text; on text NFC changes, ours cover the whole composed character and the reference drops the combining mark |
 | Where an agent-sized request spends CPU time (Qwen3-0.6B, 1,391 tokens, M1 Max, 8 threads, float32) | Compile 3.9 ms; model 2.8 s. Of the model: matmuls 56%, attention 25%, every elementwise op together ~13%. Accelerate's sgemm runs at 1.80 TFLOP/s on this CPU; bfloat16 and float16 matmuls at ~0.0003 (no kernel), so float32 is the only CPU precision here. LoRA merged into the frozen weights for serving: 2,465 → 1,940 ms, answers within 2.7e-06 |
-| The broad Qwen3-0.6B model (readout heads, 4 epochs) on the public decision benchmark, all 8,016 cases | Macro accuracy 0.424 against the incumbent's 0.838 and a compatible hosted service's 0.486. No better than the untrained backbone scoring its own tokens (0.43–0.44): the heads win only on what the mix trained (Banking77 0.604). Calibration is not the gap: ECE at or under the incumbent's on six of eleven slices (`reports/decision-bench/README.md`) |
-| The zero-shot LM-score backend on the public decision benchmark, Qwen3-0.6B, 60 cases a slice | Macro accuracy 0.439 raw and 0.429 with contextual calibration, against the incumbent's 0.808 and a compatible hosted service's 0.477 on the same cases. Calibration helps the yes/no slices (jailbreak 0.383 → 0.567, prompt injection 0.333 → 0.567) and costs the multiple-choice ones. Knowledge slices are where the gap is: MMLU-Pro 0.20 against 0.75, MedQA 0.32–0.33 against 0.83 |
+| The broad Qwen3-0.6B model (readout heads, 4 epochs) on the public decision benchmark, all 8,016 cases | Macro accuracy 0.424 against the incumbent's 0.838 and a compatible hosted service's 0.486. No better than the untrained backbone scoring its own tokens (0.415–0.418): the heads win only on what the mix trained (Banking77 0.604). Calibration is not the gap: ECE at or under the incumbent's on six of eleven slices (`reports/decision-bench/README.md`) |
+| The zero-shot LM-score backend on the public decision benchmark, Qwen3-0.6B, a seeded 60 cases a slice | Macro accuracy 0.418 raw and 0.415 with contextual calibration, against the incumbent's 0.823 and a compatible hosted service's 0.495 on the same cases. Knowledge slices are where the gap is: MMLU-Pro 0.27–0.37 against 0.83, MedQA 0.32–0.37 against 0.87 |
+| **The LM-score readout trained, Qwen3-0.6B, one epoch, one seed** (2.8 h on MPS) | Public decision benchmark **0.465** on all 8,016 cases (broad heads 0.424, hosted service 0.486, incumbent 0.838), ahead of the service on 8 of 11 slices. CLINC150 **0.812** (heads 0.585, service 0.849); renamed 50-option Banking77 0.785; order agreement 0.902; Mind2Web step success **0.438** (heads 0.260, service 0.050). Yes/no is the loss: BoolQ 0.565 under its 0.631 majority, trajectory safety 0.198. `w` settled at 0.62 (`reports/decision-bench/README.md`) |
 
 ---
 
@@ -408,6 +409,12 @@ to hold.
 ## Corrected in our own favour
 
 Errors that flattered the project, found by re-measuring rather than by review:
+
+- **The zero-shot screening sampled each slice's first 60 cases.** At least
+  one benchmark file is ordered by label, so a model that says "yes" to
+  nearly everything scored 0.917 on agent-trajectory safety from a prefix and
+  0.517 from a random sample; the macro read 0.439 and 0.429 against 0.418 and
+  0.415 on seeded samples. `--limit` now samples (`scripts/decision_bench.py`).
 
 - **The cost figure was the spike's, and the savings it printed were 15–20×
   too high.** The inherited $0.007/MTok assumed ~30k prefill tokens a second

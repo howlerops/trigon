@@ -24,6 +24,7 @@ import ast
 import json
 import math
 import pathlib
+import random
 import sys
 import time
 
@@ -128,15 +129,19 @@ def main() -> int:
     from trigon.server.config import ServerConfig
 
     if args.lm:
+        # A Hugging Face id (zero-shot), or a train_lm_score.py adapter.pt
+        # whose run directory holds its calibrators.
         env = {"TRIGON_BACKEND": "lm-score", "TRIGON_WEIGHTS": args.lm}
+        run = pathlib.Path(args.lm).parent if args.lm.endswith(".pt") else None
     else:
         env = {"TRIGON_BACKEND": "torch", "TRIGON_WEIGHTS": str(args.bundle / "adapter.pt")}
-        for name, variable in (
-            ("temperatures.json", "TRIGON_TEMPERATURE_PATH"),
-            ("isotonic.json", "TRIGON_ISOTONIC_PATH"),
-        ):
-            if (args.bundle / name).exists():
-                env[variable] = str(args.bundle / name)
+        run = args.bundle
+    for name, variable in (
+        ("temperatures.json", "TRIGON_TEMPERATURE_PATH"),
+        ("isotonic.json", "TRIGON_ISOTONIC_PATH"),
+    ):
+        if run is not None and (run / name).exists():
+            env[variable] = str(run / name)
     if args.device:
         env["TRIGON_DEVICE"] = args.device
     client = TestClient(build_app(ServerConfig.from_env(env)))
@@ -151,7 +156,10 @@ def main() -> int:
             continue
         cases = [json.loads(line) for line in path.open() if line.strip()]
         if args.limit:
-            cases = cases[: args.limit]
+            # A seeded sample, never a prefix: at least one slice's file is
+            # ordered by label, and its first 60 cases are nearly all one
+            # answer -- a prefix scored a yes-biased model 0.917 there.
+            cases = random.Random(f"limit:{slice_name}").sample(cases, min(args.limit, len(cases)))
         started, failed = time.perf_counter(), 0
         for case in cases:
             cached = raw / f"{case['case_id']}.json"

@@ -1,0 +1,263 @@
+{
+  "n_common": 7516,
+  "macro_accuracy": {
+    "trigon": 0.46515987460815045,
+    "incumbent": 0.8375235109717868,
+    "hosted-service": 0.48575862068965514
+  },
+  "slices": {
+    "aegis2": {
+      "trigon": {
+        "n": 500,
+        "accuracy": 0.624,
+        "brier": 0.4699560542125192,
+        "ece_10": 0.05668891405233801,
+        "mean_confidence": 0.5771461370552944
+      },
+      "incumbent": {
+        "n": 500,
+        "accuracy": 0.828,
+        "brier": 0.2374836,
+        "ece_10": 0.02877999999999998,
+        "mean_confidence": 0.84454
+      },
+      "hosted-service": {
+        "n": 500,
+        "accuracy": 0.542,
+        "brier": 0.6141758592,
+        "ece_10": 0.22833720000000002,
+        "mean_confidence": 0.7703372
+      }
+    },
+    "aegis2_response": {
+      "trigon": {
+        "n": 500,
+        "accuracy": 0.542,
+        "brier": 0.48887720688603564,
+        "ece_10": 0.07790328446977889,
+        "mean_confidence": 0.6167134883655067
+      },
+      "incumbent": {
+        "n": 500,
+        "accuracy": 0.812,
+        "brier": 0.26748520000000003,
+        "ece_10": 0.025460000000000003,
+        "mean_confidence": 0.80006
+      },
+      "hosted-service": {
+        "n": 500,
+        "accuracy": 0.528,
+        "brier": 0.5919765515200001,
+        "ece_10": 0.20415239999999993,
+        "mean_confidence": 0.7321524
+      }
+    },
+    "atbench500": {
+      "trigon": {
+        "n": 500,
+        "accuracy": 0.198,
+        "brier": 0.7569315280467263,
+        "ece_10": 0.44673131997725374,
+        "mean_confidence": 0.6447313199772537
+      },
+      "incumbent": {
+        "n": 500,
+        "accuracy": 0.93,
+        "brier": 0.1496536,
+        "ece_10": 0.13856000000000002,
+        "mean_confidence": 0.7914399999999999
+      },
+      "hosted-service": {
+        "n": 500,
+        "accuracy": 0.654,
+        "brier": 0.45898478636,
+        "ece_10": 0.10004500000000008,
+        "mean_confidence": 0.555965
+      }
+    },
+    "banking77": {
+      "trigon": {
+        "n": 1000,
+        "accuracy": 0.674,
+        "brier": 0.4424061727394916,
+        "ece_10": 0.0470374027988155,
+        "mean_confidence": 0.7210374027988155
+      },
+      "incumbent": {
+        "n": 1000,
+        "accuracy": 0.813,
+        "brier": 0.2938764,
+        "ece_10": 0.08198999999999992,
+        "mean_confidence": 0.89203
+      },
+      "hosted-service": {
+        "n": 1000,
+        "accuracy": 0.363,
+        "brier": 1.16008895021,
+        "ece_10": 0.5570145000000001,
+        "mean_confidence": 0.9200145
+      }
+    },
+    "jailbreak_classification": {
+      "trigon": {
+        "n": 400,
+        "accuracy": 0.66,
+        "brier": 0.4638590914920689,
+        "ece_10": 0.15393458648349148,
+        "mean_confidence": 0.803165298697222
+      },
+      "incumbent": {
+        "n": 400,
+        "accuracy": 0.975,
+        "brier": 0.043421,
+        "ece_10": 0.030350000000000023,
+        "mean_confidence": 0.9494499999999999
+      },
+      "hosted-service": {
+        "n": 400,
+        "accuracy": 0.93,
+        "brier": 0.1009163805,
+        "ece_10": 0.01226599999999994,
+        "mean_confidence": 0.940258
+      }
+    },
+    "medmcqa": {
+      "trigon": {
+        "n": 1000,
+        "accuracy": 0.309,
+        "brier": 0.7607278411126969,
+        "ece_10": 0.11282577689370023,
+        "mean_confidence": 0.4218257768937002
+      },
+      "incumbent": {
+        "n": 1000,
+        "accuracy": 0.78,
+        "brier": 0.29870990000000003,
+        "ece_10": 0.04435000000000001,
+        "mean_confidence": 0.82435
+      },
+      "hosted-service": {
+        "n": 1000,
+        "accuracy": 0.269,
+        "brier": 0.8375182852699999,
+        "ece_10": 0.20697659999999998,
+        "mean_confidence": 0.4759766
+      }
+    },
+    "medqa_usmle": {
+      "trigon": {
+        "n": 1000,
+        "accuracy": 0.329,
+        "brier": 0.7606768596790763,
+        "ece_10": 0.1083855322404844,
+        "mean_confidence": 0.4333424832235782
+      },
+      "incumbent": {
+        "n": 1000,
+        "accuracy": 0.874,
+        "brier": 0.1770025,
+        "ece_10": 0.02374999999999998,
+        "mean_confidence": 0.88215
+      },
+      "hosted-service": {
+        "n": 1000,
+        "accuracy": 0.261,
+        "brier": 0.8456954061599999,
+        "ece_10": 0.22241280000000005,
+        "mean_confidence": 0.48341280000000003
+      }
+    },
+    "mmlu_pro": {
+      "trigon": {
+        "n": 1000,
+        "accuracy": 0.241,
+        "brier": 0.8609685291555264,
+        "ece_10": 0.05058633508879203,
+        "mean_confidence": 0.2894360726103194
+      },
+      "incumbent": {
+        "n": 1000,
+        "accuracy": 0.806,
+        "brier": 0.28721159999999996,
+        "ece_10": 0.05856999999999991,
+        "mean_confidence": 0.83597
+      },
+      "hosted-service": {
+        "n": 1000,
+        "accuracy": 0.125,
+        "brier": 0.9911069277200001,
+        "ece_10": 0.23543729999999996,
+        "mean_confidence": 0.3604373
+      }
+    },
+    "prompt_injections": {
+      "trigon": {
+        "n": 116,
+        "accuracy": 0.4827586206896552,
+        "brier": 0.6960024865930878,
+        "ece_10": 0.3394080050012554,
+        "mean_confidence": 0.8221666256909106
+      },
+      "incumbent": {
+        "n": 116,
+        "accuracy": 0.7327586206896551,
+        "brier": 0.3762965517241379,
+        "ece_10": 0.16206896551724143,
+        "mean_confidence": 0.8948275862068965
+      },
+      "hosted-service": {
+        "n": 116,
+        "accuracy": 0.8103448275862069,
+        "brier": 0.27717475793103447,
+        "ece_10": 0.05619827586206893,
+        "mean_confidence": 0.7938310344827586
+      }
+    },
+    "pubmedqa": {
+      "trigon": {
+        "n": 500,
+        "accuracy": 0.386,
+        "brier": 0.6570849116918653,
+        "ece_10": 0.09178722653742856,
+        "mean_confidence": 0.47249800614139814
+      },
+      "incumbent": {
+        "n": 500,
+        "accuracy": 0.706,
+        "brier": 0.46515999999999996,
+        "ece_10": 0.19001999999999997,
+        "mean_confidence": 0.8935
+      },
+      "hosted-service": {
+        "n": 500,
+        "accuracy": 0.328,
+        "brier": 0.99038869592,
+        "ece_10": 0.4336098,
+        "mean_confidence": 0.7616098
+      }
+    },
+    "scienceqa_text": {
+      "trigon": {
+        "n": 1000,
+        "accuracy": 0.671,
+        "brier": 0.42178196673911544,
+        "ece_10": 0.052360733922435634,
+        "mean_confidence": 0.624837965515249
+      },
+      "incumbent": {
+        "n": 1000,
+        "accuracy": 0.956,
+        "brier": 0.0615312,
+        "ece_10": 0.011439999999999978,
+        "mean_confidence": 0.96228
+      },
+      "hosted-service": {
+        "n": 1000,
+        "accuracy": 0.533,
+        "brier": 0.55368880771,
+        "ece_10": 0.10714450000000002,
+        "mean_confidence": 0.6401445
+      }
+    }
+  }
+}

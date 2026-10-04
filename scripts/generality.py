@@ -206,7 +206,15 @@ def main() -> int:
 
             torch.set_num_threads(args.threads)
         answer, system, workers = _in_process(
-            args.bundle or pathlib.Path("."), int8=args.int8, lm=args.lm, device=args.device
+            args.bundle
+            or (
+                pathlib.Path(args.lm).parent
+                if args.lm.endswith(".pt")
+                else pathlib.Path("/nonexistent")
+            ),
+            int8=args.int8,
+            lm=args.lm,
+            device=args.device,
         )
     else:
         if not args.model:

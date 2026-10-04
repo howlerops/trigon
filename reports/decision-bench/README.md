@@ -13,17 +13,33 @@ ECE over the top-label probability. SST-5 ships without text and is skipped.
 | --- | ---: | ---: | --- |
 | incumbent | 8,016 | **0.838** | `broad.md` |
 | compatible hosted service | 8,016 | 0.486 | `broad.md` |
+| **trigon LM score (Qwen3-0.6B, LoRA + residual, 1 epoch)** | 8,016 | **0.465** | `lms.md` |
 | trigon broad (Qwen3-0.6B, readout heads, 4 epochs) | 8,016 | 0.424 | `broad.md` |
-| Qwen3-0.6B zero-shot LM score, raw | 660 (60 a slice) | 0.439 | `zero-shot-cf0.md` |
-| Qwen3-0.6B zero-shot LM score, contextual calibration | 660 | 0.429 | `zero-shot-cf1.md` |
+| Qwen3-0.6B zero-shot LM score, raw | 660 (60 a slice) | 0.418 | `zero-shot-cf0.md` |
+| Qwen3-0.6B zero-shot LM score, contextual calibration | 660 | 0.415 | `zero-shot-cf1.md` |
 
-On the 60-a-slice subset the incumbent scores 0.808 and the hosted service 0.477.
+On the 60-a-slice samples the incumbent scores 0.823 and the hosted service
+0.495. They are seeded random samples; the first version of this table used
+each file's first 60 cases, and at least one file is ordered by label, which
+put the zero-shot rows at 0.439 and 0.429.
 
 ## What it says
 
-**The trained readout heads add nothing over the backbone's own language
-model here.** Four epochs of the broad mix give 0.424; the same backbone with
-no training at all, scoring answers as its own tokens, gives 0.43–0.44. The
+**The LM-score readout is the better model on every axis we measure but
+yes/no.** One epoch, trained in 2.8 h on a laptop, takes the macro from 0.424
+to 0.465 and beats the hosted service on 8 of 11 slices -- every Choice slice,
+MMLU-Pro 0.241 against 0.125 -- with ECE at or under the incumbent's on
+Banking77, MMLU-Pro and PubMedQA. It loses the macro to the hosted service
+(0.486) on three yes/no slices alone: jailbreak 0.660 against 0.930, prompt
+injection 0.483 against 0.810, and agent-trajectory safety 0.198 against
+0.654 -- below chance, rating 236 of 250 safe trajectories unsafe. The same
+model is worst on BoolQ in `reports/generality/lms-q3-06b`. Yes/no is the
+open problem; `w` settled at 0.62, so the residual is doing more of the work
+than public reports of this design describe (0.95–1.01).
+
+**The old readout heads added nothing over the backbone's own language
+model.** Four epochs of the broad mix give 0.424; the same backbone with no
+training at all, scoring answers as its own tokens, gives 0.415–0.418. The
 heads win only where the mix trained them (Banking77 0.604) and lose to the
 zero-shot scorer on everything held out. This is the evidence for moving to
 the LM-score readout (`trigon.backends.lm_score`).
