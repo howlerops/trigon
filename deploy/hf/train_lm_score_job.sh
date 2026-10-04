@@ -3,6 +3,7 @@
 #
 #   hf jobs run --flavor a100-large --secrets HF_TOKEN --timeout 6h \
 #     -e MODEL=qwen3-4b -e REF=generality -e RUN=qwen3-4b-lms-s0 \
+#     -e TRAIN_ARGS="--noul-from-choice 0.3 --balance-noul" \
 #     -e BENCH_REPO=<public decision benchmark dataset> -e BENCH_REVISION=<sha> \
 #     -e BENCH_RENAME="<dir>=incumbent <dir>=hosted-service" \
 #     pytorch/pytorch:2.14.1-cuda12.6-cudnn9-runtime \
@@ -59,7 +60,7 @@ nvidia-smi --query-gpu=name,memory.total --format=csv
 OUT=/tmp/run
 python scripts/train_lm_score.py --model "$MODEL" --device cuda --seed "$SEED" --scale "$SCALE" \
   --max-prompt-tokens 1280 --extra teacher-local=3200 --extra mind2web-train=2864 \
-  --extra wanli=4000 --name "$RUN" --out "$OUT"
+  --extra wanli=4000 --name "$RUN" --out "$OUT" ${TRAIN_ARGS:-}
 # Upload after every stage: a failure late in the job must not take the
 # trained adapter with it. (It once did: a scoring crash after 2.3 GPU-hours
 # exited before the only upload, and the 4B adapter was lost.)
