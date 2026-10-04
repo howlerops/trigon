@@ -60,16 +60,22 @@ OUT=/tmp/run
 python scripts/train_lm_score.py --model "$MODEL" --device cuda --seed "$SEED" --scale "$SCALE" \
   --max-prompt-tokens 1280 --extra teacher-local=3200 --extra mind2web-train=2864 \
   --extra wanli=4000 --name "$RUN" --out "$OUT"
-python scripts/generality.py --lm "$OUT/adapter.pt" --device cuda -n 1000 --out "$OUT/generality"
-python scripts/webact.py --lm "$OUT/adapter.pt" --device cuda -n 600 --out "$OUT/webact"
+# Upload after every stage: a failure late in the job must not take the
+# trained adapter with it. (It once did: a scoring crash after 2.3 GPU-hours
+# exited before the only upload, and the 4B adapter was lost.)
+save() { hf upload "$OUT_REPO" "$OUT" "$RUN" --private --exclude "*/raw/*" --commit-message "$RUN: $1" || true; }
+save "adapter and calibrators"
+python scripts/generality.py --lm "$OUT/adapter.pt" --device cuda -n 1000 --out "$OUT/generality" || true
+save "generality"
+python scripts/webact.py --lm "$OUT/adapter.pt" --device cuda -n 600 --out "$OUT/webact" || true
+save "web actions"
 if [ -n "$BENCH_REPO" ]; then
   hf download "$BENCH_REPO" --type dataset --revision "$BENCH_REVISION" --local-dir /tmp/bench
   renames=()
   for pair in $BENCH_RENAME; do renames+=(--rename "$pair"); done
   python scripts/decision_bench.py --cases /tmp/bench/cases --lm "$OUT/adapter.pt" --device cuda \
     --reference /tmp/bench/predictions "${renames[@]}" --out "$OUT/decision-bench" \
-    | tee "$OUT/decision-bench.md"
+    | tee "$OUT/decision-bench.md" || true
+  save "decision benchmark"
 fi
-rm -rf "$OUT/generality/raw" "$OUT/webact/raw" "$OUT/decision-bench/raw"
-hf upload "$OUT_REPO" "$OUT" "$RUN" --private --commit-message "$RUN: $MODEL LM score, seed $SEED"
 echo "done: https://huggingface.co/$OUT_REPO/tree/main/$RUN"

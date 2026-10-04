@@ -40,6 +40,50 @@ from trigon.schema import render_state  # noqa: E402
 from trigon.types import NoulQuestion  # noqa: E402
 
 
+def noul_from_choice(case, rng: random.Random):
+    """A yes/no question asked of one of ``case``'s Choice answers, or None.
+
+    "Is the answer X?" -- X the true option half the time and another option
+    otherwise. The mix's only yes/no corpus answers "no" 70% of the time, and
+    a model trained on it says "no" to questions it ranks correctly (BoolQ:
+    AUC 0.804, accuracy 0.565). These are balanced by construction and come
+    from every Choice corpus, so the yes/no head sees the mix's breadth.
+    """
+    from trigon.evals.harness import Case, Expectation
+    from trigon.types import ChoiceQuestion, DecisionRequest
+
+    for qid, question in case.request.questions.items():
+        expected = case.expected.get(qid)
+        if not isinstance(question, ChoiceQuestion) or expected is None:
+            continue
+        label = expected.label
+        if label is None and expected.distribution is not None:
+            top = max(range(len(expected.distribution)), key=expected.distribution.__getitem__)
+            label = top if expected.distribution[top] >= 0.5 else None
+        if label is None or len(question.options) < 2:
+            continue
+        truth = rng.random() < 0.5
+        others = [i for i in range(len(question.options)) if i != label]
+        index = label if truth else rng.choice(others)
+        option = question.options[index]
+        named = f'"{option.name}"' + (f" ({option.criteria})" if option.criteria else "")
+        noul = NoulQuestion(instructions=f"{question.instructions.strip()}\nIs the answer {named}?")
+        return Case(
+            case_id=f"{case.case_id}:is",
+            request=DecisionRequest(state=case.request.state, questions={"is": noul}),
+            expected={"is": Expectation(probability=1.0 if truth else 0.0)},
+            domain=case.domain,
+            tags=(*case.tags, "noul-from-choice"),
+        )
+    return None
+
+
+def with_derived_nouls(cases, fraction: float, seed: int) -> list:
+    rng = random.Random(f"noul:{seed}")
+    derived = [noul_from_choice(c, rng) for c in cases if rng.random() < fraction]
+    return [*cases, *(d for d in derived if d is not None)]
+
+
 def examples(cases) -> list[tuple[str, list[str], str, object]]:
     """``(prompt, candidates, kind, target)`` per labelled question.
 
@@ -88,6 +132,17 @@ def main() -> int:
     parser.add_argument("--calibration-per-corpus", type=int, default=600)
     parser.add_argument("--reshape-max", type=int, default=77)
     parser.add_argument(
+        "--noul-from-choice",
+        type=float,
+        default=0.0,
+        help="share of Choice cases that also yield a balanced 'is the answer X?' yes/no",
+    )
+    parser.add_argument(
+        "--balance-noul",
+        action="store_true",
+        help="weight yes/no examples so each answer carries half the yes/no loss",
+    )
+    parser.add_argument(
         "--checkpointing", action="store_true", help="trade compute for memory on larger models"
     )
     parser.add_argument("--log-every", type=int, default=200)
@@ -124,6 +179,9 @@ def main() -> int:
         drawn[name] = {"train": len(cases) - extra, "calibration": min(extra, len(cases))}
         print(f"mix: {name} {drawn[name]}", file=sys.stderr, flush=True)
     calibration = reshape_all(calibration, reshape, seed=args.seed + 11)
+    if args.noul_from_choice:
+        # The yes/no calibrator is fitted on the same breadth it trains on.
+        calibration = with_derived_nouls(calibration, args.noul_from_choice, args.seed + 13)
 
     torch.manual_seed(args.seed)
     device = torch.device(args.device)
@@ -155,7 +213,16 @@ def main() -> int:
     step, running = 0, []
     for epoch in range(args.epochs):
         reshaped = reshape_all(train, reshape, seed=args.seed * 1000 + epoch)
+        if args.noul_from_choice:
+            reshaped = with_derived_nouls(reshaped, args.noul_from_choice, args.seed * 1000 + epoch)
         batch = examples(reshaped)
+        nouls = [t for _, _, k, t in batch if k == "noul"]
+        yes = sum(nouls) / max(1, len(nouls))
+        # Each answer's weight is half the yes/no loss over its share of it.
+        w_yes, w_no = 1.0, 1.0
+        if args.balance_noul:
+            w_yes, w_no = 0.5 / max(yes, 1e-3), 0.5 / max(1 - yes, 1e-3)
+        print(f"yes/no examples: {len(nouls)}, share yes {yes:.3f}", file=sys.stderr, flush=True)
         random.Random(f"order:{args.seed}:{epoch}").shuffle(batch)
         total_steps = len(batch) * args.epochs
         model.train()
@@ -171,7 +238,7 @@ def main() -> int:
                 logit = scores[1] - scores[0]
                 loss = torch.nn.functional.binary_cross_entropy_with_logits(
                     logit, torch.tensor(target, device=logit.device)
-                )
+                ) * (target * w_yes + (1 - target) * w_no)
             else:
                 logp = torch.log_softmax(scores, dim=-1)
                 if isinstance(target, int):

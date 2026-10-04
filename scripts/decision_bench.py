@@ -14,7 +14,8 @@ against the incumbent's real answers rather than a description of them.
 The cases are sent through trigon's compatibility route, as a client would send
 them. Conventions are the benchmark's: a Noul is right at 0.5, a Choice by argmax;
 Brier is the multiclass sum; ECE uses ten bins over the top-label probability.
-SST-5 ships without its text (its source states no licence) and is skipped.
+SST-5 ships without its text (its source states no licence) and is skipped, as
+are the image slices: trigon reads text only.
 """
 
 from __future__ import annotations
@@ -32,7 +33,8 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "src"))
 
 from trigon.server.compat_path import COMPAT_PATH  # noqa: E402
 
-SKIP = {"sst5"}
+#: SST-5 ships without its text; the image slices need pixels trigon cannot read.
+SKIP = {"sst5", "scienceqa_image", "vqa_rad"}
 
 
 def _parse(value):
@@ -119,6 +121,13 @@ def main() -> int:
         metavar="DIR=NAME",
         help="report a reference system under NAME instead of its directory's name",
     )
+    parser.add_argument(
+        "--only",
+        action="append",
+        default=[],
+        metavar="DIR",
+        help="compare against these reference systems only (default: every one)",
+    )
     parser.add_argument("--limit", type=int, default=0, help="cases per slice; 0 = all")
     parser.add_argument("--out", type=pathlib.Path, required=True)
     args = parser.parse_args()
@@ -196,37 +205,62 @@ def main() -> int:
     if args.reference:
         for directory in sorted(p for p in args.reference.iterdir() if p.is_dir()):
             file = directory / "predictions.jsonl"
-            if file.exists():
+            if file.exists() and (not args.only or directory.name in args.only):
                 systems[rename.get(directory.name, directory.name)] = _reference(file)
 
-    # Scored on the cases every system answered, so no system is judged on a
-    # different subset.
-    common = set.intersection(*(set(s) for s in systems.values()))
-    by_slice: dict[str, dict[str, list]] = {}
-    for case_id in common:
-        slice_name = case_id.rsplit("-", 2)[0]
-        for name, rows in systems.items():
-            by_slice.setdefault(slice_name, {}).setdefault(name, []).append(rows[case_id])
-    results = {
-        slice_name: {name: score_slice(rows) for name, rows in per.items()}
-        for slice_name, per in sorted(by_slice.items())
-    }
-    macro = {
-        name: sum(results[s][name]["accuracy"] for s in results) / len(results) for name in systems
-    }
+    def slice_of(case_id: str) -> str:
+        return case_id.rsplit("-", 2)[0]
+
+    # Per slice, scored on the cases every system that answered the slice
+    # answered, so no two systems are judged on different subsets of it. A
+    # reference system may cover only some slices (one covers only the image
+    # ones); the macro is taken over the slices every system covers.
+    by_slice: dict[str, dict[str, dict]] = {}
+    for name, rows in systems.items():
+        for case_id, row in rows.items():
+            by_slice.setdefault(slice_of(case_id), {}).setdefault(name, {})[case_id] = row
+    results: dict[str, dict[str, dict]] = {}
+    for slice_name, per in sorted(by_slice.items()):
+        if "trigon" not in per:
+            continue
+        common = set.intersection(*(set(rows) for rows in per.values()))
+        if common:
+            results[slice_name] = {
+                name: score_slice([rows[c] for c in sorted(common)]) for name, rows in per.items()
+            }
+    names = list(systems)
+
+    # A system's macro is over the slices it answered; one that skipped some
+    # of ours is marked, because its macro is over a different set.
+    def macro_of(name: str) -> tuple[float, int]:
+        covered = [s for s in results if name in results[s]]
+        if not covered:
+            return math.nan, 0
+        return sum(results[s][name]["accuracy"] for s in covered) / len(covered), len(covered)
+
+    macro = {name: macro_of(name)[0] for name in names}
+    partial = {name for name in names if macro_of(name)[1] < len(results)}
+    full = [s for s in results if all(n in results[s] for n in names if n not in partial)]
     args.out.mkdir(parents=True, exist_ok=True)
     (args.out / "results.json").write_text(
-        json.dumps({"n_common": len(common), "macro_accuracy": macro, "slices": results}, indent=2)
+        json.dumps({"macro_over": full, "macro_accuracy": macro, "slices": results}, indent=2)
     )
-    names = list(systems)
     print("| Slice | n | " + " | ".join(f"{n} acc / ECE" for n in names) + " |")
     print("| --- | ---: |" + " --- |" * len(names))
     for slice_name, per in results.items():
-        n = next(iter(per.values()))["n"]
-        cells = [f"{per[k]['accuracy']:.3f} / {per[k]['ece_10']:.3f}" for k in names]
+        n = per["trigon"]["n"]
+        cells = [
+            f"{per[k]['accuracy']:.3f} / {per[k]['ece_10']:.3f}" if k in per else "—" for k in names
+        ]
         print(f"| {slice_name} | {n} | " + " | ".join(cells) + " |")
-    print("| **macro** | | " + " | ".join(f"**{macro[k]:.3f}**" for k in names) + " |")
-    return 0 if not math.isnan(sum(macro.values())) else 1
+    cells = [
+        "—"
+        if math.isnan(macro[k])
+        else f"**{macro[k]:.3f}**" + (f" ({macro_of(k)[1]} slices only)" if k in partial else "")
+        for k in names
+    ]
+    print(f"| **macro** ({len(results)} slices) | | " + " | ".join(cells) + " |")
+    return 0 if not math.isnan(macro["trigon"]) else 1
 
 
 if __name__ == "__main__":
