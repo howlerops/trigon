@@ -43,7 +43,17 @@ if [ "${DRY:-0}" = 1 ]; then
   python -c "import torch, transformers; print('torch', torch.__version__, 'transformers', transformers.__version__)"
   python -c "from trigon.backends.hub import BACKBONES; print(BACKBONES['$MODEL'])"
   [ -z "$BENCH_REPO" ] || hf download "$BENCH_REPO" --type dataset --revision "$BENCH_REVISION" --local-dir /tmp/bench
-  ls "$TRIGON_CORPUS_CACHE"; echo "DRY OK"; exit 0
+  python - <<'PY'
+import sys
+sys.path.insert(0, "scripts")
+from train_mix import MIX
+from trigon.evals.corpora import load
+for name in [*MIX, "teacher-local", "mind2web-train", "wanli"]:
+    print(name, "train", len(load(name, "train", purpose="train")))
+for name in ("banking77", "clinc150", "boolq", "mind2web"):
+    print(name, "test", len(load(name, "test", purpose="eval")))
+PY
+  echo "DRY OK"; exit 0
 fi
 nvidia-smi --query-gpu=name,memory.total --format=csv
 OUT=/tmp/run
