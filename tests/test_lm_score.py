@@ -68,3 +68,11 @@ def test_a_bundle_names_its_own_backend(tmp_path):
     assert _is_lm_score_adapter(str(lm))
     assert not _is_lm_score_adapter(str(readout))
     assert not _is_lm_score_adapter("Qwen/Qwen3-0.6B")
+
+
+def test_shared_prefix_leaves_every_question_a_token():
+    from trigon.backends.lm_score import shared_prefix
+
+    assert shared_prefix([[1, 2, 3, 4], [1, 2, 3, 9], [1, 2, 7]]) == 2
+    assert shared_prefix([[1, 2, 3], [1, 2, 3]]) == 2  # identical: one token each to score
+    assert shared_prefix([[5], [5, 6]]) == 0

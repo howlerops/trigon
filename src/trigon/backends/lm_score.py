@@ -36,6 +36,8 @@ from ..types import ChoiceQuestion, DecisionRequest, NoulQuestion, ScoreQuestion
 from .base import BackendOutput, QuestionOutput
 
 TEMPLATE_VERSION = "lm-score-v1"
+#: Below this many shared tokens a second forward pass costs more than it saves.
+MIN_SHARED_PREFIX = 32
 CONTENT_FREE_STATE = "N/A"
 
 
@@ -136,7 +138,17 @@ class Readout:
         self.residual.load_state_dict(state["residual"])
 
 
-def pack(prompt_ids: list[int], candidates: list[list[int]]):
+def shared_prefix(sequences: list[list[int]]) -> int:
+    """The longest common prefix of every sequence, leaving each at least one token."""
+    n = min(len(s) for s in sequences) - 1
+    first = sequences[0]
+    for i in range(max(n, 0)):
+        if any(s[i] != first[i] for s in sequences[1:]):
+            return i
+    return max(n, 0)
+
+
+def pack(prompt_ids: list[int], candidates: list[list[int]], offset: int = 0):
     """One sequence holding the prompt and every candidate after it.
 
     Each candidate attends to the whole prompt and to its own earlier tokens,
@@ -147,13 +159,16 @@ def pack(prompt_ids: list[int], candidates: list[list[int]]):
     target, owner, last)``: ``allowed[q, k]`` is the attention mask, and token
     ``target[j]`` of candidate ``owner[j]`` is predicted at position ``pred[j]``;
     ``last[i]`` is candidate ``i``'s final position.
+
+    ``offset`` is the length of a prefix already in the KV cache: positions
+    start after it and every query may attend to all of it.
     """
     import torch
 
     n_prompt = len(prompt_ids)
     total = n_prompt + sum(len(c) for c in candidates)
     ids = list(prompt_ids)
-    positions = list(range(n_prompt))
+    positions = list(range(offset, offset + n_prompt))
     allowed = torch.zeros((total, total), dtype=torch.bool)
     allowed[:n_prompt, :n_prompt] = torch.tril(torch.ones(n_prompt, n_prompt, dtype=torch.bool))
     pred, target, owner, last = [], [], [], []
@@ -161,7 +176,7 @@ def pack(prompt_ids: list[int], candidates: list[list[int]]):
     for i, cand in enumerate(candidates):
         end = start + len(cand)
         ids += cand
-        positions += range(n_prompt, n_prompt + len(cand))
+        positions += range(offset + n_prompt, offset + n_prompt + len(cand))
         allowed[start:end, :n_prompt] = True
         allowed[start:end, start:end] = torch.tril(
             torch.ones(len(cand), len(cand), dtype=torch.bool)
@@ -172,6 +187,8 @@ def pack(prompt_ids: list[int], candidates: list[list[int]]):
             owner.append(i)
         last.append(end - 1)
         start = end
+    if offset:
+        allowed = torch.cat([torch.ones((total, offset), dtype=torch.bool), allowed], dim=1)
     return (
         torch.tensor(ids),
         torch.tensor(positions),
@@ -183,15 +200,19 @@ def pack(prompt_ids: list[int], candidates: list[list[int]]):
     )
 
 
-def packed_scores(model, prompt_ids: list[int], candidates: list[list[int]], device):
+def packed_scores(
+    model, prompt_ids: list[int], candidates: list[list[int]], device, past=None, offset: int = 0
+):
     """Each candidate's summed log-probability, and its last hidden state.
 
     Differentiable: training calls this with gradients on, serving under
-    ``no_grad``.
+    ``no_grad``. With ``past``, a KV cache holding the first ``offset`` tokens
+    of the prompt, ``prompt_ids`` is the rest of it; the cache is cropped back
+    to ``offset`` afterwards, so the next question can reuse it.
     """
     import torch
 
-    ids, positions, allowed, pred, target, owner, last = pack(prompt_ids, candidates)
+    ids, positions, allowed, pred, target, owner, last = pack(prompt_ids, candidates, offset)
     dtype = next(model.parameters()).dtype
     mask = torch.zeros(allowed.shape, dtype=dtype)
     mask.masked_fill_(~allowed, torch.finfo(dtype).min)
@@ -200,8 +221,11 @@ def packed_scores(model, prompt_ids: list[int], candidates: list[list[int]], dev
         position_ids=positions[None].to(device),
         attention_mask=mask[None, None].to(device),
         output_hidden_states=True,
-        use_cache=False,
+        past_key_values=past,
+        use_cache=past is not None,
     )
+    if past is not None:
+        past.crop(offset - past.get_seq_length())  # drop what this call appended
     logits = out.logits[0, pred.to(device)].float()
     token_logp = torch.log_softmax(logits, dim=-1).gather(1, target.to(device)[:, None])[:, 0]
     sums = torch.zeros(len(candidates), device=token_logp.device).index_add(
@@ -262,19 +286,31 @@ class LMScoreBackend:
     def model_version(self) -> str:
         return self._version
 
-    def _scores(self, prompt: str, candidates: list[str]):
+    def _encode(self, prompt: str, candidates: list[str]) -> tuple[list[int], list[list[int]]]:
         prompt_ids = self.tokenizer(prompt).input_ids[-self.max_prompt_tokens :]
         encoded = [self.tokenizer(c, add_special_tokens=False).input_ids for c in candidates]
-        sums, hidden = packed_scores(self.model, prompt_ids, encoded, self.device)
-        if self.readout is None:
-            return sums
-        return self.readout(sums, hidden)
+        return prompt_ids, encoded
 
-    def _logprobs(self, prompt: str, candidates: list[str]) -> list[float]:
+    def _prefix(self, ids: list[int]):
+        """The KV cache of a prompt prefix several questions share."""
         import torch
 
         with torch.no_grad():
-            return [float(x) for x in self._scores(prompt, candidates)]
+            out = self.model(torch.tensor([ids], device=self.device), use_cache=True)
+        return out.past_key_values
+
+    def _score_ids(self, prompt_ids, encoded, past=None, offset: int = 0) -> list[float]:
+        import torch
+
+        with torch.no_grad():
+            sums, hidden = packed_scores(
+                self.model, prompt_ids[offset:], encoded, self.device, past, offset
+            )
+            scores = sums if self.readout is None else self.readout(sums, hidden)
+            return [float(x) for x in scores]
+
+    def _logprobs(self, prompt: str, candidates: list[str]) -> list[float]:
+        return self._score_ids(*self._encode(prompt, candidates))
 
     def _content_free(self, question, candidates: list[str]) -> list[float]:
         empty, _ = prompt_for(CONTENT_FREE_STATE, question)
@@ -289,10 +325,20 @@ class LMScoreBackend:
         started = time.perf_counter()
         state = render_state(request.state)
         outputs: dict[str, QuestionOutput] = {}
+        items = []
         for compiled_q in compiled.schema.questions:
             question = request.questions[compiled_q.question_id]
             prompt, candidates = prompt_for(state, question)
-            scores = self._logprobs(prompt, candidates)
+            items.append((compiled_q, question, candidates, *self._encode(prompt, candidates)))
+        # Every question's prompt opens with the same state, and an agent's
+        # state is most of its tokens: run the shared token prefix once and
+        # score each question's remainder against its cache. Measured on the
+        # token ids, so it is exact whatever the tokenizer does at the seam.
+        offset = shared_prefix([ids for *_, ids, _ in items]) if len(items) > 1 else 0
+        past = self._prefix(items[0][3][:offset]) if offset >= MIN_SHARED_PREFIX else None
+        offset = offset if past is not None else 0
+        for compiled_q, question, candidates, prompt_ids, encoded in items:
+            scores = self._score_ids(prompt_ids, encoded, past, offset)
             if self.content_free:
                 prior = self._content_free(question, candidates)
                 scores = [s - p for s, p in zip(scores, prior, strict=True)]
