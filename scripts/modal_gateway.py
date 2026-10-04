@@ -48,10 +48,13 @@ image = (
         "safetensors>=0.4",
         "regex>=2023",
         "httpx2",  # the TestClient `bench` measures the gateway through
+        "transformers>=4.51",  # LM-score bundles load their backbone through it
     )
     .env(
         {
             "TRIGON_WEIGHTS_CACHE": "/weights/backbones",
+            # An LM-score backbone downloads once, onto the volume, not per cold start.
+            "HF_HOME": "/weights/hf",
             "PYTHONPATH": "/root/trigon/src",
             "TRIGON_BUNDLE": BUNDLE,
         }

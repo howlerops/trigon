@@ -80,6 +80,18 @@ def create_router(config: ServerConfig | None = None) -> TieredRouter:
     )
 
 
+def _is_lm_score_adapter(weights: str) -> bool:
+    if not weights.endswith(".pt"):
+        return False
+    import torch
+
+    try:
+        payload = torch.load(weights, map_location="cpu", weights_only=True, mmap=True)
+    except Exception:
+        return False  # not a plain tensor dict: a readout checkpoint, loaded below
+    return isinstance(payload, dict) and payload.get("kind") == "lm-score"
+
+
 def _backend(
     name: str,
     weights: str | None = None,
@@ -113,6 +125,11 @@ def _backend(
             device=device,
             content_free=os.environ.get("TRIGON_LM_CONTENT_FREE", "1") != "0",
         )
+    if name == "torch" and weights and _is_lm_score_adapter(weights):
+        # A bundle names its own kind, so every deployment that serves
+        # `TRIGON_BACKEND=torch` with a bundle's adapter serves an LM-score
+        # bundle too, without a second switch to keep in step.
+        return _backend("lm-score", weights, int8=int8, device=device)
     if name == "torch":
         from ..backends.torch_readout import TorchReadoutBackend
 

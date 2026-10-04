@@ -60,7 +60,29 @@ def _table(results: dict, columns: list[tuple[str, str]]) -> list[str]:
 
 
 def card(name: str, version: str, mix: dict, generality: dict | None, webact: dict | None) -> str:
-    backbone = BACKBONES[mix["backbone"]]
+    lm_score = mix.get("kind") == "lm-score"
+    if lm_score:
+        pinned = [b for b in BACKBONES.values() if b.repo == mix["base"]]
+        repo, revision = mix["base"], mix.get("revision") or "main"
+        licence = pinned[0].licence if pinned else "see its repository"
+    else:
+        backbone = BACKBONES[mix["backbone"]]
+        repo, revision, licence = backbone.repo, backbone.revision, backbone.licence
+    if lm_score:
+        what = [
+            f"- **This bundle**: LoRA rank {mix.get('lora_rank', 16)} and an answer readout"
+            " (`adapter.pt`): each",
+            "  answer is scored as the backbone's own continuation, `w * log p(answer) +"
+            " residual`,",
+            f"  `w` = {mix['w']:.3f}; build `{mix['model_version']}`.",
+        ]
+    else:
+        what = [
+            f"- **This bundle**: LoRA rank {mix.get('lora_rank', 16)} and readout heads"
+            " (`adapter.pt`),",
+            f"  build `{mix['model_version']}`, Choice head crossover"
+            f" {mix.get('option_crossover', 64)}.",
+        ]
     lines = [
         f"# trigon {name} {version}",
         "",
@@ -70,12 +92,9 @@ def card(name: str, version: str, mix: dict, generality: dict | None, webact: di
         "",
         "## What it is",
         "",
-        f"- **Backbone**: `{backbone.repo}` at `{backbone.revision}` ({backbone.licence}),",
+        f"- **Backbone**: `{repo}` at `{revision}` ({licence}),",
         "  frozen; fetched from its own repository, never re-published here.",
-        f"- **This bundle**: LoRA rank {mix.get('lora_rank', 16)} and readout heads"
-        " (`adapter.pt`),",
-        f"  build `{mix['model_version']}`, Choice head crossover"
-        f" {mix.get('option_crossover', 64)}.",
+        *what,
         f"- **Trained**: {mix['epochs']} epochs, lr {mix['lr']}, seed {mix['seed']},"
         f" on {mix['device']} in {mix['train_seconds'] / 3600:.1f} h.",
         "- **Licence**: Apache-2.0 for this bundle. Every training corpus is green-tier",
@@ -97,8 +116,11 @@ def card(name: str, version: str, mix: dict, generality: dict | None, webact: di
         "",
         "**Held out**: corpora "
         + ", ".join(f"`{c}`" for c in held.get("corpora", []))
-        + "; teacher domains "
-        + ", ".join(f"`{d}`" for d in held.get("teacher_domains", []))
+        + (
+            "; teacher domains " + ", ".join(f"`{d}`" for d in held["teacher_domains"])
+            if held.get("teacher_domains")
+            else ""
+        )
         + "."
         + (
             " Every website in the web-action evaluation is excluded from `mind2web-train`."

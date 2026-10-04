@@ -54,3 +54,17 @@ def test_content_free_prior_is_computed_once_per_question():
     second = backend._content_free(question, candidates)
     assert first == second == [-1.0, -2.0]
     assert sum(p.startswith(CONTENT_FREE_STATE) for p in backend.calls) == 1
+
+
+def test_a_bundle_names_its_own_backend(tmp_path):
+    """`TRIGON_BACKEND=torch` with an LM-score adapter serves it as one."""
+    torch = __import__("pytest").importorskip("torch")
+    from trigon.server.app import _is_lm_score_adapter
+
+    lm = tmp_path / "lm.pt"
+    torch.save({"kind": "lm-score", "base": "x", "lora": {}}, lm)
+    readout = tmp_path / "readout.pt"
+    torch.save({"config": {"d_model": 8}, "state": {"w": torch.zeros(2)}}, readout)
+    assert _is_lm_score_adapter(str(lm))
+    assert not _is_lm_score_adapter(str(readout))
+    assert not _is_lm_score_adapter("Qwen/Qwen3-0.6B")
