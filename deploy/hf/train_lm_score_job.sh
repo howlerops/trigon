@@ -25,6 +25,9 @@ url = "https://codeload.github.com/howlerops/trigon/tar.gz/${REF}"
 tarfile.open(fileobj=io.BytesIO(urllib.request.urlopen(url).read())).extractall(".")
 PY
 cd trigon-*/
+# The image's Python is Debian-managed (PEP 668); the container is thrown
+# away, and installing over it keeps the image's own CUDA build of torch.
+export PIP_BREAK_SYSTEM_PACKAGES=1
 pip install -q -e ".[train,server,convert]" "transformers>=4.51" "huggingface_hub[cli]>=1.0" httpx2
 export TRIGON_CORPUS_CACHE=/tmp/corpora TRIGON_WEIGHTS_CACHE=/tmp/backbones PYTHONUNBUFFERED=1
 mkdir -p "$TRIGON_CORPUS_CACHE"
@@ -35,6 +38,13 @@ for stream in teacher-workflows teacher-local; do
 done
 python scripts/convert_corpus.py measuring_hate_speech
 python scripts/convert_corpus.py boolq
+if [ "${DRY:-0}" = 1 ]; then
+  # Setup only, on a CPU flavor: everything a GPU hour would fail on first.
+  python -c "import torch, transformers; print('torch', torch.__version__, 'transformers', transformers.__version__)"
+  python -c "from trigon.backends.hub import BACKBONES; print(BACKBONES['$MODEL'])"
+  [ -z "$BENCH_REPO" ] || hf download "$BENCH_REPO" --type dataset --revision "$BENCH_REVISION" --local-dir /tmp/bench
+  ls "$TRIGON_CORPUS_CACHE"; echo "DRY OK"; exit 0
+fi
 nvidia-smi --query-gpu=name,memory.total --format=csv
 OUT=/tmp/run
 python scripts/train_lm_score.py --model "$MODEL" --device cuda --seed "$SEED" --scale "$SCALE" \

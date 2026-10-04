@@ -21,6 +21,9 @@ url = "https://codeload.github.com/howlerops/trigon/tar.gz/${REF}"
 tarfile.open(fileobj=io.BytesIO(urllib.request.urlopen(url).read())).extractall(".")
 PY
 cd trigon-*/
+# The image's Python is Debian-managed (PEP 668); the container is thrown
+# away, and installing over it keeps the image's own CUDA build of torch.
+export PIP_BREAK_SYSTEM_PACKAGES=1
 pip install -q -e ".[train,server,convert]" "transformers>=4.51" "huggingface_hub[cli]>=1.0" httpx2
 export TRIGON_CORPUS_CACHE=/tmp/corpora TRIGON_WEIGHTS_CACHE=/tmp/backbones PYTHONUNBUFFERED=1
 mkdir -p "$TRIGON_CORPUS_CACHE"
