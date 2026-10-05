@@ -118,7 +118,12 @@ def _backend(
 
             meta = torch.load(weights, map_location="cpu", weights_only=True)
             return LMScoreBackend(
-                meta["base"], revision=meta.get("revision"), device=device, adapter=weights
+                meta["base"],
+                revision=meta.get("revision"),
+                device=device,
+                adapter=weights,
+                merge=os.environ.get("TRIGON_LM_MERGE", "0") == "1",
+                lora_in_model_dtype=os.environ.get("TRIGON_LM_LORA_DTYPE", "float32") == "model",
             )
         return LMScoreBackend(
             weights or "Qwen/Qwen3-0.6B",

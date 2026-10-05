@@ -32,7 +32,11 @@ import modal
 REPO = pathlib.Path(__file__).resolve().parent.parent
 #: Which bundle under /runs/bundles/ to serve, fixed at deploy time.
 BUNDLE = os.environ.get("TRIGON_BUNDLE", "mix-q3-06b")
-GPU = os.environ.get("TRIGON_GATEWAY_GPU", "L4")
+# An L40S, not an L4: on the published 4B an agent step takes 223 ms against
+# 562 ms, at $0.000542/s against $0.000222/s -- the same cost per busy request,
+# the same bfloat16 arithmetic (parity 119/120 against 118/120), more only while
+# idle inside `scaledown_window`.
+GPU = os.environ.get("TRIGON_GATEWAY_GPU", "L40S")
 #: The spend ceiling: however much arrives, no more GPUs than this.
 MAX_CONTAINERS = int(os.environ.get("TRIGON_GATEWAY_MAX_CONTAINERS", "2"))
 
@@ -57,6 +61,10 @@ image = (
             "HF_HOME": "/weights/hf",
             "PYTHONPATH": "/root/trigon/src",
             "TRIGON_BUNDLE": BUNDLE,
+            # Serving precision switches, fixed at deploy time like the bundle;
+            # each is shipped only after `scripts/serving_parity.py` passes.
+            "TRIGON_LM_MERGE": os.environ.get("TRIGON_LM_MERGE", "0"),
+            "TRIGON_LM_LORA_DTYPE": os.environ.get("TRIGON_LM_LORA_DTYPE", "float32"),
         }
     )
     .add_local_dir(
@@ -121,7 +129,7 @@ def gateway():
     volumes={"/runs": runs, "/weights": weights},
     timeout=1800,
 )
-def bench(requests: list[dict], repeats: int = 2) -> dict:
+def bench(requests: list[dict], repeats: int = 2, profile: bool = False) -> dict:
     """The gateway in process on this GPU: per-request latency, no network.
 
     What a caller sees is this plus the round trip to the Worker and from it to
@@ -153,7 +161,24 @@ def bench(requests: list[dict], repeats: int = 2) -> dict:
             response.raise_for_status()
             tokens.append(response.json()["usage"]["prefill_tokens"])
     seconds.sort()
+    profiled = {}
+    if profile:
+        # Where an agent step's time goes on this GPU: wall clock against the
+        # GPU's own busy time, and the labelled stages of the LM-score backend.
+        from torch.profiler import ProfilerActivity
+        from torch.profiler import profile as torch_profile
+
+        with torch_profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
+            for body in requests[:4]:
+                client.post("/v1/decide", json=body)
+            torch.cuda.synchronize()
+        averages = prof.key_averages()
+        profiled = {
+            "stages": averages.table(sort_by="cpu_time_total", row_limit=12),
+            "kernels": averages.table(sort_by="self_cuda_time_total", row_limit=15),
+        }
     return {
+        **profiled,
         "gpu": torch.cuda.get_device_name(0),
         "n": len(seconds),
         "p50_ms": round(1000 * statistics.median(seconds), 1),

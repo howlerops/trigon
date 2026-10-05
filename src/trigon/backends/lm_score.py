@@ -92,6 +92,9 @@ def add_lora(model, rank: int = 16, alpha: float = 32.0, targets=LORA_TARGETS):
             self.lora_b = nn.Parameter(torch.zeros(base.out_features, rank, dtype=torch.float32))
 
         def forward(self, x):
+            if self.lora_a.dtype == x.dtype:
+                # Serving in the model's own precision: no casts around it.
+                return self.base(x) + ((x @ self.lora_a.T) @ self.lora_b.T) * self.scale
             update = (x.float() @ self.lora_a.T) @ self.lora_b.T
             return self.base(x) + (update * self.scale).to(x.dtype)
 
@@ -102,6 +105,32 @@ def add_lora(model, rank: int = 16, alpha: float = 32.0, targets=LORA_TARGETS):
             if child_name in targets and isinstance(child, nn.Linear):
                 setattr(module, child_name, LoRALinear(child))
     return {n: p for n, p in model.named_parameters() if "lora_" in n}
+
+
+def merge_lora(model) -> int:
+    """Fold each LoRA update into its frozen weight and drop the wrapper: serving only.
+
+    ``W + scale * B @ A`` is computed in float32 and rounded once to the
+    weight's dtype. On a GPU that is bfloat16, so the merged model is not the
+    unmerged one to the last bit; `scripts/serving_parity.py` is what says the
+    difference is rounding. The wrapper's float32 matmuls and casts were ~30%
+    of an agent step's GPU time on an L4.
+    """
+    import torch
+
+    merged = 0
+    with torch.no_grad():
+        for module in list(model.modules()):
+            for name, child in list(module.named_children()):
+                if hasattr(child, "lora_a") and hasattr(child, "base"):
+                    base = child.base
+                    update = child.scale * (child.lora_b.float() @ child.lora_a.float())
+                    base.weight.copy_(
+                        (base.weight.float() + update.to(base.weight.device)).to(base.weight.dtype)
+                    )
+                    setattr(module, name, base)
+                    merged += 1
+    return merged
 
 
 class Readout:
@@ -216,22 +245,25 @@ def packed_scores(
     dtype = next(model.parameters()).dtype
     mask = torch.zeros(allowed.shape, dtype=dtype)
     mask.masked_fill_(~allowed, torch.finfo(dtype).min)
-    out = model(
+    # The decoder alone, then the vocabulary head only where a candidate's
+    # token is predicted: over every position of an agent's page the head
+    # was the largest single matmul in the request.
+    out = model.get_decoder()(
         ids[None].to(device),
         position_ids=positions[None].to(device),
         attention_mask=mask[None, None].to(device),
-        output_hidden_states=True,
         past_key_values=past,
         use_cache=past is not None,
     )
     if past is not None:
         past.crop(offset - past.get_seq_length())  # drop what this call appended
-    logits = out.logits[0, pred.to(device)].float()
+    hidden = out.last_hidden_state[0]
+    logits = model.get_output_embeddings()(hidden[pred.to(device)]).float()
     token_logp = torch.log_softmax(logits, dim=-1).gather(1, target.to(device)[:, None])[:, 0]
     sums = torch.zeros(len(candidates), device=token_logp.device).index_add(
         0, owner.to(device), token_logp
     )
-    return sums, out.hidden_states[-1][0, last.to(device)]
+    return sums, hidden[last.to(device)]
 
 
 class LMScoreBackend:
@@ -248,6 +280,8 @@ class LMScoreBackend:
         max_prompt_tokens: int = 8192,
         content_free: bool = True,
         adapter: str | None = None,
+        merge: bool = False,
+        lora_in_model_dtype: bool = False,
     ) -> None:
         import torch
         from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -270,6 +304,14 @@ class LMScoreBackend:
             missing = set(lora) - set(state["lora"])
             if missing:
                 raise ValueError(f"{adapter} has no LoRA weights for {sorted(missing)[:3]}")
+            if merge:
+                merge_lora(self.model)
+            elif lora_in_model_dtype:
+                # Keeps the update separate from the weight -- no rounding of
+                # it into bfloat16 -- but drops the float32 casts around it.
+                for name, param in self.model.named_parameters():
+                    if "lora_" in name:
+                        param.data = param.data.to(dtype)
             self.model.to(self.device)
             self.readout = Readout(self.model.config.hidden_size, self.device)
             self.readout.load_state_dict(state["readout"])
@@ -296,7 +338,8 @@ class LMScoreBackend:
         import torch
 
         with torch.no_grad():
-            out = self.model(torch.tensor([ids], device=self.device), use_cache=True)
+            decoder = self.model.get_decoder()
+            out = decoder(torch.tensor([ids], device=self.device), use_cache=True)
         return out.past_key_values
 
     def _score_ids(self, prompt_ids, encoded, past=None, offset: int = 0) -> list[float]:
@@ -325,20 +368,25 @@ class LMScoreBackend:
         started = time.perf_counter()
         state = render_state(request.state)
         outputs: dict[str, QuestionOutput] = {}
+        from torch.profiler import record_function
+
         items = []
-        for compiled_q in compiled.schema.questions:
-            question = request.questions[compiled_q.question_id]
-            prompt, candidates = prompt_for(state, question)
-            items.append((compiled_q, question, candidates, *self._encode(prompt, candidates)))
+        with record_function("lm.encode"):
+            for compiled_q in compiled.schema.questions:
+                question = request.questions[compiled_q.question_id]
+                prompt, candidates = prompt_for(state, question)
+                items.append((compiled_q, question, candidates, *self._encode(prompt, candidates)))
         # Every question's prompt opens with the same state, and an agent's
         # state is most of its tokens: run the shared token prefix once and
         # score each question's remainder against its cache. Measured on the
         # token ids, so it is exact whatever the tokenizer does at the seam.
         offset = shared_prefix([ids for *_, ids, _ in items]) if len(items) > 1 else 0
-        past = self._prefix(items[0][3][:offset]) if offset >= MIN_SHARED_PREFIX else None
+        with record_function("lm.prefix"):
+            past = self._prefix(items[0][3][:offset]) if offset >= MIN_SHARED_PREFIX else None
         offset = offset if past is not None else 0
         for compiled_q, question, candidates, prompt_ids, encoded in items:
-            scores = self._score_ids(prompt_ids, encoded, past, offset)
+            with record_function("lm.question"):
+                scores = self._score_ids(prompt_ids, encoded, past, offset)
             if self.content_free:
                 prior = self._content_free(question, candidates)
                 scores = [s - p for s, p in zip(scores, prior, strict=True)]
