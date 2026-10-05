@@ -14,14 +14,14 @@ narrative sections are a discipline, not a test.
 
 | | |
 | --- | ---: |
-| Commits | 309 |
-| Tests | 788 |
-| Python files (`src`, `tests`, `scripts`) | 145 |
-| Lines in `src/` | 17,955 |
+| Commits | 336 |
+| Tests | 799 |
+| Python files (`src`, `tests`, `scripts`) | 152 |
+| Lines in `src/` | 18,772 |
 | Release gates | 11 |
-| Green-tier corpora in the licence audit | 14 |
+| Green-tier corpora in the licence audit | 17 |
 | Committed use cases | 3 |
-| Real corpora loadable | 12 |
+| Real corpora loadable | 15 |
 
 **Certified on real data: Qwen2.5-1.5B on Banking77**, LoRA rank 16, lr
 1e-4, 4 epochs — median accuracy 0.9009 against the spike's 0.7248, every seed
@@ -324,6 +324,8 @@ twenty-two runs** — the investigation is closed and the evidence is in
 | **Published: `qwen3-4b-lms-yn` v1**, served on a Modal L4 behind the Worker | Parity through the Worker against the bundle in process (MPS, bfloat16): 118 of 120 argmaxes agree, max probability difference 0.041, same build. Latency through the Worker: 149 ms in the model for a 461-token request, 602 ms for a 1,326-token agent step; cold start 75 s. R2 copy verified by checksum through the Worker; public on Hugging Face |
 | Serving the 4B faster, each change checked by `serving_parity.py` before it counts (agent steps, bench in process on the GPU) | The vocabulary head ran on every position of the page; applied only where a candidate token is read it is **bit-identical** (0.0 difference) and saves 4% on an L4 (586 → 562 ms). LoRA merged into bfloat16 weights: 393 ms, but a probability moved 0.082 against the 0.05 gate -- **not shipped**. LoRA kept separate in bfloat16: 460 ms, 0.056 -- **not shipped**. **An L40S instead of an L4: 223 ms**, parity 0.023, the same cost per busy request ($0.000121 against $0.000125). Through the Worker: 79 ms in the model for a 50-option request, 229 ms for an agent step; 271 and 496 ms end to end |
 | Where a short request's end-to-end time goes, L40S, one kept-alive connection | 223 ms through the Worker, 188 ms direct to Modal, 73 ms in the model, 0.4 ms in the server outside it. The Worker costs ~35 ms; the rest is the round trip to the GPU's region and Modal's ingress -- not in this code. A new connection adds a TLS handshake (50 ms to the Worker's edge, 194 ms direct), which is why per-request clients measured 271 ms |
+| **The 4B yes/no recipe, certified on three seeds** | Benchmark macro 0.621–0.649, median 0.637; BoolQ 0.836–0.855; CLINC150 0.919–0.934; Mind2Web 0.597–0.617. The published seed is the median on every row |
+| **Safety corpora** (train splits of the benchmark's jailbreak, injection and Aegis sources; 43 shared texts excluded), 4B, one seed | Benchmark 0.637 → **0.708**: jailbreak 0.988, prompt injection 0.905, Aegis 0.834 / 0.842 -- all above the incumbent -- but in-distribution. On the seven held-out slices 0.602 against 0.582–0.603 without them: no cost. Agent-trajectory safety, with no training data, is the slice left (0.536). **Published as `qwen3-4b-lms-safe` v1**, parity 120/120 through the Worker |
 | A calibrator fitted on one corpus's yes/no questions, applied to another's | The second 4B run's calibration accepted an isotonic map for yes/no, fitted on WANLI alone (its only yes/no corpus, 70% "no"). On BoolQ the same weights read **0.725 accuracy, ECE 0.166 with it and 0.818, ECE 0.056 without** -- the map flips answers it was never fitted near. The first run had accepted a temperature, which cannot flip one. A calibrator is only evidence about the distribution it was fitted on |
 | Agent requests on the LM-score backend, M1 Max MPS, 0.6B, 20 Mind2Web steps | Every question re-read the page: **1,760 → 1,115 ms p50** once the questions' shared token prefix runs once into the KV cache and each question scores only its remainder. Exact on CPU float32 (logits within 3e-05); on MPS answers move up to 0.022 in probability with every argmax unchanged -- the GPU's rounding, not the reuse |
 | One 1,391-token Qwen3-0.6B prefill on an M1 Max's GPU, idle | MLX bfloat16 287 ms; PyTorch MPS float16 352 ms, float32 397 ms; MLX 8-bit 375 ms and 4-bit 429 ms. **Quantization slows prefill here**: a long single pass is compute-bound and dequantizing costs more than the bandwidth it saves -- it is a memory and decode optimisation, not one for this workload. MLX is the fastest local runtime measured, 1.4× PyTorch; the GPU is 7× the merged CPU path |

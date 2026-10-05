@@ -12,6 +12,7 @@ ECE over the top-label probability. SST-5 ships without text and is skipped.
 | System | Cases | Macro accuracy | Table |
 | --- | ---: | ---: | --- |
 | incumbent | 8,016 | **0.838** | `broad.md` |
+| **trigon LM score, Qwen3-4B, yes/no fix + safety corpora (published: `qwen3-4b-lms-safe` v1)** -- four slices in-distribution, see below | 8,016 | **0.708** | `lms-safe-s0-4b.md` |
 | an open distilled model, published beside it | 8,016 | 0.703 | `lms-yn-4b.md` |
 | **trigon LM score, Qwen3-4B, yes/no fix (published: `qwen3-4b-lms-yn` v1)** | 8,016 | **0.637** | `lms-yn-4b.md` |
 | trigon LM score, Qwen3-4B | 8,016 | 0.586 | `lms-4b.md` |
@@ -26,6 +27,34 @@ On the 60-a-slice samples the incumbent scores 0.823 and the hosted service
 0.495. They are seeded random samples; the first version of this table used
 each file's first 60 cases, and at least one file is ordered by label, which
 put the zero-shot rows at 0.439 and 0.429.
+
+## Held out, and not
+
+The `safety` model trains on the *train* splits of the four sources the
+benchmark's safety slices test on (jailbreak, prompt injection, Aegis 2.0
+prompt and response) -- every text the benchmark shows a model excluded, 43
+cases. Those four slices are in-distribution for it the way Banking77 is for
+every trigon model; the other seven are held out. Macro accuracy split that way:
+
+| System | 7 held-out slices | 4 safety slices |
+| --- | ---: | ---: |
+| incumbent | 0.838 | 0.837 |
+| an open distilled model | 0.659 | 0.778 |
+| **trigon `qwen3-4b-lms-safe` (seed 0)** | **0.602** | **0.892** (in-distribution) |
+| trigon `qwen3-4b-lms-yn`, seeds 0 / 1 / 2 | 0.582 / 0.582 / 0.603 | 0.732 / 0.767 / 0.652 |
+| hosted service | 0.362 | 0.703 |
+
+Adding the safety corpora cost nothing on the held-out slices (0.602 against
+the yes/no model's 0.582–0.603).
+
+## Certification of the yes/no recipe, three seeds
+
+| Seed | Benchmark macro | BoolQ | CLINC150 | Mind2Web step success |
+| ---: | ---: | ---: | ---: | ---: |
+| 0 | 0.637 | 0.842 | 0.919 | 0.600 |
+| 1 | 0.649 | 0.836 | 0.934 | 0.617 |
+| 2 | 0.621 | 0.855 | 0.919 | 0.597 |
+| **median** | **0.637** | **0.842** | **0.919** | **0.600** |
 
 ## What it says
 

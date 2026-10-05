@@ -17,10 +17,12 @@ A **bundle** is a directory:
 | `mix.json` | which corpora, how many cases, what was held out, what the calibrator was fitted on |
 | `README.md`, `SHA256SUMS` | the generated model card and the checksums of every other file |
 
-**The current model is `qwen3-4b-lms-yn` v1** (Hugging Face
-`jacobbeckdev/trigon-qwen3-4b-lms-yn`; R2 `bundles/qwen3-4b-lms-yn/v1/`).
-Public decision benchmark 0.637, CLINC150 0.919, Mind2Web step success 0.600
-(`reports/decision-bench/README.md`). It wants a GPU for agent-sized requests.
+**The current model is `qwen3-4b-lms-safe` v1** (Hugging Face
+`jacobbeckdev/trigon-qwen3-4b-lms-safe`; R2 `bundles/qwen3-4b-lms-safe/v1/`):
+public decision benchmark 0.708 (0.602 on its seven held-out slices), CLINC150
+0.930, BoolQ 0.843, Mind2Web step success 0.622 (`reports/decision-bench/README.md`).
+`qwen3-4b-lms-yn` v1 is its predecessor without the safety corpora. Both want a
+GPU for agent-sized requests.
 
 The backbone (Qwen3, Qwen2.5 or MiniCPM5, all Apache-2.0) is not in the bundle.
 It is fetched from Hugging Face at its pinned revision on first start and
