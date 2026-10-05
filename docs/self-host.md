@@ -12,13 +12,20 @@ A **bundle** is a directory:
 
 | File | What it is |
 | --- | --- |
-| `adapter.pt` | the trained LoRA and readout heads; names its backbone and the revision it was trained on |
+| `adapter.pt` | the trained LoRA and its readout; names its kind, its backbone and the revision it was trained on. An LM-score adapter (`scripts/train_lm_score.py`) scores each answer as the backbone's own tokens; a readout-head adapter (`scripts/train_mix.py`) uses trained heads. The server reads which from the file |
 | `temperatures.json`, `isotonic.json` | the calibrators, fitted on held-out data; either may be absent when none was accepted |
-| `mix.json` | for a model from `scripts/train_mix.py`: which corpora, how many cases, what was held out, what the calibrator was fitted on |
+| `mix.json` | which corpora, how many cases, what was held out, what the calibrator was fitted on |
+| `README.md`, `SHA256SUMS` | the generated model card and the checksums of every other file |
+
+**The current model is `qwen3-4b-lms-yn` v1** (Hugging Face
+`jacobbeckdev/trigon-qwen3-4b-lms-yn`; R2 `bundles/qwen3-4b-lms-yn/v1/`).
+Public decision benchmark 0.637, CLINC150 0.919, Mind2Web step success 0.600
+(`reports/decision-bench/README.md`). It wants a GPU for agent-sized requests.
 
 The backbone (Qwen3, Qwen2.5 or MiniCPM5, all Apache-2.0) is not in the bundle.
 It is fetched from Hugging Face at its pinned revision on first start and
-cached (`TRIGON_WEIGHTS_CACHE`).
+cached (`TRIGON_WEIGHTS_CACHE` for readout-head bundles, `HF_HOME` for LM-score
+ones).
 
 ## Run it
 
@@ -68,12 +75,14 @@ is fetched from its own repository at the pinned revision.
 ## Hosted: Cloudflare in front, a GPU behind
 
 For agent-sized requests a GPU is the difference between the incumbent's per-request latency
-and seconds per step: the 0.6B mix answers a ~1,400-token web-action request
-in 149 ms p50 on an L4 and 6.55 s on a Fly `shared-cpu-4x`. The hosted shape:
+and seconds per step. The published 4B answers a 50-option request in 79 ms and
+a ~1,300-token web-action step in 229 ms in the model on an L40S (562 ms on an
+L4, the same cost per busy request); the 0.6B readout-head model took 6.55 s on
+a Fly `shared-cpu-4x`. The hosted shape:
 
 ```
 caller ──► Cloudflare Worker (deploy/cloudflare)       ──► Modal Server (scripts/modal_gateway.py)
-           API keys, CORS, 503 retry, Smart Placement       L4, scale to zero, ≤2 containers,
+           API keys, CORS, 503 retry, Smart Placement       L40S, scale to zero, ≤2 containers,
            GET /models/* from R2 (trigon-models)            low-latency regional router, proxy auth
 ```
 
@@ -90,13 +99,20 @@ caller ──► Cloudflare Worker (deploy/cloudflare)       ──► Modal Ser
   immutable `bundles/<name>/<version>/` path with `SHA256SUMS` and a model card,
   and charges nothing for downloads.
 
-Measured end to end (Arizona, 2026-10-02): ~0.31 s median through the Worker
-for a small request with a fresh TLS connection per request; 45.6 s for the
-first request from zero. Deploy:
+Measured end to end (Arizona, 2026-10-05, the 4B on an L40S): 223 ms median
+through the Worker for a small request on a kept-alive connection, 188 ms
+direct to Modal, 73 ms of it the model -- the rest is the network to the GPU's
+region. A fresh TLS connection per request adds ~50 ms. The first request from
+zero takes ~75 s. **Every deployment is checked before it counts:**
+`scripts/serving_parity.py` sends the same requests to the Worker and to the
+bundle in process and fails unless the answers agree
+(`reports/parity/`). Deploy:
 
 ```bash
-TRIGON_BUNDLE=<name> modal deploy scripts/modal_gateway.py
+TRIGON_BUNDLE=<name>-<version> modal deploy scripts/modal_gateway.py   # TRIGON_GATEWAY_GPU to change the GPU
 cd deploy/cloudflare && npx wrangler deploy   # secrets: CLIENT_KEYS, GATEWAY_KEY, MODAL_KEY, MODAL_SECRET
+TRIGON_PARITY_KEY_FILE=<client key file> python scripts/serving_parity.py \
+  --bundle <bundle dir> --url https://<worker> --out reports/parity/<name>
 ```
 
 ## Two front doors
