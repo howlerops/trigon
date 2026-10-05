@@ -33,7 +33,9 @@ pip install -q -e ".[train,server,convert]" "transformers>=4.51" "huggingface_hu
 export TRIGON_CORPUS_CACHE=/tmp/corpora TRIGON_WEIGHTS_CACHE=/tmp/backbones PYTHONUNBUFFERED=1
 mkdir -p "$TRIGON_CORPUS_CACHE"
 hf download "$DATA_REPO" --type dataset --local-dir /tmp/private
-for stream in teacher-workflows teacher-local; do
+for stream in teacher-workflows teacher-local teacher-agents; do
+  # teacher-agents is newer than the first runs; a data repo without it still works.
+  [ -f "/tmp/private/$stream/cases.jsonl.gz" ] || continue
   mkdir -p "$TRIGON_CORPUS_CACHE/$stream"
   cp "/tmp/private/$stream/cases.jsonl.gz" "$TRIGON_CORPUS_CACHE/$stream/"
 done
