@@ -112,7 +112,10 @@ bundle in process and fails unless the answers agree
 
 ```bash
 TRIGON_BUNDLE=<name>-<version> modal deploy scripts/modal_gateway.py   # TRIGON_GATEWAY_GPU to change the GPU
-cd deploy/cloudflare && npx wrangler deploy   # secrets: CLIENT_KEYS, GATEWAY_KEY, MODAL_KEY, MODAL_SECRET
+# secrets: CLIENT_KEYS, GATEWAY_KEY, MODAL_KEY, MODAL_SECRET. COMPAT_PATH puts the incumbent's
+# path at the Worker's root, so a client changes only its base URL; it is never written here.
+cd deploy/cloudflare && npx wrangler deploy --var COMPAT_PATH:$(python -c \
+  "from trigon.server.compat_path import COMPAT_PATH; print(COMPAT_PATH)")
 TRIGON_PARITY_KEY_FILE=<client key file> python scripts/serving_parity.py \
   --bundle <bundle dir> --url https://<worker> --out reports/parity/<name>
 ```

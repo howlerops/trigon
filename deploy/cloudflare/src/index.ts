@@ -15,6 +15,13 @@ interface Env {
   MODAL_KEY: string;
   MODAL_SECRET: string;
   MODELS?: R2Bucket;
+  /**
+   * The incumbent's decision path, served at the root so a client that may
+   * change only its base URL works unmodified. A deploy-time variable
+   * (`wrangler deploy --var COMPAT_PATH:<path>`), never written in this
+   * repository: the path names the incumbent (`tests/test_no_incumbent_names.py`).
+   */
+  COMPAT_PATH?: string;
 }
 
 const CORS = {
@@ -115,10 +122,13 @@ export default {
       return forward(request, env, "/healthz");
     }
 
+    const atRoot = !!env.COMPAT_PATH && pathname === env.COMPAT_PATH;
     const decision =
-      request.method === "POST" && (pathname === "/v1/decide" || pathname.startsWith("/compat/"));
+      request.method === "POST" &&
+      (pathname === "/v1/decide" || pathname.startsWith("/compat/") || atRoot);
     if (!decision) return json({ error: "not found" }, 404);
     if (!(await authorised(request, env))) return json({ error: "unauthorized" }, 401);
-    return forward(request, env, pathname);
+    // The gateway mounts the incumbent's shapes under /compat.
+    return forward(request, env, atRoot ? `/compat${pathname}` : pathname);
   },
 } satisfies ExportedHandler<Env>;
