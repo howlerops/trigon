@@ -12,6 +12,10 @@ ECE over the top-label probability. SST-5 ships without text and is skipped.
 | System | Cases | Macro accuracy | Table |
 | --- | ---: | ---: | --- |
 | incumbent | 8,016 | **0.838** | `broad.md` |
+| an open distilled model, published beside it | 8,016 | 0.703 | `lms-yn-4b.md` |
+| **trigon LM score, Qwen3-4B, yes/no fix (published: `qwen3-4b-lms-yn` v1)** | 8,016 | **0.637** | `lms-yn-4b.md` |
+| trigon LM score, Qwen3-4B | 8,016 | 0.586 | `lms-4b.md` |
+| trigon LM score, Qwen3-0.6B, yes/no fix | 8,016 | 0.496 | `lms-yn.md` |
 | compatible hosted service | 8,016 | 0.486 | `broad.md` |
 | **trigon LM score (Qwen3-0.6B, LoRA + residual, 1 epoch)** | 8,016 | **0.465** | `lms.md` |
 | trigon broad (Qwen3-0.6B, readout heads, 4 epochs) | 8,016 | 0.424 | `broad.md` |
@@ -24,6 +28,17 @@ each file's first 60 cases, and at least one file is ordered by label, which
 put the zero-shot rows at 0.439 and 0.429.
 
 ## What it says
+
+**At 4B, with yes/no trained on balanced questions, trigon is second of the
+open systems here and ahead of the hosted service by 15 points** (0.637
+against 0.486). The yes/no fix -- every Choice corpus also asked as "is the
+answer X?", true half the time, and the yes/no loss balanced -- is worth 3
+points at 0.6B and 5 at 4B, most of it on the safety slices (jailbreak 0.665
+→ 0.892, aegis2 0.586 → 0.754). Jailbreak (0.892), agent-trajectory safety (0.402) and
+prompt injection (0.552) are still below the hosted service; knowledge slices are
+where the incumbent's lead remains (MMLU-Pro 0.429 against 0.806). The 4B runs
+read the benchmark at a later pinned revision that adds two reference systems
+and two image slices; trigon reads text only and the image slices are skipped.
 
 **The LM-score readout is the better model on every axis we measure but
 yes/no.** One epoch, trained in 2.8 h on a laptop, takes the macro from 0.424
