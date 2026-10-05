@@ -1756,3 +1756,25 @@ TEACHER_LOCAL = CorpusSpec(
 )
 GENERATED[TEACHER_LOCAL.name] = TEACHER_LOCAL
 _LOADERS[TEACHER_LOCAL.name] = _load_teacher
+
+#: The same local teacher over agent trajectories, safe and not
+#: (`scripts/local_teacher.py --domain-set agents`): the one benchmark safety
+#: slice with no licensed training data anywhere.
+TEACHER_AGENTS = CorpusSpec(
+    name="teacher-agents",
+    primitive="mixed",
+    tier="green",
+    licence="Apache-2.0",
+    attribution=(
+        "Generated and labelled by Qwen3 mixture-of-experts models (Qwen Team, Alibaba Cloud), "
+        "Apache-2.0, served by ollama; each record names the teacher and its ollama digest. "
+        "Teacher labels buy coverage, not calibration."
+    ),
+    files={"all": "local/cases.jsonl.gz"},
+    instructions="(each case carries its own schema)",
+    holdout_key="case_id",
+    holdout_fraction=0.3,
+    teacher="ollama:qwen3",
+)
+GENERATED[TEACHER_AGENTS.name] = TEACHER_AGENTS
+_LOADERS[TEACHER_AGENTS.name] = _load_teacher

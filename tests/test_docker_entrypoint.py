@@ -94,3 +94,34 @@ def test_a_mounted_bundle_is_served_without_a_url(tmp_path, monkeypatch):
     assert module.os.environ["TRIGON_TEMPERATURE_PATH"] == str(tmp_path / "temperatures.json")
     assert "TRIGON_ISOTONIC_PATH" not in module.os.environ
     assert ran and ran[0][:2] == ["trigon", "serve"]
+
+
+def _published(tmp_path, tamper: str | None = None) -> tuple[str, str]:
+    """A bundle laid out as publish_bundle.py publishes it, served from file:// URLs."""
+    folder = tmp_path / "published"
+    folder.mkdir()
+    files = {"adapter.pt": b"weights", "temperatures.json": b"{}", "README.md": b"# card"}
+    for name, data in files.items():
+        (folder / name).write_bytes(data)
+    sums = "".join(f"{hashlib.sha256(d).hexdigest()}  {n}\n" for n, d in sorted(files.items()))
+    (folder / "SHA256SUMS").write_text(sums)
+    if tamper:
+        (folder / tamper).write_bytes(b"something else")
+    return folder.as_uri() + "/", hashlib.sha256(sums.encode()).hexdigest()
+
+
+def test_a_published_bundle_is_fetched_file_by_file_and_checked(tmp_path, monkeypatch):
+    base, digest = _published(tmp_path)
+    entry = _entrypoint(monkeypatch, tmp_path / "model")
+    bundle = entry._fetch_published(base, digest)
+    assert (bundle / "adapter.pt").read_bytes() == b"weights"
+    assert (bundle / "README.md").exists()
+
+
+def test_a_tampered_file_or_list_is_refused(tmp_path, monkeypatch):
+    base, digest = _published(tmp_path, tamper="adapter.pt")
+    entry = _entrypoint(monkeypatch, tmp_path / "model")
+    with pytest.raises(SystemExit, match="adapter.pt does not match"):
+        entry._fetch_published(base, digest)
+    with pytest.raises(SystemExit, match="SHA256SUMS does not match"):
+        entry._fetch_published(base, "0" * 64)
