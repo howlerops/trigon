@@ -109,7 +109,14 @@ def _reference(path: pathlib.Path) -> dict[str, dict]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cases", type=pathlib.Path, required=True)
-    who = parser.add_mutually_exclusive_group(required=True)
+    parser.add_argument(
+        "--dump-texts",
+        type=pathlib.Path,
+        default=None,
+        help="write every text the benchmark shows a model, one JSON string a line, and exit: "
+        "what a training run must not contain (train_lm_score.py --exclude-texts)",
+    )
+    who = parser.add_mutually_exclusive_group()
     who.add_argument("--bundle", type=pathlib.Path, help="a train_mix.py run directory")
     who.add_argument("--lm", help="a causal LM's Hugging Face id, scored zero-shot (lm-score)")
     parser.add_argument("--device", default=None)
@@ -129,8 +136,22 @@ def main() -> int:
         help="compare against these reference systems only (default: every one)",
     )
     parser.add_argument("--limit", type=int, default=0, help="cases per slice; 0 = all")
-    parser.add_argument("--out", type=pathlib.Path, required=True)
+    parser.add_argument("--out", type=pathlib.Path, default=None)
     args = parser.parse_args()
+    if args.dump_texts:
+        texts = set()
+        for path in sorted(args.cases.glob("*.jsonl")):
+            for line in path.open():
+                row = json.loads(line) if line.strip() else {}
+                if row.get("state") is not None:
+                    state = _parse(row["state"])
+                    values = state.values() if isinstance(state, dict) else [state]
+                    texts.update(str(v).strip() for v in values if str(v).strip())
+        args.dump_texts.write_text("".join(json.dumps(t) + "\n" for t in sorted(texts)))
+        print(f"{len(texts)} texts -> {args.dump_texts}", file=sys.stderr)
+        return 0
+    if not (args.bundle or args.lm) or args.out is None:
+        parser.error("--out and one of --bundle or --lm are required")
 
     from fastapi.testclient import TestClient
 

@@ -90,6 +90,9 @@ Rows marked *unchecked* keep the plan's assumption and are still blockers.
 | Mind2Web | Choice (operation + element, per step) | **CC BY 4.0** | **green** ✓ — held out by decision: the web-action evaluation | HF `osunlp/Mind2Web` metadata at `17ece8eb8986`, checked 2026-10-02; train split only, the test splits are not used |
 | WANLI | Noul (implies / true / rules out, per pair) | **CC BY 4.0** | **green** ✓ | HF `alisawuffles/WANLI` metadata at `61c95318fd71`, checked 2026-10-02; premises seeded from MultiNLI and generated, then revised and labelled by crowdworkers -- the dataset's own licence is CC BY 4.0 |
 | mind2web-train | Choice (operation + element, per step) | **CC BY 4.0** | **green** ✓ — trains; every website in the `mind2web` evaluation shard excluded | HF `osunlp/Mind2Web` at `17ece8eb8986`, shards 0 and 2–9, checked 2026-10-02 |
+| jailbreak-train | Noul (is this a jailbreak attempt) | **Apache-2.0** | **green** ✓ — train split only; a public decision benchmark tests on the test split | HF `jackhhao/jailbreak-classification` at `2f2ceeb39658`, `default/` train CSV, checked 2026-10-05 |
+| prompt-injections-train | Noul (is this a prompt injection) | **Apache-2.0** | **green** ✓ — train split only; the benchmark tests on the test split | HF `deepset/prompt-injections` at `4f61ecb038e9`, checked 2026-10-05 |
+| aegis2-train | Noul (is the prompt / the response unsafe) | **CC BY 4.0** | **green** ✓ — train split only; the benchmark tests on the test split. Redacted prompts skipped | HF `nvidia/Aegis-AI-Content-Safety-Dataset-2.0` at `d86bb8bedff5`, checked 2026-10-05 |
 | MASSIVE | Choice (60) | CC BY 4.0 | **green** ✓ | HF `AmazonScience/massive` metadata |
 | AG News | Choice (4) | **licence "unknown" on the dataset card** | **red** | HF `fancyzhx/ag_news` |
 | DBpedia-14 | Choice (14) | **CC BY-SA 3.0 + GFDL** | **amber** ⬆ | HF `fancyzhx/dbpedia_14` |

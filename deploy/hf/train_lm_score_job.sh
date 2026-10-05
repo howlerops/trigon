@@ -39,17 +39,25 @@ for stream in teacher-workflows teacher-local; do
 done
 python scripts/convert_corpus.py measuring_hate_speech
 python scripts/convert_corpus.py boolq
+python scripts/convert_corpus.py prompt-injections-train
+# The benchmark first, so every text it shows a model is kept out of training.
+EXCLUDE=()
+if [ -n "$BENCH_REPO" ]; then
+  hf download "$BENCH_REPO" --type dataset --revision "$BENCH_REVISION" --local-dir /tmp/bench
+  python scripts/decision_bench.py --cases /tmp/bench/cases --dump-texts /tmp/bench-texts.jsonl
+  EXCLUDE=(--exclude-texts /tmp/bench-texts.jsonl)
+fi
 if [ "${DRY:-0}" = 1 ]; then
   # Setup only, on a CPU flavor: everything a GPU hour would fail on first.
   python -c "import torch, transformers; print('torch', torch.__version__, 'transformers', transformers.__version__)"
   python -c "from trigon.backends.hub import BACKBONES; print(BACKBONES['$MODEL'])"
-  [ -z "$BENCH_REPO" ] || hf download "$BENCH_REPO" --type dataset --revision "$BENCH_REVISION" --local-dir /tmp/bench
   python - <<'PY'
 import sys
 sys.path.insert(0, "scripts")
 from train_mix import MIX
 from trigon.evals.corpora import load
-for name in [*MIX, "teacher-local", "mind2web-train", "wanli"]:
+for name in [*MIX, "teacher-local", "mind2web-train", "wanli",
+             "jailbreak-train", "prompt-injections-train", "aegis2-train"]:
     print(name, "train", len(load(name, "train", purpose="train")))
 for name in ("banking77", "clinc150", "boolq", "mind2web"):
     print(name, "test", len(load(name, "test", purpose="eval")))
@@ -60,7 +68,7 @@ nvidia-smi --query-gpu=name,memory.total --format=csv
 OUT=/tmp/run
 python scripts/train_lm_score.py --model "$MODEL" --device cuda --seed "$SEED" --scale "$SCALE" \
   --max-prompt-tokens 1280 --extra teacher-local=3200 --extra mind2web-train=2864 \
-  --extra wanli=4000 --name "$RUN" --out "$OUT" ${TRAIN_ARGS:-}
+  --extra wanli=4000 --name "$RUN" --out "$OUT" "${EXCLUDE[@]}" ${TRAIN_ARGS:-}
 # Upload after every stage: a failure late in the job must not take the
 # trained adapter with it. (It once did: a scoring crash after 2.3 GPU-hours
 # exited before the only upload, and the 4B adapter was lost.)
@@ -71,7 +79,6 @@ save "generality"
 python scripts/webact.py --lm "$OUT/adapter.pt" --device cuda -n 600 --out "$OUT/webact" || true
 save "web actions"
 if [ -n "$BENCH_REPO" ]; then
-  hf download "$BENCH_REPO" --type dataset --revision "$BENCH_REVISION" --local-dir /tmp/bench
   renames=()
   for pair in $BENCH_RENAME; do renames+=(--rename "$pair"); done
   python scripts/decision_bench.py --cases /tmp/bench/cases --lm "$OUT/adapter.pt" --device cuda \

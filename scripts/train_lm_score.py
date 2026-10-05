@@ -138,6 +138,13 @@ def main() -> int:
         help="share of Choice cases that also yield a balanced 'is the answer X?' yes/no",
     )
     parser.add_argument(
+        "--exclude-texts",
+        type=pathlib.Path,
+        default=None,
+        help="JSON strings, one a line: drop any case whose state contains one of them "
+        "(decision_bench.py --dump-texts), so an evaluation's texts never train",
+    )
+    parser.add_argument(
         "--balance-noul",
         action="store_true",
         help="weight yes/no examples so each answer carries half the yes/no loss",
@@ -174,10 +181,25 @@ def main() -> int:
         want = int(n * args.scale)
         extra = args.calibration_per_corpus if spec.calibration_evidence else 0
         cases = _draw(name, want + extra, args.seed)
+        # A small corpus keeps most of itself for training: calibration takes
+        # at most a quarter of what it has.
+        extra = min(extra, len(cases) // 4)
         calibration += cases[:extra]
         train += cases[extra:]
         drawn[name] = {"train": len(cases) - extra, "calibration": min(extra, len(cases))}
         print(f"mix: {name} {drawn[name]}", file=sys.stderr, flush=True)
+    if args.exclude_texts:
+        banned = {json.loads(line) for line in args.exclude_texts.open() if line.strip()}
+
+        def clean(case) -> bool:
+            state = case.request.state
+            values = state.values() if isinstance(state, dict) else [state]
+            return not any(str(v).strip() in banned for v in values)
+
+        before = len(train) + len(calibration)
+        train, calibration = [c for c in train if clean(c)], [c for c in calibration if clean(c)]
+        dropped = before - len(train) - len(calibration)
+        print(f"excluded {dropped} cases sharing a text with the evaluation", file=sys.stderr)
     calibration = reshape_all(calibration, reshape, seed=args.seed + 11)
     if args.noul_from_choice:
         # The yes/no calibrator is fitted on the same breadth it trains on.
