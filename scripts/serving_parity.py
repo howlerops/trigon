@@ -22,6 +22,8 @@ import json
 import os
 import pathlib
 import sys
+import time
+import urllib.error
 import urllib.request
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "src"))
@@ -92,20 +94,35 @@ def main() -> int:
         request = urllib.request.Request(
             args.url.rstrip("/") + "/v1/decide", data=json.dumps(body).encode(), headers=headers
         )
-        with urllib.request.urlopen(request, timeout=180) as response:  # noqa: S310
-            return json.loads(response.read())
+        # A tier woken from zero can outlast the Worker's own retries; a 503
+        # here is a cold start, retried, never a difference.
+        for attempt in range(6):
+            try:
+                with urllib.request.urlopen(request, timeout=180) as response:  # noqa: S310
+                    return json.loads(response.read())
+            except urllib.error.HTTPError as error:
+                if error.code != 503 or attempt == 5:
+                    raise
+                time.sleep(20)
+        raise AssertionError("unreachable")
 
-    local, remote, models = [], [], set()
+    bodies = []
     for name in TASKS:
         for case in build(task(name), n=args.n):
             body = case.request.model_dump(exclude_none=True)
             if args.model:
                 body["model"] = args.model
-            response = client.post("/v1/decide", json=body)
-            response.raise_for_status()
-            local.append(response.json())
-            remote.append(served(body))
-            models.add((local[-1]["model"], remote[-1]["model"]))
+            bodies.append(body)
+    # Every local answer first, then every served one back to back: a large
+    # model computed locally between requests let the served tier idle past
+    # its scale-down window and every request after that met a cold start.
+    local = []
+    for body in bodies:
+        response = client.post("/v1/decide", json=body)
+        response.raise_for_status()
+        local.append(response.json())
+    remote = [served(body) for body in bodies]
+    models = {(a["model"], b["model"]) for a, b in zip(local, remote, strict=True)}
     result = compare(local, remote)
     result["models"] = sorted({m for pair in models for m in pair})
     result["same_build"] = all(a == b for a, b in models)
