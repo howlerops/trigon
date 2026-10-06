@@ -10,6 +10,8 @@
 
 interface Env {
   ORIGIN: string;
+  /** The knowledge tier's gateway: a request whose `model` is in LARGE_MODELS goes here. */
+  ORIGIN_LARGE?: string;
   CLIENT_KEYS: string;
   GATEWAY_KEY: string;
   MODAL_KEY: string;
@@ -62,10 +64,23 @@ async function authorised(request: Request, env: Env): Promise<boolean> {
 /** How long a request may wait for a GPU replica to come up from zero. */
 const COLD_START_BUDGET_MS = 90_000;
 
+/** Request `model` names served by the knowledge tier; every other name, the default. */
+const LARGE_MODELS = new Set(["trigon-large"]);
+
+function originFor(body: ArrayBuffer | undefined, env: Env): string {
+  if (!env.ORIGIN_LARGE || !body) return env.ORIGIN;
+  try {
+    const model = JSON.parse(new TextDecoder().decode(body))?.model;
+    return LARGE_MODELS.has(model) ? env.ORIGIN_LARGE : env.ORIGIN;
+  } catch {
+    return env.ORIGIN; // not JSON: the gateway will say why
+  }
+}
+
 async function forward(request: Request, env: Env, path: string): Promise<Response> {
-  const url = new URL(path + new URL(request.url).search, env.ORIGIN);
-  // Buffered once, so a retry can resend it.
+  // Buffered once, so a retry can resend it and the tier can be read from it.
   const body = request.method === "GET" ? undefined : await request.arrayBuffer();
+  const url = new URL(path + new URL(request.url).search, originFor(body, env));
   const init = {
     method: request.method,
     body,

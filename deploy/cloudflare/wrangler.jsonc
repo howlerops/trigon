@@ -10,7 +10,8 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-09-15",
   "vars": {
-    "ORIGIN": "https://jbeck018--trigon-gateway-gateway.us-west.modal.direct"
+    "ORIGIN": "https://jbeck018--trigon-gateway-gateway.us-west.modal.direct",
+    "ORIGIN_LARGE": "https://jbeck018--trigon-gateway-large-gateway.us-west.modal.direct"
   },
   "observability": { "enabled": true },
   // Run near the GPU origin rather than near the caller: each request is one

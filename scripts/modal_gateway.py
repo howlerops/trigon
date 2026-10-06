@@ -73,6 +73,7 @@ image = (
         ignore=[
             "**/.venv*/**",
             "**/corpora/**",
+            "**/runs/**",  # local training runs: gigabytes, and a live log changes mid-upload
             "**/.git/**",
             "**/.claude/**",
             "**/.omc/**",
@@ -85,7 +86,10 @@ image = (
     )
 )
 
-app = modal.App("trigon-gateway")
+#: One app per tier: `trigon-gateway` serves the default bundle and
+#: `trigon-gateway-large` (TRIGON_GATEWAY_APP) the knowledge tier, each with its
+#: own URL the Worker routes to by the request's `model`.
+app = modal.App(os.environ.get("TRIGON_GATEWAY_APP", "trigon-gateway"))
 runs = modal.Volume.from_name("trigon-runs")
 weights = modal.Volume.from_name("trigon-weights")
 

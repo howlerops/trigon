@@ -56,6 +56,9 @@ def main() -> int:
     parser.add_argument("--bundle", type=pathlib.Path, required=True)
     parser.add_argument("--url", required=True, help="the served base URL (Worker or gateway)")
     parser.add_argument("--device", default=None)
+    parser.add_argument(
+        "--model", default=None, help="the request's tier, e.g. trigon-large; default tier if unset"
+    )
     parser.add_argument("-n", type=int, default=40, help="cases per task")
     parser.add_argument("--min-agreement", type=float, default=0.98)
     parser.add_argument("--tolerance", type=float, default=0.05)
@@ -96,6 +99,8 @@ def main() -> int:
     for name in TASKS:
         for case in build(task(name), n=args.n):
             body = case.request.model_dump(exclude_none=True)
+            if args.model:
+                body["model"] = args.model
             response = client.post("/v1/decide", json=body)
             response.raise_for_status()
             local.append(response.json())
