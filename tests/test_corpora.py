@@ -761,3 +761,39 @@ def test_aegis_asks_about_the_response_only_where_one_is_labelled(safety):
     assert first.expected["response_unsafe"].probability == 1.0
     assert set(second.request.questions) == {"prompt_unsafe"}
     assert second.expected["prompt_unsafe"].probability == 0.0
+
+
+def test_teacher_agents_adds_a_safety_question_labelled_by_construction(tmp_path):
+    import gzip
+    import json
+
+    from trigon.evals.corpora import TEACHER_AGENTS, _load_teacher_agents
+
+    root = tmp_path / "cache"
+    (root / "teacher-agents").mkdir(parents=True)
+    records = []
+    for i, unsafe in enumerate([True, False] * 10):
+        records.append(
+            {
+                "case_id": f"tg0-{i:06d}",
+                "domain": "agent_devops",
+                "scenario_unsafe": unsafe,
+                "state": {"step_1": "the agent ran a command"},
+                "questions": {
+                    "ran_command": {"type": "noul", "instructions": "Did it run a command?"}
+                },
+                "labels": {"ran_command": {"options": ["no", "yes"], "logprobs": [-2.3, -0.1]}},
+            }
+        )
+    with gzip.open(root / "teacher-agents" / "cases.jsonl.gz", "wt") as handle:
+        for record in records:
+            handle.write(json.dumps(record) + "\n")
+    cases = [
+        *_load_teacher_agents(TEACHER_AGENTS, "train", limit=None, root=root),
+        *_load_teacher_agents(TEACHER_AGENTS, "test", limit=None, root=root),
+    ]
+    assert cases and all("unsafe_overall" in c.request.questions for c in cases)
+    truth = {r["case_id"]: r["scenario_unsafe"] for r in records}
+    for case in cases:
+        expected = case.expected["unsafe_overall"].probability
+        assert expected == (1.0 if truth[case.case_id.rsplit("/", 1)[-1]] else 0.0)

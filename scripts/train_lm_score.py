@@ -101,9 +101,16 @@ def examples(cases) -> list[tuple[str, list[str], str, object]]:
                 continue
             prompt, candidates = prompt_for(state, question)
             if isinstance(question, NoulQuestion):
-                if expected.probability is None:
+                # A teacher labels a Noul as a distribution over (no, yes)
+                # (`trigon.evals.teacher.labels_of`), not a probability. Until
+                # this read it, every teacher yes/no question was dropped.
+                if expected.probability is not None:
+                    p_yes = float(expected.probability)
+                elif expected.distribution is not None and len(expected.distribution) == 2:
+                    p_yes = float(expected.distribution[1])
+                else:
                     continue
-                out.append((prompt, candidates, "noul", float(expected.probability)))
+                out.append((prompt, candidates, "noul", p_yes))
             elif expected.distribution is not None:
                 out.append((prompt, candidates, "choice", list(expected.distribution)))
             elif expected.label is not None:

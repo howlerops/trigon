@@ -404,6 +404,14 @@ The most useful section. Each of these was argued for before it was measured.
 
 ## Confirmed the hard way
 
+- **Every teacher yes/no question was dropped from LM-score training** (found
+  2026-10-05). The trainer read a Noul's target from `probability`; the
+  teacher streams store theirs as a distribution over (no, yes). Nothing
+  failed -- the examples were skipped -- so every LM-score model to date,
+  published ones included, trained on none of the ~6,500 teacher yes/no
+  questions. Fixed in `scripts/train_lm_score.py`; the effect is the next run's
+  to measure.
+
 Rules this project wrote down before it had evidence for them, and which
 measurement has since borne out. Shorter than the disproved list, and it
 should stay that way — a rule that keeps being confirmed was probably cheap
