@@ -1,0 +1,4 @@
+{"model": "mlx-community/Qwen3-4B-4bit", "mean": 0.507, "mmlu_pro": 0.45, "medqa_usmle": 0.55, "medmcqa": 0.383, "pubmedqa": 0.333, "scienceqa_text": 0.817, "minutes": 4.0}
+{"model": "mlx-community/Qwen3-8B-4bit", "mean": 0.6, "mmlu_pro": 0.517, "medqa_usmle": 0.65, "medmcqa": 0.5, "pubmedqa": 0.45, "scienceqa_text": 0.883, "minutes": 8.0}
+{"model": "mlx-community/Qwen3-14B-4bit", "mean": 0.643, "mmlu_pro": 0.567, "medqa_usmle": 0.667, "medmcqa": 0.6, "pubmedqa": 0.5, "scienceqa_text": 0.883, "minutes": 20.7}
+{"model": "mlx-community/Qwen3-30B-A3B-4bit", "mean": 0.667, "mmlu_pro": 0.5, "medqa_usmle": 0.75, "medmcqa": 0.683, "pubmedqa": 0.483, "scienceqa_text": 0.917, "minutes": 15.1}
