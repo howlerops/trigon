@@ -39,6 +39,7 @@ import hashlib
 import json
 import math
 import pathlib
+import re
 import sys
 import threading
 import time
@@ -396,6 +397,31 @@ def label(host: str, model: str, state, question, *, shuffle_seed: str | None = 
     }
 
 
+_QUESTION_ID = re.compile(r"^[a-z][a-z0-9_]{2,39}$")
+
+
+def _rename_question_ids(text: str) -> str:
+    """``q1`` -> ``question_1``: qwen3:30b names its questions too briefly to pass.
+
+    Only an id that fails the snake_case rule is renamed, and only the id: the
+    question itself is untouched. Without this, 42% of agent cases were
+    refused for that alone.
+    """
+    try:
+        payload = json.loads(text)
+    except ValueError:
+        return text
+    questions = payload.get("questions") if isinstance(payload, dict) else None
+    if not isinstance(questions, dict):
+        return text
+    renamed = {}
+    for i, (qid, question) in enumerate(questions.items(), 1):
+        key = qid if _QUESTION_ID.match(str(qid)) else f"question_{i}"
+        renamed[key if key not in renamed else f"question_{i}"] = question
+    payload["questions"] = renamed
+    return json.dumps(payload)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--n", type=int, default=6000)
@@ -476,7 +502,7 @@ def main() -> int:
                 },
             )
             text = out["response"]
-            request = parse_generated(text, plan)
+            request = parse_generated(_rename_question_ids(text), plan)
             labels = {
                 qid: label(
                     args.host,
