@@ -22,7 +22,9 @@ A **bundle** is a directory:
 public decision benchmark 0.708 (0.602 on its seven held-out slices), CLINC150
 0.930, BoolQ 0.843, Mind2Web step success 0.622 (`reports/decision-bench/README.md`).
 `qwen3-4b-lms-yn` v1 is its predecessor without the safety corpora. Both want a
-GPU for agent-sized requests.
+GPU for agent-sized requests. **For a CPU, `qwen3-0.6b-lms-safe` v1** (Hugging
+Face `jacobbeckdev/trigon-qwen3-0.6b-lms-safe`; R2 `bundles/qwen3-0.6b-lms-safe/v1/`):
+the same recipe on a 0.6B backbone, the default of `docker-compose.yml`.
 
 The backbone (Qwen3, Qwen2.5 or MiniCPM5, all Apache-2.0) is not in the bundle.
 It is fetched from Hugging Face at its pinned revision on first start and
@@ -30,6 +32,13 @@ cached (`TRIGON_WEIGHTS_CACHE` for readout-head bundles, `HF_HOME` for LM-score
 ones).
 
 ## Run it
+
+**Quickest, no GPU:** `docker compose up` serves the published CPU model,
+`qwen3-0.6b-lms-safe` v1, fetched from Hugging Face at a pinned revision and
+checked file by file. It answers on `:8000` -- `POST /v1/decide`. Public
+decision benchmark 0.562 (the hosted service 0.486), CLINC150 0.812, BoolQ
+0.699, Mind2Web step success 0.457. A CPU server answers exactly as the bundle
+does in process (`reports/parity/qwen3-0.6b-lms-safe-v1-cpu/`).
 
 Without Docker:
 
