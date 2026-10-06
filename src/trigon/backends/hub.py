@@ -89,6 +89,15 @@ BACKBONES: dict[str, Backbone] = {
         "Apache-2.0",
         sharded=True,
     ),
+    # The knowledge tier's dense candidate: zero-shot 0.643 on the benchmark's
+    # knowledge slices against 4B's 0.507 (`reports/scaling/`). LM-score only.
+    "qwen3-14b": Backbone(
+        "qwen3-14b",
+        "Qwen/Qwen3-14B",
+        "40c069824f4251a91eefaf281ebe4c544efd3e18",
+        "Apache-2.0",
+        sharded=True,
+    ),
     # MiniCPM5 (OpenBMB, 2026), post-trained, Apache-2.0 on the model card. Plain
     # Llama: full attention in every layer, no q/k/v bias, no QK-norm, head_dim
     # 128, untied embeddings -- all of which `QwenShape` already expresses. Its
