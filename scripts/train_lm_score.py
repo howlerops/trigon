@@ -84,8 +84,8 @@ def with_derived_nouls(cases, fraction: float, seed: int) -> list:
     return [*cases, *(d for d in derived if d is not None)]
 
 
-def examples(cases) -> list[tuple[str, list[str], str, object]]:
-    """``(prompt, candidates, kind, target)`` per labelled question.
+def examples(cases, teacher_noul_weight: float = 1.0) -> list[tuple]:
+    """``(prompt, candidates, kind, target, weight)`` per labelled question.
 
     ``target`` is a label index or a distribution for a Choice or Score, and a
     probability of yes for a Noul.
@@ -110,11 +110,12 @@ def examples(cases) -> list[tuple[str, list[str], str, object]]:
                     p_yes = float(expected.distribution[1])
                 else:
                     continue
-                out.append((prompt, candidates, "noul", p_yes))
+                weight = teacher_noul_weight if expected.from_teacher else 1.0
+                out.append((prompt, candidates, "noul", p_yes, weight))
             elif expected.distribution is not None:
-                out.append((prompt, candidates, "choice", list(expected.distribution)))
+                out.append((prompt, candidates, "choice", list(expected.distribution), 1.0))
             elif expected.label is not None:
-                out.append((prompt, candidates, "choice", int(expected.label)))
+                out.append((prompt, candidates, "choice", int(expected.label), 1.0))
     return out
 
 
@@ -150,6 +151,13 @@ def main() -> int:
         default=None,
         help="JSON strings, one a line: drop any case whose state contains one of them "
         "(decision_bench.py --dump-texts), so an evaluation's texts never train",
+    )
+    parser.add_argument(
+        "--teacher-noul-weight",
+        type=float,
+        default=1.0,
+        help="loss weight of a teacher-labelled yes/no question; at 1.0 the ~25,000 of them "
+        "outnumbered every other kind and the readout's w fell from 0.40 to 0.01",
     )
     parser.add_argument(
         "--balance-noul",
@@ -244,8 +252,8 @@ def main() -> int:
         reshaped = reshape_all(train, reshape, seed=args.seed * 1000 + epoch)
         if args.noul_from_choice:
             reshaped = with_derived_nouls(reshaped, args.noul_from_choice, args.seed * 1000 + epoch)
-        batch = examples(reshaped)
-        nouls = [t for _, _, k, t in batch if k == "noul"]
+        batch = examples(reshaped, args.teacher_noul_weight)
+        nouls = [t for _, _, k, t, _ in batch if k == "noul"]
         yes = sum(nouls) / max(1, len(nouls))
         # Each answer's weight is half the yes/no loss over its share of it.
         w_yes, w_no = 1.0, 1.0
@@ -255,7 +263,7 @@ def main() -> int:
         random.Random(f"order:{args.seed}:{epoch}").shuffle(batch)
         total_steps = len(batch) * args.epochs
         model.train()
-        for i, (prompt, candidates, kind, target) in enumerate(batch):
+        for i, (prompt, candidates, kind, target, weight) in enumerate(batch):
             lr_scale = 0.5 * (1 + math.cos(math.pi * step / max(1, total_steps)))
             for group, base in zip(optimiser.param_groups, (args.lr, args.readout_lr), strict=True):
                 group["lr"] = base * min(1.0, (step + 1) / 200) * lr_scale
@@ -274,7 +282,7 @@ def main() -> int:
                     loss = -logp[target]
                 else:
                     loss = -(torch.tensor(target, device=logp.device) * logp).sum()
-            (loss / args.accumulate).backward()
+            (loss * weight / args.accumulate).backward()
             running.append(loss.item())
             step += 1
             if step % args.accumulate == 0 or i == len(batch) - 1:
