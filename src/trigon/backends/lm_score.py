@@ -133,6 +133,9 @@ def merge_lora(model) -> int:
     return merged
 
 
+KIND_CHOICE, KIND_NOUL = 0, 1
+
+
 class Readout:
     """``score = w * lm_logprob + residual(hidden)``, residual zero at init.
 
@@ -140,12 +143,19 @@ class Readout:
     from the backbone's own answer and moves away only as far as the data
     asks. ``w`` is reported because where it settles says how much of the
     pretrained probability the trained model kept.
+
+    One ``w`` per kind of question -- ``KIND_CHOICE`` (Choice and Score) and
+    ``KIND_NOUL`` -- not one for all: with a single shared ``w``, a corpus
+    whose yes/no questions the backbone reads backwards (agent transcripts)
+    drove it from 0.40 to 0.01 and took the multiple-choice prior with it,
+    CLINC150's ECE rising from 0.105 to 0.181-0.258. A scalar ``w`` in an
+    older adapter loads into both.
     """
 
     def __init__(self, hidden: int, device):
         import torch
 
-        self.w = torch.ones((), device=device, requires_grad=True)
+        self.w = torch.ones(2, device=device, requires_grad=True)
         self.residual = torch.nn.Linear(hidden, 1).to(device)
         torch.nn.init.zeros_(self.residual.weight)
         torch.nn.init.zeros_(self.residual.bias)
@@ -153,8 +163,8 @@ class Readout:
     def parameters(self):
         return [self.w, *self.residual.parameters()]
 
-    def __call__(self, sums, hidden):
-        return self.w * sums + self.residual(hidden.float())[:, 0]
+    def __call__(self, sums, hidden, kind: int = 0):
+        return self.w[kind] * sums + self.residual(hidden.float())[:, 0]
 
     def state_dict(self):
         return {"w": self.w.detach().cpu(), "residual": self.residual.state_dict()}
@@ -163,7 +173,7 @@ class Readout:
         import torch
 
         with torch.no_grad():
-            self.w.copy_(state["w"])
+            self.w.copy_(torch.as_tensor(state["w"], dtype=self.w.dtype).expand_as(self.w))
         self.residual.load_state_dict(state["residual"])
 
 
@@ -342,14 +352,16 @@ class LMScoreBackend:
             out = decoder(torch.tensor([ids], device=self.device), use_cache=True)
         return out.past_key_values
 
-    def _score_ids(self, prompt_ids, encoded, past=None, offset: int = 0) -> list[float]:
+    def _score_ids(
+        self, prompt_ids, encoded, past=None, offset: int = 0, kind: int = KIND_CHOICE
+    ) -> list[float]:
         import torch
 
         with torch.no_grad():
             sums, hidden = packed_scores(
                 self.model, prompt_ids[offset:], encoded, self.device, past, offset
             )
-            scores = sums if self.readout is None else self.readout(sums, hidden)
+            scores = sums if self.readout is None else self.readout(sums, hidden, kind)
             return [float(x) for x in scores]
 
     def _logprobs(self, prompt: str, candidates: list[str]) -> list[float]:
@@ -386,7 +398,8 @@ class LMScoreBackend:
         offset = offset if past is not None else 0
         for compiled_q, question, candidates, prompt_ids, encoded in items:
             with record_function("lm.question"):
-                scores = self._score_ids(prompt_ids, encoded, past, offset)
+                kind = KIND_NOUL if isinstance(question, NoulQuestion) else KIND_CHOICE
+                scores = self._score_ids(prompt_ids, encoded, past, offset, kind)
             if self.content_free:
                 prior = self._content_free(question, candidates)
                 scores = [s - p for s, p in zip(scores, prior, strict=True)]

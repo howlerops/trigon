@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from trigon.backends.lm_score import CONTENT_FREE_STATE, LMScoreBackend, prompt_for
 from trigon.types import ChoiceQuestion, NoulQuestion
 
@@ -76,3 +78,17 @@ def test_shared_prefix_leaves_every_question_a_token():
     assert shared_prefix([[1, 2, 3, 4], [1, 2, 3, 9], [1, 2, 7]]) == 2
     assert shared_prefix([[1, 2, 3], [1, 2, 3]]) == 2  # identical: one token each to score
     assert shared_prefix([[5], [5, 6]]) == 0
+
+
+def test_the_readout_keeps_a_weight_per_kind_and_loads_an_old_scalar():
+    torch = pytest.importorskip("torch")
+    from trigon.backends.lm_score import KIND_CHOICE, KIND_NOUL, Readout
+
+    readout = Readout(hidden=4, device="cpu")
+    with torch.no_grad():
+        readout.w.copy_(torch.tensor([1.0, 0.0]))
+    sums, hidden = torch.tensor([-1.0, -3.0]), torch.zeros(2, 4)
+    assert readout(sums, hidden, KIND_CHOICE).tolist() == [-1.0, -3.0]
+    assert readout(sums, hidden, KIND_NOUL).tolist() == [0.0, 0.0]
+    readout.load_state_dict({"w": torch.tensor(0.4), "residual": readout.residual.state_dict()})
+    assert readout.w.tolist() == pytest.approx([0.4, 0.4])

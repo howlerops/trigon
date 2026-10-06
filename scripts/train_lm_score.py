@@ -272,7 +272,7 @@ def main() -> int:
             prompt_ids = tokenizer(prompt).input_ids[-args.max_prompt_tokens :]
             encoded = [tokenizer(c, add_special_tokens=False).input_ids for c in candidates]
             sums, hidden = packed_scores(model, prompt_ids, encoded, device)
-            scores = readout(sums, hidden)
+            scores = readout(sums, hidden, 1 if kind == "noul" else 0)
             if kind == "noul":
                 logit = scores[1] - scores[0]
                 loss = torch.nn.functional.binary_cross_entropy_with_logits(
@@ -297,7 +297,8 @@ def main() -> int:
                 rate = step / (time.perf_counter() - started)
                 print(
                     f"epoch {epoch} step {step}/{total_steps} "
-                    f"loss {sum(running) / len(running):.4f} w {float(readout.w):.3f} "
+                    f"loss {sum(running) / len(running):.4f} "
+                    f"w {' '.join(f'{x:.3f}' for x in readout.w.tolist())} "
                     f"{rate:.2f} q/s",
                     file=sys.stderr,
                     flush=True,
@@ -347,7 +348,7 @@ def main() -> int:
                 "seed": args.seed,
                 "device": args.device,
                 "train_seconds": train_seconds,
-                "w": float(backend.readout.w),
+                "w": backend.readout.w.tolist(),
                 "corpora": drawn,
                 "held_out": {"corpora": list(NEVER)},
                 "calibrated_on": {

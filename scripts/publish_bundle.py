@@ -59,6 +59,13 @@ def _table(results: dict, columns: list[tuple[str, str]]) -> list[str]:
     return lines
 
 
+def _w(w) -> str:
+    """A readout's w: one number, or one per kind of question (choice, yes/no)."""
+    if isinstance(w, list):
+        return " / ".join(f"{x:.3f}" for x in w) + " (choice / yes-no)"
+    return f"{w:.3f}"
+
+
 def card(name: str, version: str, mix: dict, generality: dict | None, webact: dict | None) -> str:
     lm_score = mix.get("kind") == "lm-score"
     if lm_score:
@@ -74,7 +81,7 @@ def card(name: str, version: str, mix: dict, generality: dict | None, webact: di
             " (`adapter.pt`): each",
             "  answer is scored as the backbone's own continuation, `w * log p(answer) +"
             " residual`,",
-            f"  `w` = {mix['w']:.3f}; build `{mix['model_version']}`.",
+            f"  `w` = {_w(mix['w'])}; build `{mix['model_version']}`.",
         ]
     else:
         what = [
