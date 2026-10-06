@@ -111,6 +111,8 @@ def examples(cases, teacher_noul_weight: float = 1.0) -> list[tuple]:
                 else:
                     continue
                 weight = teacher_noul_weight if expected.from_teacher else 1.0
+                if weight == 0:
+                    continue  # dropped, not computed and multiplied away
                 out.append((prompt, candidates, "noul", p_yes, weight))
             elif expected.distribution is not None:
                 out.append((prompt, candidates, "choice", list(expected.distribution), 1.0))
