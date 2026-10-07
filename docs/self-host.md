@@ -17,7 +17,14 @@ A **bundle** is a directory:
 | `mix.json` | which corpora, how many cases, what was held out, what the calibrator was fitted on |
 | `README.md`, `SHA256SUMS` | the generated model card and the checksums of every other file |
 
-**The current model is `qwen3-4b-lms-safe` v1** (Hugging Face
+**Two hosted tiers behind one URL**, chosen by the request's `model`: the
+default (`trigon-workhorse`, or anything else) is `qwen3-4b-lms-safe` v1;
+`"model": "trigon-large"` is **`qwen3-14b-lms-safe` v1** (Hugging Face
+`jacobbeckdev/trigon-qwen3-14b-lms-safe`), for knowledge-heavy questions --
+public benchmark 0.756, 0.668 on its held-out slices, 117 ms in the model for
+a 50-option request and 399 ms for an agent step on its own L40S.
+
+**The current default model is `qwen3-4b-lms-safe` v1** (Hugging Face
 `jacobbeckdev/trigon-qwen3-4b-lms-safe`; R2 `bundles/qwen3-4b-lms-safe/v1/`):
 public decision benchmark 0.708 (0.602 on its seven held-out slices), CLINC150
 0.930, BoolQ 0.843, Mind2Web step success 0.622 (`reports/decision-bench/README.md`).
@@ -121,6 +128,7 @@ bundle in process and fails unless the answers agree
 
 ```bash
 TRIGON_BUNDLE=<name>-<version> modal deploy scripts/modal_gateway.py   # TRIGON_GATEWAY_GPU to change the GPU
+TRIGON_GATEWAY_APP=trigon-gateway-large TRIGON_BUNDLE=<large bundle> modal deploy scripts/modal_gateway.py
 # secrets: CLIENT_KEYS, GATEWAY_KEY, MODAL_KEY, MODAL_SECRET. COMPAT_PATH puts the incumbent's
 # path at the Worker's root, so a client changes only its base URL; it is never written here.
 cd deploy/cloudflare && npx wrangler deploy --var COMPAT_PATH:$(python -c \

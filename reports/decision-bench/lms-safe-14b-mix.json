@@ -1,0 +1,120 @@
+{
+  "kind": "lm-score",
+  "base": "Qwen/Qwen3-14B",
+  "revision": "40c069824f4251a91eefaf281ebe4c544efd3e18",
+  "model_version": "trigon-lm-score-qwen3-14b-qwen3-14b-lms-safe-s0+lm-score-v1",
+  "lora_rank": 16,
+  "epochs": 1,
+  "lr": 0.0001,
+  "seed": 0,
+  "device": "cuda",
+  "train_seconds": 11546.461867474995,
+  "w": 0.38809114694595337,
+  "corpora": {
+    "banking77": {
+      "train": 1500,
+      "calibration": 500
+    },
+    "goemotions": {
+      "train": 1238,
+      "calibration": 412
+    },
+    "helpsteer2": {
+      "train": 844,
+      "calibration": 281
+    },
+    "measuring_hate_speech": {
+      "train": 844,
+      "calibration": 281
+    },
+    "hatexplain": {
+      "train": 1107,
+      "calibration": 368
+    },
+    "teacher-workflows": {
+      "train": 1400,
+      "calibration": 0
+    },
+    "teacher-local": {
+      "train": 1120,
+      "calibration": 0
+    },
+    "mind2web-train": {
+      "train": 1202,
+      "calibration": 400
+    },
+    "wanli": {
+      "train": 1500,
+      "calibration": 500
+    },
+    "jailbreak-train": {
+      "train": 1199,
+      "calibration": 399
+    },
+    "prompt-injections-train": {
+      "train": 410,
+      "calibration": 136
+    },
+    "aegis2-train": {
+      "train": 1500,
+      "calibration": 500
+    }
+  },
+  "held_out": {
+    "corpora": [
+      "clinc150",
+      "boolq",
+      "circa"
+    ]
+  },
+  "calibrated_on": {
+    "cases": 4140,
+    "corpora": [
+      "banking77",
+      "goemotions",
+      "helpsteer2",
+      "measuring_hate_speech",
+      "hatexplain",
+      "mind2web-train",
+      "wanli",
+      "jailbreak-train",
+      "prompt-injections-train",
+      "aegis2-train"
+    ]
+  },
+  "argv": [
+    "--model",
+    "qwen3-14b",
+    "--device",
+    "cuda",
+    "--seed",
+    "0",
+    "--scale",
+    "0.35",
+    "--max-prompt-tokens",
+    "1280",
+    "--extra",
+    "teacher-local=3200",
+    "--extra",
+    "mind2web-train=2864",
+    "--extra",
+    "wanli=4000",
+    "--name",
+    "qwen3-14b-lms-safe-s0",
+    "--out",
+    "<run>",
+    "--exclude-texts",
+    "<run>",
+    "--noul-from-choice",
+    "0.3",
+    "--balance-noul",
+    "--extra",
+    "jailbreak-train=4566",
+    "--extra",
+    "prompt-injections-train=1560",
+    "--extra",
+    "aegis2-train=4000",
+    "--teacher-noul-weight",
+    "0"
+  ]
+}
