@@ -58,6 +58,15 @@ the yes/no model's 0.582–0.603).
 | 2 | 0.621 | 0.855 | 0.919 | 0.597 |
 | **median** | **0.637** | **0.842** | **0.919** | **0.600** |
 
+## Certification of the `trigon-large` recipe (Qwen3-14B), three seeds
+
+| Seed | Benchmark macro | Held-out slices | BoolQ | CLINC150 | Mind2Web step success |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 0 (published) | 0.756 | 0.668 | 0.892 | 0.942 | 0.673 |
+| 1 | 0.746 | 0.657 | 0.892 | 0.948 | 0.685 |
+| 2 | 0.750 | 0.668 | 0.899 | 0.943 | 0.703 |
+| **median** | **0.750** | **0.668** | **0.892** | **0.943** | **0.685** |
+
 ## What it says
 
 **At 4B, with yes/no trained on balanced questions, trigon is second of the
