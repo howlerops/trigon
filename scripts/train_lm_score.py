@@ -169,6 +169,13 @@ def main() -> int:
     parser.add_argument(
         "--checkpointing", action="store_true", help="trade compute for memory on larger models"
     )
+    parser.add_argument(
+        "--checkpoint-every",
+        type=int,
+        default=0,
+        help="write <out>/checkpoint.pt every N steps (LoRA and readout), so a run stopped "
+        "early -- a job cancelled when its credit ran out -- keeps what it trained",
+    )
     parser.add_argument("--log-every", type=int, default=200)
     parser.add_argument("--name", default=None, help="build name; defaults to the out dir")
     parser.add_argument("--out", type=pathlib.Path, required=True)
@@ -293,6 +300,22 @@ def main() -> int:
                 optimiser.zero_grad(set_to_none=True)
             if device.type == "mps" and step % 50 == 0:
                 torch.mps.empty_cache()
+            if args.checkpoint_every and step % args.checkpoint_every == 0:
+                args.out.mkdir(parents=True, exist_ok=True)
+                partial = {
+                    "kind": "lm-score",
+                    "base": repo,
+                    "revision": revision,
+                    "name": f"{args.name or args.out.name}-step{step}",
+                    "rank": args.lora_rank,
+                    "alpha": args.lora_alpha,
+                    "lora": {k: v.detach().cpu() for k, v in lora.items()},
+                    "readout": readout.state_dict(),
+                    "step": step,
+                    "of": total_steps,
+                }
+                torch.save(partial, args.out / "checkpoint.tmp")
+                (args.out / "checkpoint.tmp").replace(args.out / "checkpoint.pt")
             if step % args.log_every == 0:
                 rate = step / (time.perf_counter() - started)
                 print(

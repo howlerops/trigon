@@ -68,13 +68,23 @@ PY
 fi
 nvidia-smi --query-gpu=name,memory.total --format=csv
 OUT=/tmp/run
-python scripts/train_lm_score.py --model "$MODEL" --device cuda --seed "$SEED" --scale "$SCALE" \
+mkdir -p "$OUT"
+# While it trains, the latest checkpoint goes up every 20 minutes: two runs were
+# cancelled mid-training when the account's prepaid credit ran out, and an
+# upload only at the end kept nothing of either.
+( while sleep 1200; do
+    [ -f "$OUT/checkpoint.pt" ] && hf upload "$OUT_REPO" "$OUT/checkpoint.pt" "$RUN/checkpoint.pt" \
+      --private --commit-message "$RUN: checkpoint" >/dev/null 2>&1 || true
+  done ) &
+UPLOADER=$!
+python scripts/train_lm_score.py --checkpoint-every 2000 --model "$MODEL" --device cuda --seed "$SEED" --scale "$SCALE" \
   --max-prompt-tokens 1280 --extra teacher-local=3200 --extra mind2web-train=2864 \
   --extra wanli=4000 --name "$RUN" --out "$OUT" "${EXCLUDE[@]}" ${TRAIN_ARGS:-}
 # Upload after every stage: a failure late in the job must not take the
 # trained adapter with it. (It once did: a scoring crash after 2.3 GPU-hours
 # exited before the only upload, and the 4B adapter was lost.)
 save() { hf upload "$OUT_REPO" "$OUT" "$RUN" --private --exclude "*/raw/*" --commit-message "$RUN: $1" || true; }
+kill "$UPLOADER" 2>/dev/null || true
 save "adapter and calibrators"
 python scripts/generality.py --lm "$OUT/adapter.pt" --device cuda -n 1000 --out "$OUT/generality" || true
 save "generality"
