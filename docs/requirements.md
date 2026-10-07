@@ -19,8 +19,8 @@ it here, and a row is only **met** on measured evidence.
 | 9 | **Context and limits** | the incumbent's 64k / 32k token envelope | **met** | `COMPAT_BUDGET` reproduces it exactly; ours is a superset. Its per-question 50-option cap and required Noul criteria, observed on a compatible service, are handled outbound |
 | 10 | **Independent questions** | adding a question does not move another's answer | **met** | asserted per architecture in `tests/test_independence.py` and `tests/test_qwen_backend.py`, Qwen3 included |
 | 11 | **Throughput** | the incumbent's 80 requests / 100K tokens per second per account | **not measured** | two L4 containers at eight concurrent requests each is the current ceiling, by design for cost |
-| 12 | **Open and durable** | weights anyone can use, long term | **met** | `qwen3-14b-lms-safe`, `qwen3-4b-lms-safe` (and `-lms-yn`) and `qwen3-0.6b-lms-safe` v1, Apache-2.0, every training corpus green-tier, on R2 behind the Worker and public on Hugging Face, checksums verified through the Worker; each served only after a parity check (`reports/parity/`) |
-| 13 | **Broad** | one model across intents, yes/no, scores, documents and web actions | **met** | the published safety model leads the hosted service on 10 of 11 benchmark slices (all but agent-trajectory safety, 0.536 against 0.654) and on every generality task, and leads web actions |
+| 12 | **Open and durable** | weights anyone can use, long term | **met** | `qwen3-14b-lms-safe`, `qwen3-4b-lms-agents`, `qwen3-4b-lms-safe` (and `-lms-yn`) and `qwen3-0.6b-lms-safe` v1, Apache-2.0, every training corpus green-tier, on R2 behind the Worker and public on Hugging Face, checksums verified through the Worker; each served only after a parity check (`reports/parity/`) |
+| 13 | **Broad** | one model across intents, yes/no, scores, documents and web actions | **met** | the default `qwen3-4b-lms-agents` leads the hosted service on all 11 benchmark slices, agent-trajectory safety included (0.840 against 0.654), and on every generality task, and leads web actions; `docs/models.md` |
 
 ## What to check on every run
 

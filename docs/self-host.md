@@ -18,7 +18,8 @@ A **bundle** is a directory:
 | `README.md`, `SHA256SUMS` | the generated model card and the checksums of every other file |
 
 **Two hosted tiers behind one URL**, chosen by the request's `model`: the
-default (`trigon-workhorse`, or anything else) is `qwen3-4b-lms-safe` v1;
+default (`trigon-workhorse`, or anything else) is `qwen3-4b-lms-agents` v1
+(public benchmark 0.735, agent-trajectory safety 0.840; `docs/models.md`);
 `"model": "trigon-large"` is **`qwen3-14b-lms-safe` v1** (Hugging Face
 `jacobbeckdev/trigon-qwen3-14b-lms-safe`), for knowledge-heavy questions --
 public benchmark 0.756, 0.668 on its held-out slices, 117 ms in the model for

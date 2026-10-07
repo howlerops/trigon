@@ -1,0 +1,13 @@
+{
+  "questions": 120,
+  "argmax_agreement": 1.0,
+  "max_abs_diff": 0.027070220871345585,
+  "models": [
+    "trigon-lm-score-qwen3-4b-qwen3-4b-lms-agents-s0+lm-score-v1"
+  ],
+  "same_build": true,
+  "passed": true,
+  "served_by": "Cloudflare Worker -> Modal L40S (trigon-gateway), bfloat16, default tier",
+  "reference": "the same bundle in process, Apple MPS, bfloat16",
+  "cases_per_task": 40
+}
