@@ -36,7 +36,12 @@ BUNDLE = os.environ.get("TRIGON_BUNDLE", "mix-q3-06b")
 # 562 ms, at $0.000542/s against $0.000222/s -- the same cost per busy request,
 # the same bfloat16 arithmetic (parity 119/120 against 118/120), more only while
 # idle inside `scaledown_window`.
-GPU = os.environ.get("TRIGON_GATEWAY_GPU", "L40S")
+#
+# A list, first available wins: on 2026-10-08 Modal had no L40S to give for
+# over five minutes while an L4 started in 19 s, and a gateway pinned to one
+# type was down for as long as that lasted. The 4B fits an L4; the 14B
+# (TRIGON_GATEWAY_GPU=L40S,A100-40GB,A100-80GB) does not.
+GPU = [g.strip() for g in os.environ.get("TRIGON_GATEWAY_GPU", "L40S,L4").split(",") if g.strip()]
 #: The spend ceiling: however much arrives, no more GPUs than this.
 MAX_CONTAINERS = int(os.environ.get("TRIGON_GATEWAY_MAX_CONTAINERS", "2"))
 
