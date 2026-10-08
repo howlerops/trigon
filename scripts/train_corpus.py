@@ -240,6 +240,42 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--reshape-max",
+        type=int,
+        default=0,
+        help=(
+            "redraw every Choice's options per case per epoch "
+            "(trigon.evals.schema_shift): a subset of --reshape-min to this many, "
+            "the true option always kept, shuffled. 0 (the default) trains on the "
+            "declared set, which is how a model learns a set instead of reading one"
+        ),
+    )
+    parser.add_argument("--reshape-min", type=int, default=2)
+    parser.add_argument(
+        "--reshape-crossover-fraction",
+        type=float,
+        default=0.0,
+        help=(
+            "with --reshape-max: share of reshapes above the scoring crossover "
+            "(DOT_PRODUCT_CROSSOVER), so both Choice heads train"
+        ),
+    )
+    parser.add_argument(
+        "--reshape-rename",
+        type=float,
+        default=0.0,
+        help="with --reshape-max: chance each option name is redrawn in another case style",
+    )
+    parser.add_argument(
+        "--reshape-criteria-only",
+        type=float,
+        default=0.0,
+        help=(
+            "with --reshape-max: chance a case's options are renamed to opaque ids with "
+            "the name moved into the criteria"
+        ),
+    )
+    parser.add_argument(
         "--paired-mix",
         type=float,
         default=0.0,
@@ -284,7 +320,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--device",
         default="auto",
         help=(
-            "cpu, cuda, or auto (cuda when present). Naming cuda on a machine "
+            "cpu, cuda, mps, or auto (cuda, then mps, when present). Naming cuda on a machine "
             "without one is an error, not a fallback: a run that asked for a GPU "
             "and quietly trained on the CPU publishes a report about hardware it "
             "never used"
@@ -366,12 +402,39 @@ def init_suffix(init_version: str) -> str:
     return ".init." + "".join(c if c.isalnum() or c == "-" else "-" for c in digest)
 
 
+def reshape_spec(args):
+    """The per-epoch option redraw, or None to train on the declared set."""
+    if not args.reshape_max:
+        return None
+    from trigon.evals.schema_shift import Reshape
+
+    return Reshape(
+        min_options=args.reshape_min,
+        max_options=args.reshape_max,
+        shuffle=True,
+        rename=args.reshape_rename,
+        criteria_only=args.reshape_criteria_only,
+        crossover_fraction=args.reshape_crossover_fraction,
+    )
+
+
 def resolve_device(requested: str) -> tuple[str, str]:
     """The device to train on, and the name of the hardware behind it."""
     import torch
 
     if requested == "auto":
-        requested = "cuda" if torch.cuda.is_available() else "cpu"
+        if torch.cuda.is_available():
+            requested = "cuda"
+        elif torch.backends.mps.is_available():
+            requested = "mps"
+        else:
+            requested = "cpu"
+    if requested == "mps":
+        if not torch.backends.mps.is_available():
+            raise SystemExit("--device mps was asked for and no MPS device is present")
+        import platform
+
+        return requested, f"Apple {platform.machine()} (MPS)"
     if requested.startswith("cuda"):
         if not torch.cuda.is_available():
             raise SystemExit(f"--device {requested} was asked for and no CUDA device is present")
@@ -599,6 +662,14 @@ def header(
                 f" --paired-mix {args.paired_mix} --paired-kinds {args.paired_kinds}"
                 f" --consistency-weight {args.consistency_weight}"
                 if args.paired_mix
+                else ""
+            )
+            + (
+                f" --reshape-max {args.reshape_max} --reshape-min {args.reshape_min}"
+                f" --reshape-rename {args.reshape_rename}"
+                f" --reshape-criteria-only {args.reshape_criteria_only}"
+                f" --reshape-crossover-fraction {args.reshape_crossover_fraction}"
+                if args.reshape_max
                 else ""
             )
             + (
@@ -1112,6 +1183,7 @@ def main(argv: list[str] | None = None) -> int:
                 rationale_weight=args.rationale_weight,
                 augment=paired_augment(args),
                 consistency_weight=args.consistency_weight,
+                reshape=reshape_spec(args),
             ),
             compiler=compiler,
         )

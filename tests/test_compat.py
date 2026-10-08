@@ -418,3 +418,16 @@ def test_the_migration_harness_compares_a_score_instead_of_two_nones():
     assert migrate._selected({"type": "noul", "probability": 0.07}) == "no"
     # And the empty case still reads as "no decision" rather than as a label.
     assert migrate._selected({"type": "score"}) is None
+
+
+def test_a_noul_goes_out_with_criteria():
+    """A compatible service refuses a Noul without criteria; ours has none to
+    send, so the yes/no boundary goes out explicitly."""
+    from trigon.server.compat import to_compat_request
+    from trigon.types import DecisionRequest, NoulQuestion
+
+    request = DecisionRequest(state="x", questions={"q": NoulQuestion(instructions="Urgent?")})
+    out = to_compat_request(request, model="incumbent-model")["questions"]["q"]
+    assert out["criteria"] == {"true": "Yes", "false": "No"}
+    # And it round-trips through our own inbound side unchanged in meaning.
+    assert to_native({"state": "x", "model": "m", "questions": {"q": out}}).questions["q"]

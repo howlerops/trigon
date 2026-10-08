@@ -63,3 +63,65 @@ def test_a_bundle_url_without_a_checksum_is_refused(tmp_path, monkeypatch):
     monkeypatch.delenv("TRIGON_BUNDLE_SHA256", raising=False)
     with pytest.raises(SystemExit, match="needs TRIGON_BUNDLE_SHA256"):
         module.main()
+
+
+def test_a_mounted_bundle_is_served_without_a_url(tmp_path, monkeypatch):
+    """docker-compose mounts a locally trained bundle at /model."""
+    (tmp_path / "adapter.pt").write_bytes(b"weights")
+    (tmp_path / "temperatures.json").write_text("{}")
+    module = _entrypoint(monkeypatch, tmp_path)
+    # main() sets variables with os.environ.setdefault, which monkeypatch does
+    # not track: on the real environment they outlived this test and pointed
+    # every later app at a deleted adapter. A copy is thrown away afterwards.
+    environ = {
+        k: v
+        for k, v in module.os.environ.items()
+        if k
+        not in (
+            "TRIGON_BUNDLE_URL",
+            "TRIGON_BACKEND",
+            "TRIGON_WEIGHTS",
+            "TRIGON_TEMPERATURE_PATH",
+            "TRIGON_ISOTONIC_PATH",
+        )
+    }
+    monkeypatch.setattr(module.os, "environ", environ)
+    ran = []
+    monkeypatch.setattr(module.sys, "argv", ["entrypoint"])
+    monkeypatch.setattr(module.os, "execvp", lambda cmd, args: ran.append(args))
+    module.main()
+    assert module.os.environ["TRIGON_WEIGHTS"] == str(tmp_path / "adapter.pt")
+    assert module.os.environ["TRIGON_TEMPERATURE_PATH"] == str(tmp_path / "temperatures.json")
+    assert "TRIGON_ISOTONIC_PATH" not in module.os.environ
+    assert ran and ran[0][:2] == ["trigon", "serve"]
+
+
+def _published(tmp_path, tamper: str | None = None) -> tuple[str, str]:
+    """A bundle laid out as publish_bundle.py publishes it, served from file:// URLs."""
+    folder = tmp_path / "published"
+    folder.mkdir()
+    files = {"adapter.pt": b"weights", "temperatures.json": b"{}", "README.md": b"# card"}
+    for name, data in files.items():
+        (folder / name).write_bytes(data)
+    sums = "".join(f"{hashlib.sha256(d).hexdigest()}  {n}\n" for n, d in sorted(files.items()))
+    (folder / "SHA256SUMS").write_text(sums)
+    if tamper:
+        (folder / tamper).write_bytes(b"something else")
+    return folder.as_uri() + "/", hashlib.sha256(sums.encode()).hexdigest()
+
+
+def test_a_published_bundle_is_fetched_file_by_file_and_checked(tmp_path, monkeypatch):
+    base, digest = _published(tmp_path)
+    entry = _entrypoint(monkeypatch, tmp_path / "model")
+    bundle = entry._fetch_published(base, digest)
+    assert (bundle / "adapter.pt").read_bytes() == b"weights"
+    assert (bundle / "README.md").exists()
+
+
+def test_a_tampered_file_or_list_is_refused(tmp_path, monkeypatch):
+    base, digest = _published(tmp_path, tamper="adapter.pt")
+    entry = _entrypoint(monkeypatch, tmp_path / "model")
+    with pytest.raises(SystemExit, match="adapter.pt does not match"):
+        entry._fetch_published(base, digest)
+    with pytest.raises(SystemExit, match="SHA256SUMS does not match"):
+        entry._fetch_published(base, "0" * 64)

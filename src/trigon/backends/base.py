@@ -74,6 +74,22 @@ class Backend(Protocol):
     def infer(self, compiled: CompiledRequest, request: DecisionRequest) -> BackendOutput: ...
 
 
+def option_crossover_of(backend: object) -> int:
+    """The option count above which this backend's weights score a Choice by dot product.
+
+    Recorded per checkpoint because it decides which head answers, and a head
+    is only as good as the option counts it was trained at: a model trained at
+    77 options with the crossover at 64 never trained its per-option head and
+    answered 50-option questions below chance. A backend that records none --
+    every checkpoint written before this existed -- keeps the compiler's
+    historical 64.
+    """
+    from ..schema.compiler import DOT_PRODUCT_CROSSOVER
+
+    config = getattr(backend, "config", None)
+    return int(getattr(config, "option_crossover", DOT_PRODUCT_CROSSOVER))
+
+
 def estimator_of(backend: object) -> TokenEstimator | None:
     """The backend's own tokenizer, if it has an exact one.
 

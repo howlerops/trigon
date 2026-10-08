@@ -1,0 +1,13 @@
+{
+  "questions": 120,
+  "argmax_agreement": 0.9833333333333333,
+  "max_abs_diff": 0.04135803813856831,
+  "models": [
+    "trigon-lm-score-qwen3-4b-qwen3-4b-lms-yn-s0+lm-score-v1"
+  ],
+  "same_build": true,
+  "passed": true,
+  "served_by": "Cloudflare Worker -> Modal L4, bfloat16, LoRA unmerged in float32",
+  "reference": "the same bundle in process, Apple MPS, bfloat16",
+  "cases_per_task": 40
+}

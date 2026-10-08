@@ -189,7 +189,16 @@ def main() -> int:
         from trigon.server.app import build_app
         from trigon.server.config import ServerConfig
 
-        client = TestClient(build_app(ServerConfig(backend=args.backend, weights=args.weights)))
+        # From the environment, with the flags on top: a challenger built from
+        # `ServerConfig(backend, weights)` alone loaded no calibrators, so every
+        # comparison this script made against a calibrated deployment scored
+        # the uncalibrated model instead -- and said nothing about it.
+        env = dict(os.environ, TRIGON_BACKEND=args.backend)
+        if args.weights:
+            env["TRIGON_WEIGHTS"] = args.weights
+        config = ServerConfig.from_env(env)
+        print(f"challenger: calibrated={config.is_calibrated}", file=sys.stderr)
+        client = TestClient(build_app(config))
 
         def challenge(body: dict) -> dict:
             response = client.post("/v1/decide", json=body)

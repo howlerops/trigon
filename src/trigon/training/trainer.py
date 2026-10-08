@@ -107,6 +107,14 @@ class TrainingConfig:
     #: stream (`trigon.evals.paired.paired_stream`) is what goes here. None --
     #: the default -- trains on ``cases`` exactly as before.
     augment: Callable[[list[Case]], list[Case]] | None = None
+    #: Redraws one case, fresh every epoch, from its own seeded stream -- so
+    #: the epoch order, and every run made without it, is unchanged. The
+    #: option-set augmentation (`trigon.evals.schema_shift.Reshape`) is the
+    #: one this exists for: a model that only ever sees one option set learns
+    #: that set, and answers below chance the first time a caller declares
+    #: another. Not saved in a resume file; a resumed run redraws from epoch
+    #: zero's stream, which changes which reshapes it sees, not what it learns.
+    reshape: Callable[[Case, random.Random], Case] | None = None
     #: Weight of the consistency term (`losses.consistency_loss`) on cases that
     #: carry an ``anchor`` request: the anchor is run in the same step and the
     #: term is added to that case's loss. 0 -- the default -- never runs an
@@ -249,8 +257,12 @@ def train(
             flush=True,
         )
 
+    declared = cases
+    reshape_rng = random.Random(config.seed + 104729)
     for epoch in range(first_epoch, config.epochs):
         rng.shuffle(order)
+        if config.reshape is not None:
+            cases = [config.reshape(case, reshape_rng) for case in declared]
         epoch_started = time.perf_counter()
         total, seen = 0.0, 0
         optimizer.zero_grad(set_to_none=True)
@@ -370,6 +382,9 @@ def train(
             torch.nn.utils.clip_grad_norm_(model.parameters(), config.grad_clip)
             optimizer.step()
             optimizer.zero_grad(set_to_none=True)
+            if step % 50 == 0 and next(model.parameters()).device.type == "mps":
+                # Return cached blocks the varying lengths have fragmented.
+                torch.mps.empty_cache()
             if config.log_every and step % config.log_every == 0:
                 print(
                     f"  epoch {epoch + 1} step {step}/{total_steps} "

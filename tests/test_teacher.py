@@ -433,3 +433,18 @@ def test_the_fixture_is_a_small_sample_of_the_pinned_build():
             assert len(label["logprobs"]) == len(label["options"])
             assert all(lp <= 0 for lp in label["logprobs"])
             assert 0 < label["declared_mass"] <= 1 + 1e-6
+
+
+def test_agent_plans_are_noul_weighted_and_cover_every_domain():
+    import sys
+
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "scripts"))
+    from local_teacher import AGENT_DOMAINS, plan_agent_case
+
+    plans = [plan_agent_case(0, i) for i in range(200)]
+    assert {p.domain for p in plans} == {d.name for d in AGENT_DOMAINS}
+    assert all(p.case_id.startswith("tg0-") for p in plans)
+    kinds = [kind for p in plans for kind, _ in p.questions]
+    assert kinds.count("noul") > kinds.count("choice") > 0
+    # The same seed plans the same build.
+    assert plan_agent_case(0, 7) == plans[7]

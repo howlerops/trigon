@@ -1,0 +1,13 @@
+{
+  "questions": 120,
+  "argmax_agreement": 1.0,
+  "max_abs_diff": 0.0,
+  "models": [
+    "trigon-lm-score-qwen3-0.6b-lms-safe-q3-06b-s0+lm-score-v1"
+  ],
+  "same_build": true,
+  "passed": true,
+  "served_by": "local trigon serve, CPU, float32",
+  "reference": "the same bundle in process, CPU, float32",
+  "cases_per_task": 40
+}

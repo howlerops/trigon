@@ -55,6 +55,68 @@ BACKBONES: dict[str, Backbone] = {
         "060db6499f32faf8b98477b0a26969ef7d8b9987",
         "Apache-2.0",
     ),
+    # Qwen3 (2025), post-trained: the instruction-following model, not -Base.
+    # Full attention with a per-head QK-norm and its own head_dim
+    # (`QwenShape`). The newer Qwen3.5 small models are three-quarters linear
+    # attention, which the block mask cannot reach, so they are not here.
+    "qwen3-0.6b": Backbone(
+        "qwen3-0.6b",
+        "Qwen/Qwen3-0.6B",
+        "c1899de289a04d12100db370d81485cdf75e47ca",
+        "Apache-2.0",
+    ),
+    "qwen3-1.7b": Backbone(
+        "qwen3-1.7b",
+        "Qwen/Qwen3-1.7B",
+        "70d244cc86ccca08cf5af4e1e306ecf908b1ad5e",
+        "Apache-2.0",
+        sharded=True,
+    ),
+    # Larger Qwen3 for the scale ladder and as teachers to distil from: the same
+    # architecture as 0.6B/1.7B (8B with untied embeddings), too large to train
+    # on a 64 GB machine, trained on rented GPUs (`deploy/hf/`).
+    "qwen3-4b": Backbone(
+        "qwen3-4b",
+        "Qwen/Qwen3-4B",
+        "1cfa9a7208912126459214e8b04321603b3df60c",
+        "Apache-2.0",
+        sharded=True,
+    ),
+    "qwen3-8b": Backbone(
+        "qwen3-8b",
+        "Qwen/Qwen3-8B",
+        "b968826d9c46dd6066d109eabc6255188de91218",
+        "Apache-2.0",
+        sharded=True,
+    ),
+    # The knowledge tier's dense candidate: zero-shot 0.643 on the benchmark's
+    # knowledge slices against 4B's 0.507 (`reports/scaling/`). LM-score only.
+    "qwen3-14b": Backbone(
+        "qwen3-14b",
+        "Qwen/Qwen3-14B",
+        "40c069824f4251a91eefaf281ebe4c544efd3e18",
+        "Apache-2.0",
+        sharded=True,
+    ),
+    # MiniCPM5 (OpenBMB, 2026), post-trained, Apache-2.0 on the model card. Plain
+    # Llama: full attention in every layer, no q/k/v bias, no QK-norm, head_dim
+    # 128, untied embeddings -- all of which `QwenShape` already expresses. Its
+    # tokenizer chains a digit split before the usual regex and has no
+    # normalizer, which `ByteLevelBPE` covers.
+    "minicpm5-1b": Backbone(
+        "minicpm5-1b",
+        "openbmb/MiniCPM5-1B",
+        "87179e5c1f455ef22e6223592d2d61351b525bfc",
+        "Apache-2.0",
+        sharded=True,
+    ),
+    "minicpm5-2b": Backbone(
+        "minicpm5-2b",
+        "openbmb/MiniCPM5-2B",
+        "f97400052a43d642bbc6e9975e2397e3ae6a6b52",
+        "Apache-2.0",
+        sharded=True,
+    ),
     # Four bf16 shards, 15.2 GB. Untied embeddings: `lm_head.weight` is its
     # own tensor here, and unused, as the tied one is on the smaller models.
     "qwen2.5-7b": Backbone(

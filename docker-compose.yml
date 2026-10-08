@@ -1,0 +1,42 @@
+# One self-hosted service for typed decisions, and the text model an agent needs.
+#
+#   docker compose up       serves the published CPU model (qwen3-0.6b-lms-safe v1),
+#                           fetched from Hugging Face at a pinned revision
+#
+# trigon answers on :8000 -- /v1/decide (native) and /compat/<the incumbent's path> (the
+# incumbent's wire, for a client that changes only its base URL). ollama answers
+# on :11434 with an OpenAI-compatible /v1 for free text: a browser agent's
+# TYPE_TEXT values, which a prefill-only decision model deliberately never writes.
+# Nothing here calls a hosted API. docs/self-host.md has the details.
+services:
+  trigon:
+    build: .
+    image: trigon:local
+    ports: ["8000:8000"]
+    volumes:
+      # A model trained here instead: mount it and drop the TRIGON_BUNDLE_* lines.
+      # - ./bundle:/model:ro
+      - trigon-cache:/cache
+    environment:
+      # The published CPU model, fetched once and checked: one pinned digest of its
+      # SHA256SUMS vouches for every file (docker/entrypoint.py). No GPU needed.
+      TRIGON_BUNDLE_BASE: "https://huggingface.co/jacobbeckdev/trigon-qwen3-0.6b-lms-safe/resolve/a7c2f780afb324ca967f5606a197015fdcb944fa/"
+      TRIGON_BUNDLE_SUMS_SHA256: "6ba0d6e66461b4ac9435f9c6160109b7eae5c337a8b6683b0af4f022c1641da2"
+      TRIGON_MODEL_DIR: /cache/model
+      HF_HOME: /cache/hf
+      # The schema prefix cache: an agent re-sends the same instructions every
+      # step, so this is where its repeated schema stops costing a prefill.
+      TRIGON_CACHE_PREFIXES: "1"
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama
+    ports: ["11434:11434"]
+    volumes: [ollama:/root/.ollama]
+    environment:
+      OLLAMA_NUM_PARALLEL: "4"
+    restart: unless-stopped
+
+volumes:
+  trigon-cache: {}
+  ollama: {}

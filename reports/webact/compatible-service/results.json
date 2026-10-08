@@ -1,0 +1,29 @@
+{
+  "system": {
+    "compat": "a compatible hosted service (not named)",
+    "model": "its latest model, 2026-10-02"
+  },
+  "n": 600,
+  "webact": {
+    "n": 600,
+    "failed": 0,
+    "operation_accuracy": 0.7583333333333333,
+    "target_accuracy": 0.095,
+    "step_success": 0.05,
+    "step_success_by_operation": {
+      "CLICK": 0.05,
+      "SELECT": 0.0625,
+      "TYPE_TEXT": 0.047619047619047616
+    },
+    "step_counts_by_operation": {
+      "CLICK": 500,
+      "SELECT": 16,
+      "TYPE_TEXT": 84
+    },
+    "executed_confidence_ece": 0.04181349610000001,
+    "executed_confidence_ece_floor_p95": 0.03225631703333333,
+    "mean_executed_confidence": 0.0918134961,
+    "p50_seconds": 4.169,
+    "p95_seconds": 5.6796
+  }
+}

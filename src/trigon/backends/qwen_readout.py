@@ -75,7 +75,18 @@ def backbone_shards(backbone, device: str | torch.device) -> Iterator[dict[str, 
 
 
 class QwenShape:
-    """The architecture numbers a Qwen2 `config.json` declares."""
+    """The architecture numbers a Qwen2, Qwen3 or Llama `config.json` declares.
+
+    Qwen3 differs from Qwen2 in three places, each defaulted here to Qwen2's
+    value so a shape saved before Qwen3 existed rebuilds the same model: a
+    ``head_dim`` that is its own number rather than the width over the heads
+    (1.7B: 16 heads of 128 over a 2,048 width; 0.6B: 16 of 128 over 1,024),
+    no bias on the q/k/v projections, and an RMSNorm over each head's query
+    and key before the rotation (``qk_norm``). All three are full attention,
+    which is what the block mask needs -- the Qwen3.5 small models are not:
+    three layers in four are recurrent linear attention, which no mask
+    reaches.
+    """
 
     def __init__(
         self,
@@ -87,9 +98,15 @@ class QwenShape:
         d_ff: int,
         rope_theta: float = 1_000_000.0,
         eps: float = 1e-6,
+        head_dim: int | None = None,
+        attention_bias: bool = True,
+        qk_norm: bool = False,
     ) -> None:
-        if d_model % n_heads or n_heads % n_kv_heads:
+        if n_heads % n_kv_heads or (head_dim is None and d_model % n_heads):
             raise ValueError("heads must divide the width and the kv heads the heads")
+        self.head_dim = head_dim or d_model // n_heads
+        self.attention_bias = attention_bias
+        self.qk_norm = qk_norm
         self.vocab_size = vocab_size
         self.d_model = d_model
         self.n_layers = n_layers
@@ -110,6 +127,15 @@ class QwenShape:
             d_ff=config["intermediate_size"],
             rope_theta=config.get("rope_theta", 10_000.0),
             eps=config.get("rms_norm_eps", 1e-6),
+            head_dim=config.get("head_dim"),
+            # Qwen2 configs carry no `attention_bias` key and do have the bias;
+            # a Llama config that omits it (MiniCPM5-1B) or sets it null has none.
+            attention_bias=(
+                config.get("attention_bias", True)
+                if config.get("model_type", "qwen2") == "qwen2"
+                else bool(config.get("attention_bias"))
+            ),
+            qk_norm=config.get("model_type") == "qwen3",
         )
 
     def to_dict(self) -> dict:
@@ -180,6 +206,10 @@ class LoRALinear(nn.Module):
             nn.init.zeros_(self.lora_b)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if not isinstance(self.base, nn.Linear):
+            # A merged, quantized projection (`QwenReadoutBackend.int8_cpu`):
+            # the adapter is already inside it and it takes float input.
+            return self.base(x.float())
         weight = self.base.weight
         if x.dtype != weight.dtype and not torch.is_autocast_enabled(x.device.type):
             # Full precision against a bf16 backbone (`QwenPrefillModel.full_precision`).
@@ -201,12 +231,18 @@ class QwenAttention(nn.Module):
         super().__init__()
         self.n_heads = shape.n_heads
         self.n_kv = shape.n_kv_heads
-        self.head_dim = shape.d_model // shape.n_heads
-        d, kv = shape.d_model, shape.n_kv_heads * self.head_dim
-        self.q_proj = LoRALinear(d, d, bias=True, rank=rank, alpha=alpha)
-        self.k_proj = LoRALinear(d, kv, bias=True, rank=rank, alpha=alpha)
-        self.v_proj = LoRALinear(d, kv, bias=True, rank=rank, alpha=alpha)
-        self.o_proj = LoRALinear(d, d, bias=False, rank=rank, alpha=alpha)
+        self.head_dim = getattr(shape, "head_dim", None) or shape.d_model // shape.n_heads
+        d = shape.d_model
+        q, kv = shape.n_heads * self.head_dim, shape.n_kv_heads * self.head_dim
+        bias = getattr(shape, "attention_bias", True)
+        self.q_proj = LoRALinear(d, q, bias=bias, rank=rank, alpha=alpha)
+        self.k_proj = LoRALinear(d, kv, bias=bias, rank=rank, alpha=alpha)
+        self.v_proj = LoRALinear(d, kv, bias=bias, rank=rank, alpha=alpha)
+        self.o_proj = LoRALinear(q, d, bias=False, rank=rank, alpha=alpha)
+        if getattr(shape, "qk_norm", False):
+            # Qwen3: per head, over head_dim, before the rotation.
+            self.q_norm = RMSNorm(self.head_dim, shape.eps)
+            self.k_norm = RMSNorm(self.head_dim, shape.eps)
         inv_freq = 1.0 / (
             shape.rope_theta
             ** (torch.arange(0, self.head_dim, 2, dtype=torch.float32) / self.head_dim)
@@ -216,8 +252,11 @@ class QwenAttention(nn.Module):
     def qkv(self, x: torch.Tensor, positions: torch.Tensor):
         """Projected, rotated queries, keys and values: (B, heads, T, head_dim)."""
         batch, length, _ = x.shape
-        q = self.q_proj(x).view(batch, length, self.n_heads, self.head_dim).transpose(1, 2)
-        k = self.k_proj(x).view(batch, length, self.n_kv, self.head_dim).transpose(1, 2)
+        q = self.q_proj(x).view(batch, length, self.n_heads, self.head_dim)
+        k = self.k_proj(x).view(batch, length, self.n_kv, self.head_dim)
+        if hasattr(self, "q_norm"):
+            q, k = self.q_norm(q), self.k_norm(k)
+        q, k = q.transpose(1, 2), k.transpose(1, 2)
         v = self.v_proj(x).view(batch, length, self.n_kv, self.head_dim).transpose(1, 2)
         freqs = positions[..., None].float() * self.inv_freq
         angles = torch.cat((freqs, freqs), dim=-1)[:, None]
@@ -534,7 +573,9 @@ class QwenReadoutBackend(TorchReadoutBackend):
         backbone = BACKBONES[name]
         shape = QwenShape.from_config(json.loads(fetch(backbone, "config.json").read_text()))
         device = torch.device(device)
-        base_dtype = base_dtype or (torch.bfloat16 if device.type == "cuda" else torch.float32)
+        base_dtype = base_dtype or (
+            torch.bfloat16 if device.type in ("cuda", "mps") else torch.float32
+        )
         max_levels = (config or ReadoutConfig()).max_levels
         with torch.device("meta"):
             model = QwenPrefillModel(
@@ -599,6 +640,7 @@ class QwenReadoutBackend(TorchReadoutBackend):
                 "match_residual": self.config.match_residual,
                 "match_residual_score": self.config.match_residual_score,
                 "evidence_supervised": self.config.evidence_supervised,
+                "option_crossover": self.config.option_crossover,
             },
             "tokenizer": describe(self.tokenizer),
             "trainable": {k: v.detach().cpu() for k, v in model.trainable_state().items()},
@@ -645,6 +687,80 @@ class QwenReadoutBackend(TorchReadoutBackend):
         model.eval()
         backend._version = version or payload["version"]
         return backend
+
+    # -- merged adapters, for serving --------------------------------------
+
+    def merge_adapters(self) -> QwenReadoutBackend:
+        """Fold every LoRA update into its frozen weight, in place, for serving.
+
+        ``W + scale * B @ A`` is one projection where there were three, so a
+        layer runs 7 matmuls instead of 21 and reads its activations once per
+        projection. On an M1 Max CPU an agent-sized request (1,391 tokens)
+        went from 2,465 ms to 1,940 ms in the model, every probability within
+        2.7e-06 of the unmerged answer -- float rounding, not a different
+        model, so the calibrators and the build name stand.
+
+        Never on a model that will train again: the adapter is gone afterwards.
+        Only on float32 weights: a bfloat16 weight keeps 8 bits of mantissa,
+        and an update that small can round away, which is unmeasured.
+        """
+        with torch.no_grad():
+            for module in self.model.modules():
+                if isinstance(module, LoRALinear) and module.rank:
+                    if not isinstance(module.base, nn.Linear):
+                        continue
+                    if module.base.weight.dtype != torch.float32:
+                        continue
+                    update = module.scale * (module.lora_b @ module.lora_a)
+                    module.base.weight += update.to(module.base.weight.dtype)
+                    module.rank = 0
+                    del module.lora_a, module.lora_b
+        self.model.eval()
+        return self
+
+    # -- int8 on a CPU, for serving -----------------------------------------
+
+    def int8_cpu(self) -> QwenReadoutBackend:
+        """A twin that serves on a CPU with int8 matmuls in every projection.
+
+        Each LoRA update is merged into its frozen weight (``W + scale * B @ A``),
+        then the projection is replaced by PyTorch's dynamically quantized
+        Linear: int8 weights per output channel, activations quantized per call.
+        Only the backbone's projections -- the readout heads, the embeddings and
+        the norms stay in float32, because the heads are what the calibrators
+        were fitted against and the rest is not where the time goes.
+
+        Not the same model, and not assumed to be: the calibrators were fitted
+        to the float weights, so an int8 twin is served only after
+        `scripts/generality.py` has measured it (`reports/cpu/`).
+        """
+        from torch.ao.nn.quantized.dynamic import Linear as DynamicLinear
+        from torch.ao.quantization import default_dynamic_qconfig
+
+        engines = torch.backends.quantized.supported_engines
+        torch.backends.quantized.engine = "qnnpack" if "fbgemm" not in engines else "fbgemm"
+        if "x86" in engines:
+            torch.backends.quantized.engine = "x86"
+        twin_model = copy.deepcopy(self.model).to("cpu").float()
+        with torch.no_grad():
+            for module in twin_model.modules():
+                if not isinstance(module, LoRALinear):
+                    continue
+                if module.rank:
+                    module.base.weight += module.scale * (module.lora_b @ module.lora_a)
+                    module.rank = 0
+                    del module.lora_a, module.lora_b
+                module.base.qconfig = default_dynamic_qconfig
+                module.base = DynamicLinear.from_float(module.base)
+        twin = QwenReadoutBackend(
+            twin_model,  # type: ignore[arg-type]
+            self.tokenizer,
+            backbone=self.backbone,
+            config=self.config,
+            version=f"{self._version}+int8cpu",
+        )
+        twin.model.eval()
+        return twin
 
     # -- the int8 proxy --------------------------------------------------
 

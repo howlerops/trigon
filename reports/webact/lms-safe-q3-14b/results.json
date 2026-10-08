@@ -1,0 +1,39 @@
+{
+  "system": {
+    "status": "ok",
+    "version": "0.1.0",
+    "calibrated": true,
+    "trained": true,
+    "schema_cache": true,
+    "int8": false,
+    "unsupervised_evidence": null,
+    "context_tokens": 524288,
+    "latency_target_ms": {
+      "p50": 150.0,
+      "p99": 500.0
+    }
+  },
+  "n": 600,
+  "webact": {
+    "n": 600,
+    "failed": 0,
+    "operation_accuracy": 0.89,
+    "target_accuracy": 0.765,
+    "step_success": 0.6733333333333333,
+    "step_success_by_operation": {
+      "CLICK": 0.7196078431372549,
+      "SELECT": 0.11764705882352941,
+      "TYPE_TEXT": 0.4794520547945205
+    },
+    "step_counts_by_operation": {
+      "CLICK": 510,
+      "SELECT": 17,
+      "TYPE_TEXT": 73
+    },
+    "executed_confidence_ece": 0.04476308081502429,
+    "executed_confidence_ece_floor_p95": 0.05199131577130514,
+    "mean_executed_confidence": 0.6870954603533709,
+    "p50_seconds": 0.5137,
+    "p95_seconds": 0.6795
+  }
+}

@@ -83,7 +83,7 @@ from ..schema import (
     SegmentKind,
     mask_shape_key,
 )
-from ..schema.compiler import MASK_CACHE_CELLS
+from ..schema.compiler import DOT_PRODUCT_CROSSOVER, MASK_CACHE_CELLS
 from ..schema.tokens import CallableEstimator
 from ..types import DecisionRequest
 from .base import BackendOutput, QuestionOutput
@@ -206,6 +206,7 @@ class ReadoutConfig:
         match_residual: bool = True,
         match_residual_score: bool = False,
         evidence_supervised: bool = False,
+        option_crossover: int = DOT_PRODUCT_CROSSOVER,
     ) -> None:
         if d_model % n_heads:
             raise ValueError(f"d_model {d_model} must divide by n_heads {n_heads}")
@@ -245,6 +246,9 @@ class ReadoutConfig:
         #: because an evidence head nobody trained is a random projection, and
         #: its spans would look exactly as confident as a trained one's.
         self.evidence_supervised = evidence_supervised
+        #: Saved with the checkpoint, because it decides which Choice head
+        #: answers and only the trained one should (`option_crossover_of`).
+        self.option_crossover = option_crossover
 
 
 def _sinusoidal(length: int, d_model: int, device, dtype) -> torch.Tensor:
@@ -609,6 +613,7 @@ class TorchReadoutBackend:
 
     def make_compiler(self, **kwargs) -> SchemaCompiler:
         """A compiler wired to this backend's tokenizer."""
+        kwargs.setdefault("crossover", self.config.option_crossover)
         return SchemaCompiler(estimator=self.estimator, **kwargs)
 
     def quantized(self) -> TorchReadoutBackend:
@@ -682,6 +687,7 @@ class TorchReadoutBackend:
                     "match_normalize": self.config.match_normalize,
                     "match_residual": self.config.match_residual,
                     "evidence_supervised": self.config.evidence_supervised,
+                    "option_crossover": self.config.option_crossover,
                 },
                 "tokenizer": describe(self.tokenizer),
                 "state_dict": self.model.state_dict(),
@@ -690,7 +696,9 @@ class TorchReadoutBackend:
         )
 
     @classmethod
-    def load(cls, path: str | Path, *, version: str | None = None) -> TorchReadoutBackend:
+    def load(
+        cls, path: str | Path, *, version: str | None = None, device: str | None = None
+    ) -> TorchReadoutBackend:
         """Rebuild a backend from a checkpoint written by ``save``."""
         payload = torch.load(Path(path), map_location="cpu", weights_only=False)
         if payload.get("format", "").startswith("trigon-backbone-adapter"):
@@ -700,7 +708,10 @@ class TorchReadoutBackend:
 
             # On the GPU when there is one: a 1.5B backbone serves in tens of
             # milliseconds there and in seconds on a CPU.
-            device = "cuda" if torch.cuda.is_available() else "cpu"
+            # Built where it will run, so the backbone gets that device's dtype
+            # (bf16 on cuda and mps): loaded on the CPU and moved, it stayed
+            # float32 and a training run on MPS grew to a 68 GB footprint.
+            device = device or ("cuda" if torch.cuda.is_available() else "cpu")
             return QwenReadoutBackend.from_payload(payload, version=version, device=device)
         stored = dict(payload["config"])
         # A flag absent from a checkpoint means "trained before this flag

@@ -87,6 +87,13 @@ Rows marked *unchecked* keep the plan's assumption and are still blockers.
 | --- | --- | --- | --- | --- |
 | Banking77 | Choice (77) | CC BY 4.0 | **green** ✓ | HF `PolyAI/banking77` metadata |
 | CLINC150 | Choice (151) | **CC BY 3.0** | **green** ⬆ | HF `clinc/clinc_oos` metadata |
+| Mind2Web | Choice (operation + element, per step) | **CC BY 4.0** | **green** ✓ — held out by decision: the web-action evaluation | HF `osunlp/Mind2Web` metadata at `17ece8eb8986`, checked 2026-10-02; train split only, the test splits are not used |
+| WANLI | Noul (implies / true / rules out, per pair) | **CC BY 4.0** | **green** ✓ | HF `alisawuffles/WANLI` metadata at `61c95318fd71`, checked 2026-10-02; premises seeded from MultiNLI and generated, then revised and labelled by crowdworkers -- the dataset's own licence is CC BY 4.0 |
+| mind2web-train | Choice (operation + element, per step) | **CC BY 4.0** | **green** ✓ — trains; every website in the `mind2web` evaluation shard excluded | HF `osunlp/Mind2Web` at `17ece8eb8986`, shards 0 and 2–9, checked 2026-10-02 |
+| jailbreak-train | Noul (is this a jailbreak attempt) | **Apache-2.0** | **green** ✓ — train split only; a public decision benchmark tests on the test split | HF `jackhhao/jailbreak-classification` at `2f2ceeb39658`, `default/` train CSV, checked 2026-10-05 |
+| prompt-injections-train | Noul (is this a prompt injection) | **Apache-2.0** | **green** ✓ — train split only; the benchmark tests on the test split | HF `deepset/prompt-injections` at `4f61ecb038e9`, checked 2026-10-05 |
+| aegis2-train | Noul (is the prompt / the response unsafe) | **CC BY 4.0** | **green** ✓ — train split only; the benchmark tests on the test split. Redacted prompts skipped | HF `nvidia/Aegis-AI-Content-Safety-Dataset-2.0` at `d86bb8bedff5`, checked 2026-10-05 |
+| R-Judge | Noul (is the agent's behaviour unsafe) | **none stated upstream** | **red** | GitHub `Lordog/R-Judge` has no licence (checked 2026-10-05); the CC BY 4.0 tag on the Hugging Face re-upload `Glide-py/r_judge_labelled` is the uploader's, not the authors' |
 | MASSIVE | Choice (60) | CC BY 4.0 | **green** ✓ | HF `AmazonScience/massive` metadata |
 | AG News | Choice (4) | **licence "unknown" on the dataset card** | **red** | HF `fancyzhx/ag_news` |
 | DBpedia-14 | Choice (14) | **CC BY-SA 3.0 + GFDL** | **amber** ⬆ | HF `fancyzhx/dbpedia_14` |
@@ -110,6 +117,8 @@ Rows marked *unchecked* keep the plan's assumption and are still blockers.
 | LMSYS Arena preferences | Choice (A/B/tie) | **custom LMSYS-Chat-1M Dataset License Agreement, gated access** | **dropped** | not pursued; see sign-off Q18 |
 | Home Credit; IEEE-CIS fraud | Noul on structured state | Kaggle competition terms | **dropped** | not pursued; see sign-off Q18 |
 | teacher-workflows | Choice / Noul / Score, a schema per case, teacher distributions | **Apache-2.0** — output of Qwen2.5-7B-Instruct at `a09a354`, a licence that places no restriction on output; the 3B and 72B instruct models are under the Qwen licence instead | **green** ✓ — trains for coverage; never calibration evidence | HF `Qwen/Qwen2.5-7B-Instruct` metadata and the repository's LICENSE at `a09a35458c70`, checked 2026-09-27 |
+| teacher-local | Choice / Noul / Score, a schema per case, teacher distributions (first-token letter readout) | **Apache-2.0** — output of Qwen3.6-35B-A3B (or Qwen3-30B-A3B, named per record), mixtures of experts run locally through ollama; Qwen3.6-35B-A3B and the Qwen3-30B-A3B base, Instruct-2507 and Thinking-2507 releases are all Apache-2.0 | **green** ✓ — trains for coverage; never calibration evidence | HF `Qwen/Qwen3.6-35B-A3B` metadata and LICENSE (`995ad96eacd9`), `Qwen/Qwen3-30B-A3B` (`ad44e777bcd1`) and both 2507 releases, checked 2026-10-01 |
+| teacher-agents | Noul-weighted; agent tool-use transcripts written safe or unsafe by scenario, questions and distributions from the teacher | **Apache-2.0** — output of Qwen3 mixture-of-experts models run locally through ollama, named per record | **green** ✓ — trains for coverage; never calibration evidence | the teacher licences as for teacher-local; `scripts/local_teacher.py --domain-set agents` |
 | Autocast | Noul/Choice | **code MIT; dataset hosted "with permission from Metaculus for research purposes only"** | **red** | `andyzoujm/autocast` |
 
 ### Green is a licence, not a format
@@ -129,6 +138,7 @@ the drift tests, neither of which has a GPU stack — a Parquet reader here puts
 | measuring_hate_speech | Parquet only | ✅ built — `scripts/convert_corpus.py` writes gzipped JSONL once |
 | Circa | TSV in its repository | ✅ built — **evaluation only**, CC BY-SA |
 | teacher-workflows | gzipped JSONL on the `trigon-teacher` Modal Volume, pinned by SHA-256 | ✅ built — generated, not fetched; `scripts/modal_teacher.py fetch` |
+| teacher-local | gzipped JSONL built on this machine by `scripts/local_teacher.py` | ✅ built — generated locally, not fetched |
 
 **The three were not all Parquet-only.** The Hugging Face mirrors are, which
 is what the rows above used to say. GoEmotions' authors publish the raw

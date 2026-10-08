@@ -45,7 +45,12 @@ def create_router(config: ServerConfig | None = None) -> TieredRouter:
 
     workhorse = Engine(
         _backend(
-            config.backend, config.weights, config.cache_prefixes, config.unsupervised_evidence
+            config.backend,
+            config.weights,
+            config.cache_prefixes,
+            config.unsupervised_evidence,
+            int8=config.int8,
+            device=config.device,
         ),
         scaler=scaler,
         isotonic=isotonic,
@@ -75,20 +80,74 @@ def create_router(config: ServerConfig | None = None) -> TieredRouter:
     )
 
 
+def _is_lm_score_adapter(weights: str) -> bool:
+    if not weights.endswith(".pt"):
+        return False
+    import torch
+
+    try:
+        payload = torch.load(weights, map_location="cpu", weights_only=True, mmap=True)
+    except Exception:
+        return False  # not a plain tensor dict: a readout checkpoint, loaded below
+    return isinstance(payload, dict) and payload.get("kind") == "lm-score"
+
+
 def _backend(
     name: str,
     weights: str | None = None,
     cache_prefixes: bool = True,
     unsupervised_evidence: str | None = None,
+    *,
+    int8: bool = False,
+    device: str | None = None,
 ) -> Any:
     if name == "lexical":
         if weights:
             raise ValueError("the lexical backend has no weights to load")
         return LexicalBackend()
+    if name == "lm-score":
+        # `weights` names the causal LM, or a trained adapter for one.
+        import os
+
+        from ..backends.lm_score import LMScoreBackend
+
+        # TRIGON_WEIGHTS is a Hugging Face id (zero-shot) or a trained
+        # adapter.pt, which names its own base model.
+        if weights and weights.endswith(".pt"):
+            import torch
+
+            meta = torch.load(weights, map_location="cpu", weights_only=True)
+            return LMScoreBackend(
+                meta["base"],
+                revision=meta.get("revision"),
+                device=device,
+                adapter=weights,
+                merge=os.environ.get("TRIGON_LM_MERGE", "0") == "1",
+                lora_in_model_dtype=os.environ.get("TRIGON_LM_LORA_DTYPE", "float32") == "model",
+            )
+        return LMScoreBackend(
+            weights or "Qwen/Qwen3-0.6B",
+            device=device,
+            content_free=os.environ.get("TRIGON_LM_CONTENT_FREE", "1") != "0",
+        )
+    if name == "torch" and weights and _is_lm_score_adapter(weights):
+        # A bundle names its own kind, so every deployment that serves
+        # `TRIGON_BACKEND=torch` with a bundle's adapter serves an LM-score
+        # bundle too, without a second switch to keep in step.
+        return _backend("lm-score", weights, int8=int8, device=device)
     if name == "torch":
         from ..backends.torch_readout import TorchReadoutBackend
 
-        backend = TorchReadoutBackend.load(weights) if weights else TorchReadoutBackend()
+        backend = (
+            TorchReadoutBackend.load(weights, device=device) if weights else TorchReadoutBackend()
+        )
+        if hasattr(backend, "merge_adapters") and not int8:
+            # Serving never trains: fold LoRA into the frozen weights.
+            backend.merge_adapters()
+        if int8:
+            if not hasattr(backend, "int8_cpu"):
+                raise ValueError("TRIGON_INT8 needs a pretrained-backbone checkpoint")
+            backend = backend.int8_cpu()
         # A schema prefix belongs to the weights that produced it. Those are
         # fixed for this process's lifetime, which is what makes reuse safe
         # here and unsafe in the trainer.
@@ -175,6 +234,9 @@ def build_app(config: ServerConfig | None = None, router: TieredRouter | None = 
             # comparing two deployments should not have to guess which of
             # them is running it.
             "schema_cache": config.cache_prefixes,
+            # Int8 projections change every answer slightly, and the
+            # calibrators were fitted to the float weights.
+            "int8": config.int8,
             # What a checkpoint never trained on rationales answers
             # `include_evidence` with; null for a backend that cannot
             # attribute. The response names the method too, but an operator
