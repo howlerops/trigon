@@ -20,10 +20,10 @@ A **bundle** is a directory:
 **Two hosted tiers behind one URL**, chosen by the request's `model`: the
 default (`trigon-workhorse`, or anything else) is `qwen3-4b-lms-agents` v1
 (public benchmark 0.735, agent-trajectory safety 0.840; `docs/models.md`);
-`"model": "trigon-large"` is **`qwen3-14b-lms-safe` v1** (Hugging Face
-`jacobbeckdev/trigon-qwen3-14b-lms-safe`), for knowledge-heavy questions --
-public benchmark 0.756, 0.668 on its held-out slices, 117 ms in the model for
-a 50-option request and 399 ms for an agent step on its own L40S.
+`"model": "trigon-large"` is **`qwen3-14b-lms-agents` v1** (Hugging Face
+`jacobbeckdev/trigon-qwen3-14b-lms-agents`), for knowledge-heavy questions --
+public benchmark 0.774, 0.696 on its held-out slices, ~120 ms in the model for
+a 50-option request and ~400 ms for an agent step on its own L40S.
 
 **The current default model is `qwen3-4b-lms-safe` v1** (Hugging Face
 `jacobbeckdev/trigon-qwen3-4b-lms-safe`; R2 `bundles/qwen3-4b-lms-safe/v1/`):

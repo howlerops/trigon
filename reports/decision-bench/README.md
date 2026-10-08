@@ -12,6 +12,8 @@ ECE over the top-label probability. SST-5 ships without text and is skipped.
 | System | Cases | Macro accuracy | Table |
 | --- | ---: | ---: | --- |
 | incumbent | 8,016 | **0.838** | `broad.md` |
+| **trigon `qwen3-14b-lms-agents` v1 (published, the `trigon-large` tier)** | 8,016 | **0.774** | `lms-agents-14b.md` |
+| **trigon `qwen3-4b-lms-agents` v1 (published, the default tier)** | 8,016 | **0.735** | `lms-agents-4b.md` |
 | **trigon LM score, Qwen3-14B, safety recipe (published: `qwen3-14b-lms-safe` v1, the `trigon-large` tier)** | 8,016 | **0.756** | `lms-safe-14b.md` |
 | **trigon LM score, Qwen3-4B, yes/no fix + safety corpora (published: `qwen3-4b-lms-safe` v1)** -- four slices in-distribution, see below | 8,016 | **0.708** | `lms-safe-s0-4b.md` |
 | an open distilled model, published beside it | 8,016 | 0.703 | `lms-yn-4b.md` |
