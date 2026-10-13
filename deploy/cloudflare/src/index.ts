@@ -61,8 +61,13 @@ async function authorised(request: Request, env: Env): Promise<boolean> {
   return ok;
 }
 
-/** How long a request may wait for a GPU replica to come up from zero. */
-const COLD_START_BUDGET_MS = 90_000;
+/**
+ * How long a request may wait for a GPU replica to come up from zero. The 14B
+ * tier took 85 s to wake on 2026-10-13, inside 90 s by five; each attempt
+ * below is a short request answered 503, so the wait is the Worker's, not one
+ * held-open upstream fetch.
+ */
+const COLD_START_BUDGET_MS = 150_000;
 
 /** Request `model` names served by the knowledge tier; every other name, the default. */
 const LARGE_MODELS = new Set(["trigon-large"]);

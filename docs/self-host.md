@@ -107,7 +107,7 @@ caller ──► Cloudflare Worker (deploy/cloudflare)       ──► Modal Ser
 
 * **The Worker** checks the caller's key in constant time before anything is
   forwarded, holds the Modal proxy token and the gateway key as secrets, and
-  retries the Server's 503s for up to 90 s, so a request that wakes a GPU from
+  retries the Server's 503s for up to 150 s, so a request that wakes a GPU from
   zero is one slow answer rather than an error. `/healthz` answers at the edge
   unless `?deep=1` from an authorised caller.
 * **The Modal Server** runs the same gateway under uvicorn behind Modal's
