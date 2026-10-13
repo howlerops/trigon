@@ -771,11 +771,22 @@ def medmcqa(tmp_path: pathlib.Path) -> pathlib.Path:
     """Converted rows as scripts/convert_corpus.py would write them."""
     root = tmp_path / "cache"
     rows = [
-        {"question": "What is the mechanism of penicillin?", "opa": "Cell wall inhibition",
-         "opb": "Protein synthesis inhibition", "opc": "DNA replication inhibition",
-         "opd": "Membrane disruption", "cop": 0},
-        {"question": "Which vitamin deficiency causes scurvy?", "opa": "Vitamin A",
-         "opb": "Vitamin B12", "opc": "Vitamin C", "opd": "Vitamin D", "cop": 2},
+        {
+            "question": "What is the mechanism of penicillin?",
+            "opa": "Cell wall inhibition",
+            "opb": "Protein synthesis inhibition",
+            "opc": "DNA replication inhibition",
+            "opd": "Membrane disruption",
+            "cop": 0,
+        },
+        {
+            "question": "Which vitamin deficiency causes scurvy?",
+            "opa": "Vitamin A",
+            "opb": "Vitamin B12",
+            "opc": "Vitamin C",
+            "opd": "Vitamin D",
+            "cop": 2,
+        },
         # cop out of range: dropped
         {"question": "Bad row", "opa": "a", "opb": "b", "opc": "c", "opd": "d", "cop": 5},
         # missing option: dropped
@@ -793,7 +804,7 @@ def test_medmcqa_maps_cop_to_named_option(medmcqa):
     opts = first.request.questions["answer"].options
     assert [o.name for o in opts] == ["a", "b", "c", "d"]
     assert opts[0].criteria == "Cell wall inhibition"
-    assert first.request.state == "What is the mechanism of penicillin?"
+    assert first.request.state == {"question": "What is the mechanism of penicillin?"}
     assert cases[1].expected["answer"].label == 2
 
 
@@ -819,8 +830,12 @@ def medqa(tmp_path: pathlib.Path) -> pathlib.Path:
     rows = [
         {
             "question": "A 30-year-old woman presents with joint pain. What is the diagnosis?",
-            "options": {"A": "Rheumatoid arthritis", "B": "Osteoarthritis",
-                        "C": "Gout", "D": "Lupus"},
+            "options": {
+                "A": "Rheumatoid arthritis",
+                "B": "Osteoarthritis",
+                "C": "Gout",
+                "D": "Lupus",
+            },
             "answer": "Rheumatoid arthritis",
             "answer_idx": "A",
             "meta_info": "internal medicine",
@@ -856,8 +871,8 @@ def test_medqa_maps_answer_idx_to_option_label(medqa):
     opts_first = first.request.questions["answer"].options
     assert [o.name for o in opts_first] == ["a", "b", "c", "d"]
     assert opts_first[0].criteria == "Rheumatoid arthritis"
-    # State is the vignette text
-    assert "30-year-old" in first.request.state
+    # State is the vignette, under the key a caller sends it with
+    assert "30-year-old" in first.request.state["vignette"]
 
 
 def test_medqa_is_train_only(medqa):
@@ -873,17 +888,25 @@ def pubmedqa(tmp_path: pathlib.Path) -> pathlib.Path:
         {
             "pubid": 1,
             "question": "Does aspirin reduce cardiovascular risk?",
-            "context": {"contexts": ["Aspirin inhibits platelet aggregation.",
-                                     "Clinical trials show reduced MI rates."],
-                        "labels": ["OBJECTIVE", "RESULTS"], "meshes": ["Aspirin"]},
+            "context": {
+                "contexts": [
+                    "Aspirin inhibits platelet aggregation.",
+                    "Clinical trials show reduced MI rates.",
+                ],
+                "labels": ["OBJECTIVE", "RESULTS"],
+                "meshes": ["Aspirin"],
+            },
             "long_answer": "Yes.",
             "final_decision": "yes",
         },
         {
             "pubid": 2,
             "question": "Does ibuprofen improve cancer survival?",
-            "context": {"contexts": ["No significant effect was found."],
-                        "labels": ["RESULTS"], "meshes": []},
+            "context": {
+                "contexts": ["No significant effect was found."],
+                "labels": ["RESULTS"],
+                "meshes": [],
+            },
             "long_answer": "No.",
             "final_decision": "no",
         },
@@ -903,10 +926,10 @@ def pubmedqa(tmp_path: pathlib.Path) -> pathlib.Path:
 def test_pubmedqa_drops_maybe_gold_keeps_maybe_option(pubmedqa):
     cases = load("pubmedqa-artificial", "train", purpose="train", root=pubmedqa)
     assert len(cases) == 2
-    yes_case = next(c for c in cases if "cardiovascular" in c.request.state)
-    no_case = next(c for c in cases if "ibuprofen" in c.request.state)
+    yes_case = next(c for c in cases if "cardiovascular" in c.request.state["question"])
+    no_case = next(c for c in cases if "ibuprofen" in c.request.state["question"])
     assert yes_case.expected["answer"].label == 0  # yes → index 0
-    assert no_case.expected["answer"].label == 1   # no → index 1
+    assert no_case.expected["answer"].label == 1  # no → index 1
     opts = yes_case.request.questions["answer"].options
     assert [o.name for o in opts] == ["yes", "no", "maybe"]
 
@@ -914,9 +937,28 @@ def test_pubmedqa_drops_maybe_gold_keeps_maybe_option(pubmedqa):
 def test_pubmedqa_state_contains_question_and_abstract(pubmedqa):
     cases = load("pubmedqa-artificial", "train", purpose="train", root=pubmedqa)
     state = cases[0].request.state
-    assert "QUESTION:" in state and "ABSTRACT:" in state
-    assert "aspirin" in state.lower() or "Aspirin" in state
-    assert "platelet" in state
+    assert set(state) == {"question", "abstract"} and isinstance(state["abstract"], list)
+    assert "aspirin" in state["question"].lower()
+    assert any("platelet" in section for section in state["abstract"])
+
+
+def test_pubmedqa_keeps_as_many_yes_as_no(tmp_path: pathlib.Path):
+    # The source is 93% yes; a draw of it would teach the answer, not the task.
+    root = tmp_path / "cache"
+    rows = [
+        {
+            "question": f"Question {i}?",
+            "context": {"contexts": [f"Abstract {i}."]},
+            "final_decision": "no" if i % 5 == 0 else "yes",
+        }
+        for i in range(40)
+    ]
+    _jsonl_gz(root / "pubmedqa-artificial" / "train.jsonl.gz", rows)
+    cases = load("pubmedqa-artificial", "train", purpose="train", root=root)
+    labels = [c.expected["answer"].label for c in cases]
+    assert labels.count(0) == labels.count(1) == 8
+    again = load("pubmedqa-artificial", "train", purpose="train", root=root)
+    assert [c.case_id for c in again] == [c.case_id for c in cases]
 
 
 def test_pubmedqa_is_train_only(pubmedqa):
@@ -933,16 +975,20 @@ def commonsenseqa(tmp_path: pathlib.Path) -> pathlib.Path:
             "id": "id1",
             "question": "Where do people go when they want to read a book for free?",
             "question_concept": "library",
-            "choices": {"label": ["A", "B", "C", "D", "E"],
-                        "text": ["library", "store", "home", "school", "office"]},
+            "choices": {
+                "label": ["A", "B", "C", "D", "E"],
+                "text": ["library", "store", "home", "school", "office"],
+            },
             "answerKey": "A",
         },
         {
             "id": "id2",
             "question": "What do you use to cut bread?",
             "question_concept": "knife",
-            "choices": {"label": ["A", "B", "C", "D", "E"],
-                        "text": ["spoon", "fork", "knife", "hammer", "saw"]},
+            "choices": {
+                "label": ["A", "B", "C", "D", "E"],
+                "text": ["spoon", "fork", "knife", "hammer", "saw"],
+            },
             "answerKey": "C",
         },
         # wrong number of choices: dropped
@@ -962,12 +1008,14 @@ def test_commonsenseqa_maps_answer_key_to_option_label(commonsenseqa):
     cases = load("commonsenseqa-train", "train", purpose="train", root=commonsenseqa)
     assert len(cases) == 2
     first, second = cases
-    assert first.expected["answer"].label == 0   # A → 0
+    assert first.expected["answer"].label == 0  # A → 0
     assert second.expected["answer"].label == 2  # C → 2
     opts = first.request.questions["answer"].options
     assert [o.name for o in opts] == ["a", "b", "c", "d", "e"]
     assert opts[0].criteria == "library"
-    assert first.request.state == "Where do people go when they want to read a book for free?"
+    assert first.request.state == {
+        "question": "Where do people go when they want to read a book for free?"
+    }
 
 
 def test_commonsenseqa_is_train_only(commonsenseqa):

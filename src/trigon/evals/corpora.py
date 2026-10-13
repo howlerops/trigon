@@ -2002,7 +2002,7 @@ def _load_medmcqa(
             Case(
                 case_id=f"{spec.name}/train/{i}",
                 request=DecisionRequest(
-                    state=question,
+                    state={"question": question},
                     questions={
                         "answer": ChoiceQuestion(
                             instructions=_MEDMCQA_QUESTIONS[pick], options=options
@@ -2046,7 +2046,7 @@ def _load_medqa(
             Case(
                 case_id=f"{spec.name}/train/{i}",
                 request=DecisionRequest(
-                    state=question,
+                    state={"vignette": question},
                     questions={
                         "answer": ChoiceQuestion(
                             instructions=_MEDQA_QUESTIONS[pick], options=options
@@ -2069,14 +2069,17 @@ def _load_pubmedqa(
     Options are yes / no / maybe (fixed); gold is yes or no only -- rows
     whose final_decision is 'maybe' are dropped, but 'maybe' stays as an option
     so the question has the shape it is asked in context.
+
+    **Balanced, because the source is not.** The artificial labels are 93%
+    "yes" (196,144 of 211,269), and a model trained on a draw of them learns
+    to say yes. Every "no" is kept, and as many "yes" rows, chosen by a hash
+    of the row, so the corpus is half each and the same on every machine.
     """
     if split != "train":
         raise KeyError(f"{spec.name} has one split, 'train'; got {split!r}")
     paths = fetch(spec, root=root)
     cases = []
     for i, row in enumerate(_records(paths[split])):
-        if limit and len(cases) >= limit:
-            break
         question = str(row.get("question") or "").strip()
         context = row.get("context") or {}
         # After parquet conversion the struct becomes a JSON-serialized dict in the JSONL.
@@ -2089,8 +2092,8 @@ def _load_pubmedqa(
         final = str(row.get("final_decision") or "").strip().lower()
         if not question or not contexts or final not in _PUBMEDQA_GOLD:
             continue
-        abstract = "\n\n".join(str(c).strip() for c in contexts if c)
-        state = f"QUESTION:\n{question}\n\nABSTRACT:\n{abstract}"
+        # The shape a caller sends: the question, and the abstract as its sections.
+        state = {"question": question, "abstract": [str(c).strip() for c in contexts if c]}
         pick = _pick(str(i), len(_PUBMEDQA_QUESTIONS))
         cases.append(
             Case(
@@ -2109,7 +2112,17 @@ def _load_pubmedqa(
                 tags=(spec.name, "train", "real"),
             )
         )
-    return cases
+    by_label: dict[int, list[Case]] = {0: [], 1: []}
+    for case in cases:
+        by_label[case.expected["answer"].label].append(case)
+    keep = min(len(group) for group in by_label.values())
+
+    def rank(case: Case) -> bytes:
+        return hashlib.blake2b(case.case_id.encode(), digest_size=8).digest()
+
+    kept = {c.case_id for group in by_label.values() for c in sorted(group, key=rank)[:keep]}
+    cases = [c for c in cases if c.case_id in kept]
+    return cases[:limit] if limit else cases
 
 
 def _load_commonsenseqa(
@@ -2151,7 +2164,7 @@ def _load_commonsenseqa(
             Case(
                 case_id=f"{spec.name}/train/{i}",
                 request=DecisionRequest(
-                    state=question,
+                    state={"question": question},
                     questions={
                         "answer": ChoiceQuestion(
                             instructions=_CSQA_QUESTIONS[pick], options=options
