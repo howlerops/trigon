@@ -14,10 +14,10 @@ narrative sections are a discipline, not a test.
 
 | | |
 | --- | ---: |
-| Commits | 336 |
-| Tests | 799 |
-| Python files (`src`, `tests`, `scripts`) | 152 |
-| Lines in `src/` | 18,772 |
+| Commits | 363 |
+| Tests | 805 |
+| Python files (`src`, `tests`, `scripts`) | 153 |
+| Lines in `src/` | 18,868 |
 | Release gates | 11 |
 | Green-tier corpora in the licence audit | 17 |
 | Committed use cases | 3 |
