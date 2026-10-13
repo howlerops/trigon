@@ -680,9 +680,19 @@ def _choose_calibrator(primitive, data, scaler, isotonic) -> str:
     ``isotonic`` the way the decision says and returns the verdict line.
     """
     import math
+    import random
 
     from .calibration.isotonic import MIN_ISOTONIC_SAMPLES, IsotonicCalibrator
 
+    # Shuffled before the cut, with a fixed seed. Callers pass answers in the
+    # order the calibration split was built -- corpus by corpus -- so an
+    # unshuffled half was a different population from the other half: both
+    # agents-recipe models fitted their yes/no calibrator on GoEmotions and
+    # checked it on the safety corpora and WANLI, failed that check, and
+    # shipped uncalibrated at a pooled 0.0395 that a shuffled split takes to
+    # 0.0157 (`scripts/refit_calibration.py`, docs/ledger.md).
+    data = list(data)
+    random.Random(f"calibrate:{primitive}").shuffle(data)
     cut = max(1, len(data) // 2)
     fit_rows, check_rows = data[:cut], data[cut:]
     if not check_rows:
@@ -770,6 +780,34 @@ def _choose_calibrator(primitive, data, scaler, isotonic) -> str:
         return f"none -- unscaled is {baseline:.4f}, the best fit {best:.4f}"
 
 
+def _calibration_rows(outcomes) -> dict[str, list[tuple[list[float], int]]]:
+    """``(log-probabilities, label)`` per primitive, one answer per case."""
+    import math
+    import random
+
+    rows: dict[str, list[tuple[list[float], int]]] = {}
+    for outcome in outcomes:
+        # One answer per case and primitive. A case's questions share its
+        # state, so they are not independent answers, and counting each one
+        # let a corpus that asks seven of a text outvote the rest: GoEmotions
+        # was 2,884 of 4,963 yes/no answers in the agents recipe's split,
+        # slightly underconfident, and pooled it cancelled the safety corpora's
+        # overconfidence. Across 20 splits of those answers the rule applied a
+        # yes/no calibrator on 13 (T 1.06-1.11); one per case, on 20 (T
+        # 1.26-1.36). The bootstrap in `_help_is_real` assumes independent
+        # answers too, and correlated ones overstate what it can tell.
+        by_primitive: dict[str, list] = {}
+        for question in outcome.questions.values():
+            if question.expected is None or question.expected.hard_label is None:
+                continue
+            by_primitive.setdefault(question.primitive, []).append(question)
+        for primitive, questions in by_primitive.items():
+            question = random.Random(f"{outcome.case.case_id}:{primitive}").choice(questions)
+            logits = [math.log(max(p, 1e-12)) for p in question.probabilities]
+            rows.setdefault(primitive, []).append((logits, question.expected.hard_label))
+    return rows
+
+
 def _fit_calibration(engine, cases):
     """Fit both calibrators per primitive and apply whichever demonstrably helps.
 
@@ -804,7 +842,6 @@ def _fit_calibration(engine, cases):
     assumed; see `docs/decisions.md`, "A temperature is a proposal, not a
     result".
     """
-    import math
     import warnings
 
     from .calibration.isotonic import IsotonicCalibrator
@@ -819,13 +856,7 @@ def _fit_calibration(engine, cases):
 
     scaler = TemperatureScaler()
     isotonic = IsotonicCalibrator()
-    rows: dict[str, list[tuple[list[float], int]]] = {}
-    for outcome in run_cases(engine, cases):
-        for question in outcome.questions.values():
-            if question.expected is None or question.expected.hard_label is None:
-                continue
-            logits = [math.log(max(p, 1e-12)) for p in question.probabilities]
-            rows.setdefault(question.primitive, []).append((logits, question.expected.hard_label))
+    rows = _calibration_rows(run_cases(engine, cases))
 
     chosen: dict[str, str] = {}
     # Recorded rather than ignored. A fit pinned at a bound carries

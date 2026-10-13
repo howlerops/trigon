@@ -413,6 +413,22 @@ The most useful section. Each of these was argued for before it was measured.
 
 ## Confirmed the hard way
 
+- **The calibrator was checked on a different population from the one it was
+  fitted on** (found 2026-10-13). `_choose_calibrator` fitted on the first half
+  of the answers and checked on the second, unshuffled, and the calibration
+  split is built corpus by corpus, so the halves were different corpora. Both
+  agents-recipe models (4B and 14B) fitted their yes/no calibrator on mostly
+  GoEmotions, checked it on the safety corpora and WANLI, declined it, and
+  shipped yes/no answers raw -- overconfident on the benchmark's safety slices
+  (Aegis: confidence 0.911 at accuracy 0.842). A second defect hid it further:
+  every question of a case counted as an answer, and GoEmotions asks seven of
+  each text, 2,884 of the 4,963 yes/no answers, slightly underconfident, so
+  pooled it cancelled the rest. On the 4B's own calibration answers
+  (`scripts/refit_calibration.py`), across 20 splits: unshuffled, no
+  calibrator; shuffled, one on 13 of 20 (T 1.06–1.11); shuffled and one answer
+  per case, on 20 of 20 (T 1.26–1.36, beside the 1.28 the previous 4B
+  shipped). Both fixed in `trigon.cli`; tests pin each. The shipped bundles
+  keep their calibrators until a refit is checked on the benchmark.
 - **Every teacher yes/no question was dropped from LM-score training** (found
   2026-10-05). The trainer read a Noul's target from `probability`; the
   teacher streams store theirs as a distribution over (no, yes). Nothing
