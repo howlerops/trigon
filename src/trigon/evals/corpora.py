@@ -729,6 +729,104 @@ AEGIS2_TRAIN = CorpusSpec(
     instructions="(asked per case from a set of phrasings; prompt and response separately)",
 )
 
+MEDMCQA_TRAIN = CorpusSpec(
+    name="medmcqa-train",
+    primitive="choice",
+    tier="green",
+    licence="Apache-2.0",
+    attribution=(
+        "MedMCQA (Pal et al., 2022), openlifescienceai. Apache-2.0. "
+        "https://huggingface.co/datasets/openlifescienceai/medmcqa "
+        "at 91c6572c454088bf71b679ad90aa8dffcd0d5868"
+    ),
+    files={
+        "train": (
+            "https://huggingface.co/datasets/openlifescienceai/medmcqa/resolve/"
+            "91c6572c454088bf71b679ad90aa8dffcd0d5868/data/train-00000-of-00001.parquet"
+        )
+    },
+    sha256={"train": "b119434ba551517a6ec0ba1f7e0b4c029165ed284a4704f262ce37c791c493c5"},
+    converted_from="parquet",
+    # state_fields keeps question + the four option columns through columns() in convert_corpus.py;
+    # cop (the correct-option index, 0-3) is kept because label_field != "category".
+    state_fields=("question", "opa", "opb", "opc", "opd"),
+    label_field="cop",
+    instructions="(asked per case from a set of phrasings)",
+)
+
+MEDQA_TRAIN = CorpusSpec(
+    name="medqa-train",
+    primitive="choice",
+    tier="green",
+    licence="CC BY 4.0",
+    attribution=(
+        "MedQA-USMLE (Jin et al., 2021), GBaker. CC BY 4.0 "
+        "(note: the upstream MedQA dataset is MIT). "
+        "https://huggingface.co/datasets/GBaker/MedQA-USMLE-4-options "
+        "at 0fb93dd23a7339b6dcd27e241cb9b5eca62d4d18"
+    ),
+    files={
+        "train": (
+            "https://huggingface.co/datasets/GBaker/MedQA-USMLE-4-options/resolve/"
+            "0fb93dd23a7339b6dcd27e241cb9b5eca62d4d18/phrases_no_exclude_train.jsonl"
+        )
+    },
+    sha256={"train": "3a65baf760f17c395058d6699315a7ce8aa767c50cb193fea87ceb94dd790324"},
+    instructions="(asked per case from a set of phrasings)",
+)
+
+PUBMEDQA_ARTIFICIAL = CorpusSpec(
+    name="pubmedqa-artificial",
+    primitive="choice",
+    tier="green",
+    licence="MIT",
+    attribution=(
+        "PubMedQA (Jin et al., 2019), qiaojin. MIT. "
+        "https://huggingface.co/datasets/qiaojin/PubMedQA "
+        "at 9001f2853fb87cab8d220904e0de81ac6973b318 "
+        "(pqa_artificial split only; pqa_labeled is the public test set and is never used)"
+    ),
+    files={
+        "train": (
+            "https://huggingface.co/datasets/qiaojin/PubMedQA/resolve/"
+            "9001f2853fb87cab8d220904e0de81ac6973b318/"
+            "pqa_artificial/train-00000-of-00001.parquet"
+        )
+    },
+    sha256={"train": "cdee2d3c01369f47d2ea7b89cd32ee64b142cc0debcb863bf39b3a81a3cece05"},
+    converted_from="parquet",
+    # state_fields keeps question and the context struct (contexts list lives inside it);
+    # final_decision is kept because label_field != "category".
+    state_fields=("question", "context"),
+    label_field="final_decision",
+    instructions="(asked per case from a set of phrasings)",
+)
+
+COMMONSENSEQA_TRAIN = CorpusSpec(
+    name="commonsenseqa-train",
+    primitive="choice",
+    tier="green",
+    licence="MIT",
+    attribution=(
+        "CommonsenseQA (Talmor et al., 2019), tau. MIT. "
+        "https://huggingface.co/datasets/tau/commonsense_qa "
+        "at 94630fe30dad47192a8546eb75f094926d47e155"
+    ),
+    files={
+        "train": (
+            "https://huggingface.co/datasets/tau/commonsense_qa/resolve/"
+            "94630fe30dad47192a8546eb75f094926d47e155/data/train-00000-of-00001.parquet"
+        )
+    },
+    sha256={"train": "b0449767ed986bfc2ca52b1244a46ef12f732756727f3cb0a4ab69ac8b3d282b"},
+    converted_from="parquet",
+    # state_fields keeps question and the choices struct (label + text lists inside it);
+    # answerKey is kept because label_field != "category".
+    state_fields=("question", "choices"),
+    label_field="answerKey",
+    instructions="(asked per case from a set of phrasings)",
+)
+
 CORPORA: dict[str, CorpusSpec] = {
     c.name: c
     for c in (
@@ -746,6 +844,10 @@ CORPORA: dict[str, CorpusSpec] = {
         JAILBREAK_TRAIN,
         PROMPT_INJECTIONS_TRAIN,
         AEGIS2_TRAIN,
+        MEDMCQA_TRAIN,
+        MEDQA_TRAIN,
+        PUBMEDQA_ARTIFICIAL,
+        COMMONSENSEQA_TRAIN,
     )
 }
 
@@ -1830,3 +1932,241 @@ def _load_teacher_agents(
 
 
 _LOADERS[TEACHER_AGENTS.name] = _load_teacher_agents
+
+
+# -- Knowledge-QA corpora: train splits for medical and commonsense reasoning --
+#
+# Four multiple-choice corpora, all train-only splits, asked in several phrasings
+# chosen deterministically per case (hash of row index). Options carry the actual
+# answer text as criteria, so the model sees the question in context.
+
+_MEDMCQA_QUESTIONS = (
+    "A medical examination question is given below. Choose the single best answer.",
+    "Read the medical question and select the most accurate answer from the four options.",
+    "This is a medical knowledge question. Pick the one correct answer from the choices.",
+)
+
+_MEDQA_QUESTIONS = (
+    "A clinical vignette is given below. Select the single best answer from the options.",
+    "Read the clinical case and choose the most appropriate answer.",
+    "This is a USMLE-style clinical question. Identify the one best answer from the choices.",
+)
+
+_PUBMEDQA_QUESTIONS = (
+    "Based on the biomedical abstract, answer the research question with yes, no, or maybe.",
+    "Based on the abstract, answer: does the evidence support, refute, or leave inconclusive?",
+    "Given the research abstract, select yes, no, or maybe for the question.",
+)
+
+_PUBMEDQA_OPTIONS = [
+    {"name": "yes", "criteria": "the evidence supports a positive answer"},
+    {"name": "no", "criteria": "the evidence does not support the claim"},
+    {"name": "maybe", "criteria": "the evidence is inconclusive or mixed"},
+]
+
+_PUBMEDQA_GOLD = {"yes": 0, "no": 1}
+
+_CSQA_QUESTIONS = (
+    "Choose the answer that best completes or answers the question, using common sense.",
+    "Read the question and select the most sensible answer from the options.",
+    "Pick the answer that a reasonable person would consider correct for this everyday question.",
+)
+
+
+def _load_medmcqa(
+    spec: CorpusSpec, split: str, *, limit: int | None = None, root: pathlib.Path | None = None
+) -> list[Case]:
+    """Four-option medical MCQ: question as state, options a-d with criteria, cop as gold."""
+    if split != "train":
+        raise KeyError(f"{spec.name} has one split, 'train'; got {split!r}")
+    paths = fetch(spec, root=root)
+    cases = []
+    for i, row in enumerate(_records(paths[split])):
+        if limit and len(cases) >= limit:
+            break
+        question = str(row.get("question") or "").strip()
+        opts = [str(row.get(f) or "").strip() for f in ("opa", "opb", "opc", "opd")]
+        cop_raw = row.get("cop")
+        if not question or not all(opts):
+            continue
+        if isinstance(cop_raw, float) and cop_raw.is_integer():
+            cop_raw = int(cop_raw)
+        if not isinstance(cop_raw, int) or isinstance(cop_raw, bool) or not 0 <= cop_raw < 4:
+            continue
+        pick = _pick(str(i), len(_MEDMCQA_QUESTIONS))
+        options = [
+            {"name": name, "criteria": text}
+            for name, text in zip(("a", "b", "c", "d"), opts, strict=True)
+        ]
+        cases.append(
+            Case(
+                case_id=f"{spec.name}/train/{i}",
+                request=DecisionRequest(
+                    state=question,
+                    questions={
+                        "answer": ChoiceQuestion(
+                            instructions=_MEDMCQA_QUESTIONS[pick], options=options
+                        )
+                    },
+                ),
+                expected={"answer": Expectation(label=cop_raw)},
+                domain=spec.name,
+                tags=(spec.name, "train", "real"),
+            )
+        )
+    return cases
+
+
+def _load_medqa(
+    spec: CorpusSpec, split: str, *, limit: int | None = None, root: pathlib.Path | None = None
+) -> list[Case]:
+    """USMLE-style vignette: question as state, options A-D mapped to a-d, answer_idx as gold."""
+    if split != "train":
+        raise KeyError(f"{spec.name} has one split, 'train'; got {split!r}")
+    paths = fetch(spec, root=root)
+    _letter_to_idx = {"A": 0, "B": 1, "C": 2, "D": 3}
+    cases = []
+    for i, row in enumerate(_records(paths[split])):
+        if limit and len(cases) >= limit:
+            break
+        question = str(row.get("question") or "").strip()
+        options_raw = row.get("options")
+        answer_idx = str(row.get("answer_idx") or "").strip().upper()
+        if not question or not isinstance(options_raw, dict) or answer_idx not in _letter_to_idx:
+            continue
+        opts_in_order = [str(options_raw.get(k) or "").strip() for k in ("A", "B", "C", "D")]
+        if not all(opts_in_order):
+            continue
+        pick = _pick(str(i), len(_MEDQA_QUESTIONS))
+        options = [
+            {"name": name, "criteria": text}
+            for name, text in zip(("a", "b", "c", "d"), opts_in_order, strict=True)
+        ]
+        cases.append(
+            Case(
+                case_id=f"{spec.name}/train/{i}",
+                request=DecisionRequest(
+                    state=question,
+                    questions={
+                        "answer": ChoiceQuestion(
+                            instructions=_MEDQA_QUESTIONS[pick], options=options
+                        )
+                    },
+                ),
+                expected={"answer": Expectation(label=_letter_to_idx[answer_idx])},
+                domain=spec.name,
+                tags=(spec.name, "train", "real"),
+            )
+        )
+    return cases
+
+
+def _load_pubmedqa(
+    spec: CorpusSpec, split: str, *, limit: int | None = None, root: pathlib.Path | None = None
+) -> list[Case]:
+    """Biomedical yes/no question with abstract as context.
+
+    Options are yes / no / maybe (fixed); gold is yes or no only -- rows
+    whose final_decision is 'maybe' are dropped, but 'maybe' stays as an option
+    so the question has the shape it is asked in context.
+    """
+    if split != "train":
+        raise KeyError(f"{spec.name} has one split, 'train'; got {split!r}")
+    paths = fetch(spec, root=root)
+    cases = []
+    for i, row in enumerate(_records(paths[split])):
+        if limit and len(cases) >= limit:
+            break
+        question = str(row.get("question") or "").strip()
+        context = row.get("context") or {}
+        # After parquet conversion the struct becomes a JSON-serialized dict in the JSONL.
+        if isinstance(context, str):
+            try:
+                context = json.loads(context)
+            except Exception:
+                context = {}
+        contexts = context.get("contexts") if isinstance(context, dict) else []
+        final = str(row.get("final_decision") or "").strip().lower()
+        if not question or not contexts or final not in _PUBMEDQA_GOLD:
+            continue
+        abstract = "\n\n".join(str(c).strip() for c in contexts if c)
+        state = f"QUESTION:\n{question}\n\nABSTRACT:\n{abstract}"
+        pick = _pick(str(i), len(_PUBMEDQA_QUESTIONS))
+        cases.append(
+            Case(
+                case_id=f"{spec.name}/train/{i}",
+                request=DecisionRequest(
+                    state=state,
+                    questions={
+                        "answer": ChoiceQuestion(
+                            instructions=_PUBMEDQA_QUESTIONS[pick],
+                            options=_PUBMEDQA_OPTIONS,
+                        )
+                    },
+                ),
+                expected={"answer": Expectation(label=_PUBMEDQA_GOLD[final])},
+                domain=spec.name,
+                tags=(spec.name, "train", "real"),
+            )
+        )
+    return cases
+
+
+def _load_commonsenseqa(
+    spec: CorpusSpec, split: str, *, limit: int | None = None, root: pathlib.Path | None = None
+) -> list[Case]:
+    """Five-option commonsense MCQ: question as state, choices A-E mapped to a-e."""
+    if split != "train":
+        raise KeyError(f"{spec.name} has one split, 'train'; got {split!r}")
+    paths = fetch(spec, root=root)
+    _letter_to_idx = {"A": 0, "B": 1, "C": 2, "D": 3, "E": 4}
+    cases = []
+    for i, row in enumerate(_records(paths[split])):
+        if limit and len(cases) >= limit:
+            break
+        question = str(row.get("question") or "").strip()
+        choices = row.get("choices") or {}
+        if isinstance(choices, str):
+            try:
+                choices = json.loads(choices)
+            except Exception:
+                choices = {}
+        answer_key = str(row.get("answerKey") or "").strip().upper()
+        if not question or not isinstance(choices, dict) or answer_key not in _letter_to_idx:
+            continue
+        labels = choices.get("label") or []
+        texts = choices.get("text") or []
+        if len(labels) != 5 or len(texts) != 5:
+            continue
+        opts_by_label = dict(zip(labels, texts, strict=True))
+        opts_in_order = [str(opts_by_label.get(k) or "").strip() for k in ("A", "B", "C", "D", "E")]
+        if not all(opts_in_order):
+            continue
+        pick = _pick(str(i), len(_CSQA_QUESTIONS))
+        options = [
+            {"name": name, "criteria": text}
+            for name, text in zip(("a", "b", "c", "d", "e"), opts_in_order, strict=True)
+        ]
+        cases.append(
+            Case(
+                case_id=f"{spec.name}/train/{i}",
+                request=DecisionRequest(
+                    state=question,
+                    questions={
+                        "answer": ChoiceQuestion(
+                            instructions=_CSQA_QUESTIONS[pick], options=options
+                        )
+                    },
+                ),
+                expected={"answer": Expectation(label=_letter_to_idx[answer_key])},
+                domain=spec.name,
+                tags=(spec.name, "train", "real"),
+            )
+        )
+    return cases
+
+
+_LOADERS[MEDMCQA_TRAIN.name] = _load_medmcqa
+_LOADERS[MEDQA_TRAIN.name] = _load_medqa
+_LOADERS[PUBMEDQA_ARTIFICIAL.name] = _load_pubmedqa
+_LOADERS[COMMONSENSEQA_TRAIN.name] = _load_commonsenseqa
