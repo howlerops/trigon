@@ -8,12 +8,12 @@ The bundle's `mix.json` records the arguments it was trained with, and
 `train_lm_score.split` is a function of those alone, so this rebuilds the
 exact calibration split the shipped calibrators were fitted on, answers it
 once, and keeps the answers (`rows.jsonl`). The fit is then
-`trigon.cli._choose_calibrator`, the rule that ships, so a refit here is the
-calibrator the trainer would have written -- unless ``--rule`` asks for a
-different one, which is what this exists to compare.
+`trigon.cli._choose_calibrator`, the rule that ships, over one answer per case
+and primitive as training keeps them, so a refit here is the calibrator the
+trainer would now write.
 
-The report breaks the check half down by source, because a pooled ECE
-cancels: one source overconfident and another underconfident read as
+The report breaks the calibration answers down by source, because a pooled
+ECE cancels: one source overconfident and another underconfident read as
 calibrated together, and the rule declines a calibrator that each would want.
 
 ``--exclude-texts`` must be the benchmark's texts (`decision_bench.py
@@ -27,6 +27,7 @@ import argparse
 import json
 import math
 import pathlib
+import random
 import sys
 from collections import defaultdict
 
@@ -138,9 +139,16 @@ def main() -> int:
         rows = answer(args.bundle, calibration, args.device)
         cache.write_text("".join(json.dumps(r) + "\n" for r in rows))
 
-    by_primitive: dict[str, list[dict]] = defaultdict(list)
+    if any("case" not in row for row in rows):
+        raise SystemExit(f"{cache} predates case ids; delete it and answer again")
+    # One answer per case and primitive, the way `trigon.cli._calibration_rows`
+    # chooses it, so a refit here is the calibrator training would now write.
+    grouped: dict[tuple[str, str], list[dict]] = defaultdict(list)
     for row in rows:
-        by_primitive[row["primitive"]].append(row)
+        grouped[(row["case"], row["primitive"])].append(row)
+    by_primitive: dict[str, list[dict]] = defaultdict(list)
+    for (case, primitive), group in grouped.items():
+        by_primitive[primitive].append(random.Random(f"{case}:{primitive}").choice(group))
 
     scaler, isotonic = TemperatureScaler(), IsotonicCalibrator()
     lines = [
