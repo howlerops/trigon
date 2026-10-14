@@ -121,6 +121,51 @@ def examples(cases, teacher_noul_weight: float = 1.0) -> list[tuple]:
     return out
 
 
+def reshaper(args) -> Reshape:
+    return Reshape(
+        min_options=2, max_options=args.reshape_max, shuffle=True, rename=0.3, criteria_only=0.1
+    )
+
+
+def split(mix: dict[str, int], args) -> tuple[list, list, dict]:
+    """The training cases, the calibration cases, and what each corpus gave.
+
+    A function of the run's arguments alone, so `scripts/refit_calibration.py`
+    rebuilds the split a published bundle was calibrated on from its
+    `mix.json` -- the same draw, the same exclusions, the same derived nouls.
+    """
+    train, calibration, drawn = [], [], {}
+    for name, n in mix.items():
+        spec = corpus(name)
+        want = int(n * args.scale)
+        extra = args.calibration_per_corpus if spec.calibration_evidence else 0
+        cases = _draw(name, want + extra, args.seed)
+        # A small corpus keeps most of itself for training: calibration takes
+        # at most a quarter of what it has.
+        extra = min(extra, len(cases) // 4)
+        calibration += cases[:extra]
+        train += cases[extra:]
+        drawn[name] = {"train": len(cases) - extra, "calibration": min(extra, len(cases))}
+        print(f"mix: {name} {drawn[name]}", file=sys.stderr, flush=True)
+    if args.exclude_texts:
+        banned = {json.loads(line) for line in args.exclude_texts.open() if line.strip()}
+
+        def clean(case) -> bool:
+            state = case.request.state
+            values = state.values() if isinstance(state, dict) else [state]
+            return not any(str(v).strip() in banned for v in values)
+
+        before = len(train) + len(calibration)
+        train, calibration = [c for c in train if clean(c)], [c for c in calibration if clean(c)]
+        dropped = before - len(train) - len(calibration)
+        print(f"excluded {dropped} cases sharing a text with the evaluation", file=sys.stderr)
+    calibration = reshape_all(calibration, reshaper(args), seed=args.seed + 11)
+    if args.noul_from_choice:
+        # The yes/no calibrator is fitted on the same breadth it trains on.
+        calibration = with_derived_nouls(calibration, args.noul_from_choice, args.seed + 13)
+    return train, calibration, drawn
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -196,38 +241,8 @@ def main() -> int:
         if name in NEVER or not corpus(name).permits("train"):
             raise SystemExit(f"{name} is held out or may not train")
 
-    reshape = Reshape(
-        min_options=2, max_options=args.reshape_max, shuffle=True, rename=0.3, criteria_only=0.1
-    )
-    train, calibration, drawn = [], [], {}
-    for name, n in mix.items():
-        spec = corpus(name)
-        want = int(n * args.scale)
-        extra = args.calibration_per_corpus if spec.calibration_evidence else 0
-        cases = _draw(name, want + extra, args.seed)
-        # A small corpus keeps most of itself for training: calibration takes
-        # at most a quarter of what it has.
-        extra = min(extra, len(cases) // 4)
-        calibration += cases[:extra]
-        train += cases[extra:]
-        drawn[name] = {"train": len(cases) - extra, "calibration": min(extra, len(cases))}
-        print(f"mix: {name} {drawn[name]}", file=sys.stderr, flush=True)
-    if args.exclude_texts:
-        banned = {json.loads(line) for line in args.exclude_texts.open() if line.strip()}
-
-        def clean(case) -> bool:
-            state = case.request.state
-            values = state.values() if isinstance(state, dict) else [state]
-            return not any(str(v).strip() in banned for v in values)
-
-        before = len(train) + len(calibration)
-        train, calibration = [c for c in train if clean(c)], [c for c in calibration if clean(c)]
-        dropped = before - len(train) - len(calibration)
-        print(f"excluded {dropped} cases sharing a text with the evaluation", file=sys.stderr)
-    calibration = reshape_all(calibration, reshape, seed=args.seed + 11)
-    if args.noul_from_choice:
-        # The yes/no calibrator is fitted on the same breadth it trains on.
-        calibration = with_derived_nouls(calibration, args.noul_from_choice, args.seed + 13)
+    train, calibration, drawn = split(mix, args)
+    reshape = reshaper(args)
 
     torch.manual_seed(args.seed)
     device = torch.device(args.device)

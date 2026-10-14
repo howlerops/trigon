@@ -205,3 +205,60 @@ def test_conformal_rejects_an_alpha_outside_the_open_unit_interval(alpha):
 def test_conformal_rejects_labels_that_do_not_match_the_predictions():
     with pytest.raises(ValueError, match="against"):
         fit_conformal([[0.5, 0.5]] * 100, [0] * 99)
+
+
+def _binary_answers(n: int, sharpen: float, seed: int) -> list[tuple[list[float], int]]:
+    """Yes/no answers whose true P(yes) is drawn uniformly, reported as P^sharpen."""
+    rng = random.Random(seed)
+    rows = []
+    for _ in range(n):
+        q = rng.uniform(0.05, 0.95)
+        y = int(rng.random() < q)
+        a, b = (1 - q) ** sharpen, q**sharpen
+        rows.append(([math.log(a / (a + b)), math.log(b / (a + b))], y))
+    return rows
+
+
+def test_the_calibrator_check_is_not_a_different_population_from_its_fit():
+    """Callers pass answers corpus by corpus; the two halves must not be two corpora.
+
+    Underconfident answers first, overconfident ones second, as the shipped
+    split had them: an unshuffled cut fitted on the first, checked on the
+    second, and declined a calibrator the pool as a whole needs (0.0703 raw
+    against 0.0995 for its best fit). The agents-recipe models shipped their yes/no answers
+    uncalibrated that way.
+    """
+    from trigon.calibration import TemperatureScaler
+    from trigon.calibration.isotonic import IsotonicCalibrator
+    from trigon.cli import _choose_calibrator
+
+    ordered = _binary_answers(3000, 0.7, 1) + _binary_answers(1500, 2.0, 2)
+    verdict = _choose_calibrator("noul", ordered, TemperatureScaler(), IsotonicCalibrator())
+    assert not verdict.startswith("none"), verdict
+
+
+def test_a_case_contributes_one_answer_to_calibration():
+    """Seven questions of one text are one piece of evidence, not seven."""
+    from types import SimpleNamespace
+
+    from trigon.cli import _calibration_rows
+
+    def question(primitive, p_yes, label):
+        return SimpleNamespace(
+            primitive=primitive,
+            probabilities=[1 - p_yes, p_yes],
+            expected=SimpleNamespace(hard_label=label),
+        )
+
+    many = SimpleNamespace(
+        case=SimpleNamespace(case_id="emotions/0"),
+        questions={f"q{i}": question("noul", 0.1 * (i + 1), i % 2) for i in range(7)},
+    )
+    mixed = SimpleNamespace(
+        case=SimpleNamespace(case_id="mixed/0"),
+        questions={"a": question("noul", 0.4, 0), "b": question("choice", 0.7, 1)},
+    )
+    rows = _calibration_rows([many, mixed])
+    assert len(rows["noul"]) == 2 and len(rows["choice"]) == 1
+    # The same answer every time: a refit is reproducible.
+    assert _calibration_rows([many, mixed]) == rows
