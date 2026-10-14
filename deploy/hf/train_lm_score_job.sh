@@ -71,6 +71,26 @@ PY
   echo "DRY OK"; exit 0
 fi
 nvidia-smi --query-gpu=name,memory.total --format=csv
+if [ "${REFIT:-0}" = 1 ]; then
+  # A published run's calibrators refitted on the GPU's own numerics, and its
+  # benchmark answers kept (raw/) so `scripts/recalibrate_bench.py` can judge
+  # the refit without another model call. No training.
+  hf download "$OUT_REPO" "$RUN/adapter.pt" "$RUN/mix.json" "$RUN/temperatures.json" \
+    --local-dir /tmp/published
+  BUNDLE=/tmp/published/$RUN
+  python scripts/refit_calibration.py --bundle "$BUNDLE" --device cuda --out /tmp/refit \
+    "${EXCLUDE[@]}"
+  hf upload "$OUT_REPO" /tmp/refit "$RUN/refit" --private --commit-message "$RUN: refit" || true
+  renames=()
+  for pair in $BENCH_RENAME; do renames+=(--rename "$pair"); done
+  python scripts/decision_bench.py --cases /tmp/bench/cases --lm "$BUNDLE/adapter.pt" --device cuda \
+    --reference /tmp/bench/predictions "${renames[@]}" --out /tmp/refit-bench \
+    > /tmp/refit-bench.md || true
+  cp /tmp/refit-bench.md /tmp/refit-bench/report.md || true
+  hf upload "$OUT_REPO" /tmp/refit-bench "$RUN/refit-bench" --private \
+    --commit-message "$RUN: benchmark answers for the refit" || true
+  echo "done: https://huggingface.co/$OUT_REPO/tree/main/$RUN/refit"; exit 0
+fi
 OUT=/tmp/run
 mkdir -p "$OUT"
 # While it trains, the latest checkpoint goes up every 20 minutes: two runs were
