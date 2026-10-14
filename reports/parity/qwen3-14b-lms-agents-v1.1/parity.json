@@ -1,0 +1,24 @@
+{
+  "questions": 120,
+  "argmax_agreement": 1.0,
+  "max_abs_diff": 0.018909179391898068,
+  "models": [
+    "trigon-lm-score-qwen3-14b-qwen3-14b-lms-agents-s0+lm-score-v1"
+  ],
+  "same_build": true,
+  "local_health": {
+    "status": "ok",
+    "version": "0.1.0",
+    "calibrated": true,
+    "trained": true,
+    "schema_cache": true,
+    "int8": false,
+    "unsupervised_evidence": null,
+    "context_tokens": 524288,
+    "latency_target_ms": {
+      "p50": 150.0,
+      "p99": 500.0
+    }
+  },
+  "passed": true
+}

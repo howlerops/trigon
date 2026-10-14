@@ -6,8 +6,8 @@ three can be self-hosted.
 
 | Model | Where | Public decision benchmark | Time in the model | Use it for |
 | --- | --- | ---: | --- | --- |
-| **`qwen3-4b-lms-agents` v1** (4B) | hosted default | 0.735 | ~80 ms short, ~230 ms agent step (L40S) | routing, moderation, guardrails, agent steps, agent-trajectory safety |
-| **`qwen3-14b-lms-agents` v1** (14B) | hosted, `"model": "trigon-large"` | 0.774 | ~120 ms short, ~400 ms agent step (L40S) | knowledge-heavy questions; the most accurate |
+| **`qwen3-4b-lms-agents` v1.1** (4B) | hosted default | 0.735 | ~80 ms short, ~230 ms agent step (L40S) | routing, moderation, guardrails, agent steps, agent-trajectory safety |
+| **`qwen3-14b-lms-agents` v1.1** (14B) | hosted, `"model": "trigon-large"` | 0.774 | ~120 ms short, ~400 ms agent step (L40S) | knowledge-heavy questions; the most accurate |
 | **`qwen3-0.6b-lms-safe` v1** (0.6B) | self-hosted CPU, `docker compose up` | 0.562 | ~0.3 s short on a CPU | no GPU, offline |
 
 For reference on the same 8,016 cases: the incumbent 0.838, an open distilled
@@ -43,8 +43,8 @@ pinned digest of its `SHA256SUMS` before serving it (`docker/entrypoint.py`):
 | Model | `TRIGON_BUNDLE_BASE` | `TRIGON_BUNDLE_SUMS_SHA256` |
 | --- | --- | --- |
 | 0.6B | `https://huggingface.co/jacobbeckdev/trigon-qwen3-0.6b-lms-safe/resolve/a7c2f780afb324ca967f5606a197015fdcb944fa/` | `6ba0d6e66461b4ac9435f9c6160109b7eae5c337a8b6683b0af4f022c1641da2` |
-| 4B | `https://huggingface.co/jacobbeckdev/trigon-qwen3-4b-lms-agents/resolve/12e0c30a32fe88012b7c7d3e0d8072c1a580a6d9/` | `e73c96ef89a2f0faeee69d59d6ff006f24565735a0b479b9c4751387ff91125e` |
-| 14B | `https://huggingface.co/jacobbeckdev/trigon-qwen3-14b-lms-agents/resolve/d3601bbdf518f3914805a118383dd38f2a250d97/` | `e1223ab835f0daf94e699cebcca7550522563f675264b8ec334b263524a1f238` |
+| 4B | `https://huggingface.co/jacobbeckdev/trigon-qwen3-4b-lms-agents/resolve/e01e46c46ef7761eb04d1012c6e2c432f7b8844a/` | `110a80957af8163ac1a957d364f2b30122c02148c4d89738729672c759692e1e` |
+| 14B | `https://huggingface.co/jacobbeckdev/trigon-qwen3-14b-lms-agents/resolve/74c7c71e09076cd824d6c45b469173590c18bfc2/` | `4b2b03c2ee0eb4f8d4a5464f9d92aa2bec547da18502d56038f7842325a33c93` |
 
 `docker compose up` serves the 0.6B on a CPU. The 4B wants ~10 GB of GPU
 memory and the 14B ~32 GB: run them with a CUDA PyTorch image and
@@ -61,8 +61,11 @@ TRIGON_BACKEND=torch TRIGON_WEIGHTS=bundle/adapter.pt \
 ## What each is weaker at
 
 - The 4B gives up a little calibration on held-out tasks for its agent-safety
-  gain: CLINC150 ECE 0.115 against the previous default's 0.081, BoolQ 0.046
-  against 0.017 (Banking77 improved, 0.071 to 0.029).
+  gain: CLINC150 ECE 0.115 against the previous default's 0.081 (Banking77
+  improved, 0.071 to 0.029). v1 also served yes/no answers uncalibrated, a
+  defect in how the calibrator was chosen; v1.1 calibrates them (benchmark
+  mean ECE 0.073 to 0.068, same weights). The 14B had the same defect; its
+  v1.1 takes mean ECE 0.058 to 0.054.
 - Knowledge-heavy exam questions trail the incumbent on every model: MMLU-Pro
   ~0.50 on the 14B against 0.81.
 
