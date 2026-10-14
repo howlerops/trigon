@@ -427,8 +427,18 @@ The most useful section. Each of these was argued for before it was measured.
   (`scripts/refit_calibration.py`), across 20 splits: unshuffled, no
   calibrator; shuffled, one on 13 of 20 (T 1.06–1.11); shuffled and one answer
   per case, on 20 of 20 (T 1.26–1.36, beside the 1.28 the previous 4B
-  shipped). Both fixed in `trigon.cli`; tests pin each. The shipped bundles
-  keep their calibrators until a refit is checked on the benchmark.
+  shipped). Both fixed in `trigon.cli`; tests pin each. On the 4B's own
+  benchmark answers (`scripts/recalibrate_bench.py`, run locally, macro 0.736
+  against 0.735 on the serving GPU), the fixed rule's yes/no temperature
+  (T 1.275) takes mean ECE over the 11 slices from 0.071 to 0.066 with
+  accuracy unchanged -- Aegis 0.069 to 0.034, its responses 0.068 to 0.037,
+  agent transcripts 0.087 to 0.054, the two near-perfect slices 0.02-0.02
+  worse. **The rule's whole output would not have helped:** it also declines
+  the Choice temperature here (0.0434 against 0.0404, on float32 rather than
+  the GPU's bfloat16), and the benchmark's knowledge slices, which the
+  calibration split has no corpus like, need it -- without T 1.18 mean ECE is
+  0.084. A calibration split can only see the overconfidence of the tasks it
+  holds; the knowledge corpora add calibration cases for those.
 - **Every teacher yes/no question was dropped from LM-score training** (found
   2026-10-05). The trainer read a Noul's target from `probability`; the
   teacher streams store theirs as a distribution over (no, yes). Nothing

@@ -169,6 +169,9 @@ def main() -> int:
                 f"| {primitive} | {name} | {len(srows)} | {acc:.3f} | {conf:.3f} | {gap:.3f} |"
             )
     scaler.save(args.out / "temperatures.json")
+    # A map from an earlier refit into the same directory must not outlive a
+    # verdict that declined one.
+    (args.out / "isotonic.json").unlink(missing_ok=True)
     if isotonic.knots:
         isotonic.save(args.out / "isotonic.json")
     (args.out / "sources.md").write_text("\n".join(lines) + "\n")
