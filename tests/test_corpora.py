@@ -763,6 +763,266 @@ def test_aegis_asks_about_the_response_only_where_one_is_labelled(safety):
     assert second.expected["prompt_unsafe"].probability == 0.0
 
 
+# -- Knowledge-QA corpora: medmcqa, medqa, pubmedqa-artificial, commonsenseqa -
+
+
+@pytest.fixture
+def medmcqa(tmp_path: pathlib.Path) -> pathlib.Path:
+    """Converted rows as scripts/convert_corpus.py would write them."""
+    root = tmp_path / "cache"
+    rows = [
+        {
+            "question": "What is the mechanism of penicillin?",
+            "opa": "Cell wall inhibition",
+            "opb": "Protein synthesis inhibition",
+            "opc": "DNA replication inhibition",
+            "opd": "Membrane disruption",
+            "cop": 0,
+        },
+        {
+            "question": "Which vitamin deficiency causes scurvy?",
+            "opa": "Vitamin A",
+            "opb": "Vitamin B12",
+            "opc": "Vitamin C",
+            "opd": "Vitamin D",
+            "cop": 2,
+        },
+        # cop out of range: dropped
+        {"question": "Bad row", "opa": "a", "opb": "b", "opc": "c", "opd": "d", "cop": 5},
+        # missing option: dropped
+        {"question": "Incomplete", "opa": "", "opb": "b", "opc": "c", "opd": "d", "cop": 1},
+    ]
+    _jsonl_gz(root / "medmcqa-train" / "train.jsonl.gz", rows)
+    return root
+
+
+def test_medmcqa_maps_cop_to_named_option(medmcqa):
+    cases = load("medmcqa-train", "train", purpose="train", root=medmcqa)
+    assert len(cases) == 2
+    first = cases[0]
+    assert first.expected["answer"].label == 0
+    opts = first.request.questions["answer"].options
+    assert [o.name for o in opts] == ["a", "b", "c", "d"]
+    assert opts[0].criteria == "Cell wall inhibition"
+    assert first.request.state == {"question": "What is the mechanism of penicillin?"}
+    assert cases[1].expected["answer"].label == 2
+
+
+def test_medmcqa_uses_multiple_phrasings(medmcqa):
+    cases = load("medmcqa-train", "train", purpose="train", root=medmcqa)
+    phrasings = {c.request.questions["answer"].instructions for c in cases}
+    # With only 2 cases we may see 1 or 2 distinct phrasings; all must be non-empty.
+    assert all(p for p in phrasings)
+
+
+def test_medmcqa_is_train_only(medmcqa):
+    with pytest.raises(KeyError, match="'train'"):
+        load("medmcqa-train", "test", purpose="eval", root=medmcqa)
+
+
+@pytest.fixture
+def medqa(tmp_path: pathlib.Path) -> pathlib.Path:
+    """Plain JSONL as fetched directly."""
+    import json
+
+    root = tmp_path / "cache"
+    (root / "medqa-train").mkdir(parents=True)
+    rows = [
+        {
+            "question": "A 30-year-old woman presents with joint pain. What is the diagnosis?",
+            "options": {
+                "A": "Rheumatoid arthritis",
+                "B": "Osteoarthritis",
+                "C": "Gout",
+                "D": "Lupus",
+            },
+            "answer": "Rheumatoid arthritis",
+            "answer_idx": "A",
+            "meta_info": "internal medicine",
+        },
+        {
+            "question": "Which drug is first-line for type 2 diabetes?",
+            "options": {"A": "Insulin", "B": "Metformin", "C": "Glipizide", "D": "Sitagliptin"},
+            "answer": "Metformin",
+            "answer_idx": "B",
+            "meta_info": "pharmacology",
+        },
+        # answer_idx not in A-D: dropped
+        {
+            "question": "Bad answer index",
+            "options": {"A": "x", "B": "y", "C": "z", "D": "w"},
+            "answer": "x",
+            "answer_idx": "E",
+            "meta_info": "x",
+        },
+    ]
+    with open(root / "medqa-train" / "train.jsonl", "w") as handle:
+        for row in rows:
+            handle.write(json.dumps(row) + "\n")
+    return root
+
+
+def test_medqa_maps_answer_idx_to_option_label(medqa):
+    cases = load("medqa-train", "train", purpose="train", root=medqa)
+    assert len(cases) == 2
+    first, second = cases
+    assert first.expected["answer"].label == 0  # A → 0
+    assert second.expected["answer"].label == 1  # B → 1
+    opts_first = first.request.questions["answer"].options
+    assert [o.name for o in opts_first] == ["a", "b", "c", "d"]
+    assert opts_first[0].criteria == "Rheumatoid arthritis"
+    # State is the vignette, under the key a caller sends it with
+    assert "30-year-old" in first.request.state["vignette"]
+
+
+def test_medqa_is_train_only(medqa):
+    with pytest.raises(KeyError, match="'train'"):
+        load("medqa-train", "test", purpose="eval", root=medqa)
+
+
+@pytest.fixture
+def pubmedqa(tmp_path: pathlib.Path) -> pathlib.Path:
+    """Converted rows as scripts/convert_corpus.py would write them (context as dict)."""
+    root = tmp_path / "cache"
+    rows = [
+        {
+            "pubid": 1,
+            "question": "Does aspirin reduce cardiovascular risk?",
+            "context": {
+                "contexts": [
+                    "Aspirin inhibits platelet aggregation.",
+                    "Clinical trials show reduced MI rates.",
+                ],
+                "labels": ["OBJECTIVE", "RESULTS"],
+                "meshes": ["Aspirin"],
+            },
+            "long_answer": "Yes.",
+            "final_decision": "yes",
+        },
+        {
+            "pubid": 2,
+            "question": "Does ibuprofen improve cancer survival?",
+            "context": {
+                "contexts": ["No significant effect was found."],
+                "labels": ["RESULTS"],
+                "meshes": [],
+            },
+            "long_answer": "No.",
+            "final_decision": "no",
+        },
+        # final_decision maybe: dropped (gold must be yes or no)
+        {
+            "pubid": 3,
+            "question": "Is the association clear?",
+            "context": {"contexts": ["Mixed results."], "labels": ["RESULTS"], "meshes": []},
+            "long_answer": "Maybe.",
+            "final_decision": "maybe",
+        },
+    ]
+    _jsonl_gz(root / "pubmedqa-artificial" / "train.jsonl.gz", rows)
+    return root
+
+
+def test_pubmedqa_drops_maybe_gold_keeps_maybe_option(pubmedqa):
+    cases = load("pubmedqa-artificial", "train", purpose="train", root=pubmedqa)
+    assert len(cases) == 2
+    yes_case = next(c for c in cases if "cardiovascular" in c.request.state["question"])
+    no_case = next(c for c in cases if "ibuprofen" in c.request.state["question"])
+    assert yes_case.expected["answer"].label == 0  # yes → index 0
+    assert no_case.expected["answer"].label == 1  # no → index 1
+    opts = yes_case.request.questions["answer"].options
+    assert [o.name for o in opts] == ["yes", "no", "maybe"]
+
+
+def test_pubmedqa_state_contains_question_and_abstract(pubmedqa):
+    cases = load("pubmedqa-artificial", "train", purpose="train", root=pubmedqa)
+    state = cases[0].request.state
+    assert set(state) == {"question", "abstract"} and isinstance(state["abstract"], list)
+    assert "aspirin" in state["question"].lower()
+    assert any("platelet" in section for section in state["abstract"])
+
+
+def test_pubmedqa_keeps_as_many_yes_as_no(tmp_path: pathlib.Path):
+    # The source is 93% yes; a draw of it would teach the answer, not the task.
+    root = tmp_path / "cache"
+    rows = [
+        {
+            "question": f"Question {i}?",
+            "context": {"contexts": [f"Abstract {i}."]},
+            "final_decision": "no" if i % 5 == 0 else "yes",
+        }
+        for i in range(40)
+    ]
+    _jsonl_gz(root / "pubmedqa-artificial" / "train.jsonl.gz", rows)
+    cases = load("pubmedqa-artificial", "train", purpose="train", root=root)
+    labels = [c.expected["answer"].label for c in cases]
+    assert labels.count(0) == labels.count(1) == 8
+    again = load("pubmedqa-artificial", "train", purpose="train", root=root)
+    assert [c.case_id for c in again] == [c.case_id for c in cases]
+
+
+def test_pubmedqa_is_train_only(pubmedqa):
+    with pytest.raises(KeyError, match="'train'"):
+        load("pubmedqa-artificial", "test", purpose="eval", root=pubmedqa)
+
+
+@pytest.fixture
+def commonsenseqa(tmp_path: pathlib.Path) -> pathlib.Path:
+    """Converted rows as scripts/convert_corpus.py would write them (choices as dict)."""
+    root = tmp_path / "cache"
+    rows = [
+        {
+            "id": "id1",
+            "question": "Where do people go when they want to read a book for free?",
+            "question_concept": "library",
+            "choices": {
+                "label": ["A", "B", "C", "D", "E"],
+                "text": ["library", "store", "home", "school", "office"],
+            },
+            "answerKey": "A",
+        },
+        {
+            "id": "id2",
+            "question": "What do you use to cut bread?",
+            "question_concept": "knife",
+            "choices": {
+                "label": ["A", "B", "C", "D", "E"],
+                "text": ["spoon", "fork", "knife", "hammer", "saw"],
+            },
+            "answerKey": "C",
+        },
+        # wrong number of choices: dropped
+        {
+            "id": "id3",
+            "question": "Bad row",
+            "question_concept": "x",
+            "choices": {"label": ["A", "B"], "text": ["x", "y"]},
+            "answerKey": "A",
+        },
+    ]
+    _jsonl_gz(root / "commonsenseqa-train" / "train.jsonl.gz", rows)
+    return root
+
+
+def test_commonsenseqa_maps_answer_key_to_option_label(commonsenseqa):
+    cases = load("commonsenseqa-train", "train", purpose="train", root=commonsenseqa)
+    assert len(cases) == 2
+    first, second = cases
+    assert first.expected["answer"].label == 0  # A → 0
+    assert second.expected["answer"].label == 2  # C → 2
+    opts = first.request.questions["answer"].options
+    assert [o.name for o in opts] == ["a", "b", "c", "d", "e"]
+    assert opts[0].criteria == "library"
+    assert first.request.state == {
+        "question": "Where do people go when they want to read a book for free?"
+    }
+
+
+def test_commonsenseqa_is_train_only(commonsenseqa):
+    with pytest.raises(KeyError, match="'train'"):
+        load("commonsenseqa-train", "test", purpose="eval", root=commonsenseqa)
+
+
 def test_teacher_agents_adds_a_safety_question_labelled_by_construction(tmp_path):
     import gzip
     import json

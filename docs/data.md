@@ -93,6 +93,10 @@ Rows marked *unchecked* keep the plan's assumption and are still blockers.
 | jailbreak-train | Noul (is this a jailbreak attempt) | **Apache-2.0** | **green** ✓ — train split only; a public decision benchmark tests on the test split | HF `jackhhao/jailbreak-classification` at `2f2ceeb39658`, `default/` train CSV, checked 2026-10-05 |
 | prompt-injections-train | Noul (is this a prompt injection) | **Apache-2.0** | **green** ✓ — train split only; the benchmark tests on the test split | HF `deepset/prompt-injections` at `4f61ecb038e9`, checked 2026-10-05 |
 | aegis2-train | Noul (is the prompt / the response unsafe) | **CC BY 4.0** | **green** ✓ — train split only; the benchmark tests on the test split. Redacted prompts skipped | HF `nvidia/Aegis-AI-Content-Safety-Dataset-2.0` at `d86bb8bedff5`, checked 2026-10-05 |
+| medmcqa-train | Choice (4) | **Apache-2.0** | **green** ✓ — train split only; knowledge corpus, opt-in via `--extra` | HF `openlifescienceai/medmcqa` at `91c6572c4540`, checked 2026-10-13 |
+| medqa-train | Choice (4) | **CC BY 4.0** (note: upstream MedQA dataset is MIT) | **green** ✓ — train split only; knowledge corpus, opt-in via `--extra` | HF `GBaker/MedQA-USMLE-4-options` at `0fb93dd23a73`, checked 2026-10-13 |
+| pubmedqa-artificial | Choice (3: yes/no/maybe) | **MIT** | **green** ✓ — pqa_artificial train split only, balanced to half yes and half no (the source is 93% yes); pqa_labeled is the public test set and is never used | HF `qiaojin/PubMedQA` at `9001f2853fb8`, checked 2026-10-13 |
+| commonsenseqa-train | Choice (5) | **MIT** | **green** ✓ — train split only; knowledge corpus, opt-in via `--extra` | HF `tau/commonsense_qa` at `94630fe30dad`, checked 2026-10-13 |
 | R-Judge | Noul (is the agent's behaviour unsafe) | **none stated upstream** | **red** | GitHub `Lordog/R-Judge` has no licence (checked 2026-10-05); the CC BY 4.0 tag on the Hugging Face re-upload `Glide-py/r_judge_labelled` is the uploader's, not the authors' |
 | MASSIVE | Choice (60) | CC BY 4.0 | **green** ✓ | HF `AmazonScience/massive` metadata |
 | AG News | Choice (4) | **licence "unknown" on the dataset card** | **red** | HF `fancyzhx/ag_news` |

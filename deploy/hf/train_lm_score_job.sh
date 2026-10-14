@@ -42,6 +42,9 @@ done
 python scripts/convert_corpus.py measuring_hate_speech
 python scripts/convert_corpus.py boolq
 python scripts/convert_corpus.py prompt-injections-train
+python scripts/convert_corpus.py medmcqa-train
+python scripts/convert_corpus.py pubmedqa-artificial
+python scripts/convert_corpus.py commonsenseqa-train
 # The benchmark first, so every text it shows a model is kept out of training.
 EXCLUDE=()
 if [ -n "$BENCH_REPO" ]; then
@@ -59,7 +62,8 @@ sys.path.insert(0, "scripts")
 from train_mix import MIX
 from trigon.evals.corpora import load
 for name in [*MIX, "teacher-local", "mind2web-train", "wanli",
-             "jailbreak-train", "prompt-injections-train", "aegis2-train"]:
+             "jailbreak-train", "prompt-injections-train", "aegis2-train",
+             "medmcqa-train", "medqa-train", "pubmedqa-artificial", "commonsenseqa-train"]:
     print(name, "train", len(load(name, "train", purpose="train")))
 for name in ("banking77", "clinc150", "boolq", "mind2web"):
     print(name, "test", len(load(name, "test", purpose="eval")))
